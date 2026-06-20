@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>照明型番サーチ</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3250;
+    --accent: #4f8ef7;
+    --accent2: #7c3aed;
+    --text: #e8eaf6;
+    --text2: #8b90b8;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --radius: 12px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hiragino Sans', 'Meiryo', sans-serif;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .logo {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+  .logo span {
+    color: var(--accent);
+  }
+
+  .badge {
+    font-size: 10px;
+    background: var(--accent2);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+
+  .input-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: var(--text2);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .model-input-wrap {
+    display: flex;
+    gap: 10px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus {
+    border-color: var(--accent);
+  }
+  input[type="text"]::placeholder {
+    color: var(--text2);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    color: var(--text2);
+    font-size: 12px;
+  }
+  .divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(79,142,247,0.05);
+  }
+  .upload-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; }
+  .upload-text { font-size: 14px; color: var(--text2); }
+  .upload-text strong { color: var(--accent); }
+
+  .preview-wrap {
+    margin-top: 12px;
+    position: relative;
+    display: inline-block;
+  }
+  .preview-wrap img {
+    max-width: 100%;
+    max-height: 180px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .remove-img {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: var(--error);
+    color: white;
+    border: none;
+    border-radius: 99px;
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+  }
+
+  /* Result area */
+  #result-area { display: none; }
+
+  .result-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  .result-header {
+    padding: 14px 20px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .result-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text2);
+    letter-spacing: 0.5px;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 99px;
+    background: var(--success);
+  }
+
+  .result-body { padding: 20px; }
+
+  .field-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    align-items: flex-start;
+  }
+  .field-key {
+    font-size: 12px;
+    color: var(--text2);
+    min-width: 110px;
+    padding-top: 2px;
+    flex-shrink: 0;
+  }
+  .field-val {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .field-val.mono {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    border: 1px solid var(--border);
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .tag-green { background: rgba(34,197,94,0.15); color: var(--success); }
+  .tag-yellow { background: rgba(245,158,11,0.15); color: var(--warning); }
+  .tag-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
+
+  .order-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-top: 4px;
+  }
+  .order-block pre {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    font-size: 13px;
+    color: var(--text);
+    white-space: pre-wrap;
+    line-height: 1.7;
+  }
+
+  .copy-btn {
+    margin-top: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 14px;
+    color: var(--text2);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.2s;
+  }
+  .copy-btn:hover { color: var(--text); }
+
+  /* Loading */
+  .loading-wrap {
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-text { color: var(--text2); font-size: 14px; }
+
+  /* Error */
+  .error-box {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 8px;
+    padding: 14px 16px;
+    color: #fca5a5;
+    font-size: 14px;
+  }
+
+  /* Note area */
+  .note-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    resize: vertical;
+    min-height: 80px;
+    transition: border-color 0.2s;
+    margin-bottom: 12px;
+  }
+  .note-input:focus { border-color: var(--accent); }
+  .note-input::placeholder { color: var(--text2); }
+
+  footer {
+    text-align: center;
+    color: var(--text2);
+    font-size: 12px;
+    margin-top: 40px;
+    padding: 0 16px;
+  }
+
+  /* Estimate builder */
+  .estimate-trigger {
+    display: none;
+    text-align: center;
+    margin: 20px 0;
+  }
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 13px 24px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+  .btn-secondary:hover { border-color: var(--accent); }
+
+  .estimate-form-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .estimate-form-row .field-key {
+    min-width: 90px;
+  }
+  .num-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 10px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    text-align: right;
+  }
+  .num-input:focus { border-color: var(--accent); }
+
+  .yen-prefix {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+  }
+  .yen-prefix span {
+    position: absolute;
+    left: 10px;
+    color: var(--text2);
+    font-size: 13px;
+    pointer-events: none;
+  }
+  .yen-prefix input { padding-left: 26px; }
+
+  .item-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .item-line:last-child { border-bottom: none; }
+  .item-line .item-name { color: var(--text); }
+  .item-line .item-sub { color: var(--text2); font-size: 12px; margin-top: 2px; }
+  .item-line .item-price { color: var(--text); font-family: 'SF Mono', monospace; }
+
+  .total-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 14px;
+    margin-top: 6px;
+    border-top: 2px solid var(--border);
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .total-line .total-amount {
+    color: var(--accent);
+    font-family: 'SF Mono', monospace;
+  }
+
+  .company-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .company-info-grid input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .company-info-grid input:focus { border-color: var(--accent); }
+  .company-info-grid input::placeholder { color: var(--text2); }
+
+  /* Printable estimate sheet */
+  #estimate-sheet {
+    background: #ffffff;
+    color: #1a1a1a;
+    border-radius: var(--radius);
+    padding: 32px 28px;
+    font-family: 'Hiragino Sans', sans-serif;
+  }
+  .sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #1a1a1a;
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+  }
+  .sheet-title {
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: 4px;
+  }
+  .sheet-date {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+  }
+  .sheet-company {
+    text-align: right;
+    font-size: 12px;
+    color: #333;
+    line-height: 1.6;
+  }
+  .sheet-company .name {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+  .sheet-client {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .sheet-client-sub {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 20px;
+  }
+  .sheet-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 13px;
+  }
+  .sheet-table th {
+    background: #f0f0f0;
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    font-weight: 600;
+    font-size: 12px;
+    color: #444;
+  }
+  .sheet-table td {
+    padding: 10px;
+    border: 1px solid #ddd;
+    vertical-align: top;
+  }
+  .sheet-table .num-cell {
+    text-align: right;
+    font-family: 'SF Mono', monospace;
+  }
+  .sheet-item-name { font-weight: 600; margin-bottom: 2px; }
+  .sheet-item-note { font-size: 11px; color: #888; }
+  .sheet-total-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 24px;
+    padding: 10px 0;
+    font-size: 14px;
+    border-top: 1px solid #ddd;
+  }
+  .sheet-total-row.grand {
+    font-size: 18px;
+    font-weight: 800;
+    border-top: 2px solid #1a1a1a;
+    padding-top: 14px;
+    margin-top: 4px;
+  }
+  .sheet-footer-note {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px dashed #ccc;
+    font-size: 11px;
+    color: #888;
+    line-height: 1.6;
+  }
+  .sheet-actions {
+    margin-top: 16px;
+    display: flex;
+    gap: 10px;
+  }
+  .sheet-actions button { flex: 1; }
+
+  @media print {
+    header, .input-card, .estimate-trigger, .sheet-actions, footer { display: none !important; }
+    body { background: white; }
+    #estimate-sheet { box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">照明<span>サーチ</span></div>
+  <div class="badge">β版</div>
+</header>
+
+<div id="login-gate" style="max-width:400px;margin:60px auto;padding:0 16px;">
+  <div class="input-card">
+    <div class="section-label">アクセスコード</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+      このツールは関係者限定で公開しています。配布されたアクセスコードを入力してください。
+    </p>
+    <div class="model-input-wrap">
+      <input type="password" id="access-code-input" placeholder="アクセスコード" />
+      <button class="btn-primary" onclick="submitAccessCode()">入る</button>
+    </div>
+    <div id="access-code-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;">
+      コードが正しくありません
+    </div>
+  </div>
+</div>
+
+<main id="app-main" style="display:none;">
+
+  <div class="input-card">
+    <div class="section-label">型番で検索</div>
+    <div class="model-input-wrap">
+      <input type="text" id="model-input" placeholder="例：LGB51671LE1、LSEB7040LE1" />
+      <button class="btn-primary" id="search-btn" onclick="doSearch()">調べる</button>
+    </div>
+  </div>
+
+  <div class="input-card">
+    <div class="section-label">写真から読み取る</div>
+    <div class="upload-zone" id="upload-zone">
+      <input type="file" accept="image/*" id="file-input" onchange="handleFile(this)" />
+      <div class="upload-icon">📷</div>
+      <div class="upload-text"><strong>タップして写真を選択</strong><br>または、型番ラベルを撮影してアップロード</div>
+    </div>
+    <div id="preview-container"></div>
+  </div>
+
+  <div class="input-card">
+    <div class="section-label">現場メモ（任意）</div>
+    <textarea class="note-input" id="note-input" placeholder="設置場所、取り付け方法、お客さんの要望など"></textarea>
+  </div>
+
+  <div id="result-area">
+    <div id="result-content"></div>
+  </div>
+
+  <div class="estimate-trigger" id="estimate-trigger">
+    <button class="btn-secondary" onclick="showEstimateForm()">📄 この内容で見積書を作成</button>
+  </div>
+
+  <div id="estimate-form-area" style="display:none;">
+    <div class="input-card">
+      <div class="section-label">お客様情報</div>
+      <div class="company-info-grid">
+        <input type="text" id="client-name" placeholder="お客様名（例：山田様）" />
+        <input type="text" id="client-site" placeholder="工事場所（例：リビング照明）" />
+      </div>
+    </div>
+
+    <div class="input-card">
+      <div class="section-label">自社情報（見積書に表示）</div>
+      <div class="company-info-grid">
+        <input type="text" id="biz-name" placeholder="屋号・会社名" />
+        <input type="text" id="biz-tel" placeholder="電話番号" />
+        <input type="text" id="biz-license" placeholder="第二種電気工事士 登録番号など（任意）" />
+        <input type="text" id="biz-note" placeholder="備考（任意）" />
+      </div>
+    </div>
+
+    <div class="input-card">
+      <div class="section-label">金額入力</div>
+      <div class="estimate-form-row">
+        <span class="field-key">材料費</span>
+        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-material" placeholder="0" oninput="updateEstimatePreview()" /></div>
+      </div>
+      <div class="estimate-form-row">
+        <span class="field-key">施工費</span>
+        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
+      </div>
+      <div class="estimate-form-row">
+        <span class="field-key">出張費</span>
+        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
+      </div>
+      <div class="total-line" id="estimate-preview" style="margin-top:12px;font-size:14px;">
+        <span>合計（税込）</span>
+        <span class="total-amount" id="estimate-preview-amount">¥0</span>
+      </div>
+      <div style="margin-top:16px;">
+        <button class="btn-primary" style="width:100%;" onclick="generateEstimateSheet()">見積書を生成</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="estimate-sheet-area" style="display:none;">
+    <div id="estimate-sheet"></div>
+    <div class="sheet-actions">
+      <button class="btn-secondary" onclick="window.print()">🖨️ PDF保存／印刷</button>
+      <button class="btn-secondary" onclick="copyEstimateText()">📋 テキストをコピー</button>
+    </div>
+  </div>
+
+</main>
+
+<footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
+
+<script>
+const SYSTEM_PROMPT = `あなたは日本の照明器具の専門家です。電気工事士が使う業務ツールとして、照明器具の型番や写真から後継器・互換品を調べて返答します。
+
+必ず以下のJSON形式のみで返答してください（マークダウン不要）:
+{
+  "original_model": "入力された型番（写真から読み取った場合はその型番）",
+  "manufacturer": "メーカー名",
+  "product_name": "製品名（わかる範囲で）",
+  "status": "廃番" or "現行品" or "不明",
+  "successor_models": [
+    {
+      "model": "型番",
+      "manufacturer": "メーカー名",
+      "name": "製品名",
+      "note": "互換性・違いなどの補足"
+    }
+  ],
+  "order_text": "材料屋への発注メモ文（型番・メーカー・数量欄を含む短い文章）",
+  "caution": "工事士へのワンポイント注意（取付穴径、電源方式の違いなど）",
+  "confidence": "high" or "medium" or "low"
+}`;
+
+function getAccessCode() {
+  return localStorage.getItem('access_code') || '';
+}
+
+function submitAccessCode() {
+  const input = document.getElementById('access-code-input');
+  const code = input.value.trim();
+  if (!code) return;
+  localStorage.setItem('access_code', code);
+  document.getElementById('login-gate').style.display = 'none';
+  document.getElementById('app-main').style.display = 'block';
+}
+
+// ページ読み込み時、すでにコードが保存されていればそのまま画面を表示
+// （正しいかどうかは実際にAPIを呼んだ時にサーバー側がチェックする）
+window.addEventListener('DOMContentLoaded', () => {
+  if (getAccessCode()) {
+    document.getElementById('login-gate').style.display = 'none';
+    document.getElementById('app-main').style.display = 'block';
+  }
+});
+
+let uploadedImageBase64 = null;
+let uploadedMimeType = null;
+
+function handleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const dataUrl = e.target.result;
+    uploadedImageBase64 = dataUrl.split(',')[1];
+    uploadedMimeType = file.type;
+
+    const container = document.getElementById('preview-container');
+    container.innerHTML = `
+      <div class="preview-wrap">
+        <img src="${dataUrl}" alt="プレビュー" />
+        <button class="remove-img" onclick="removeImage()">×</button>
+      </div>
+    `;
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeImage() {
+  uploadedImageBase64 = null;
+  uploadedMimeType = null;
+  document.getElementById('preview-container').innerHTML = '';
+  document.getElementById('file-input').value = '';
+}
+
+async function doSearch() {
+  const modelNum = document.getElementById('model-input').value.trim();
+  const note = document.getElementById('note-input').value.trim();
+
+  if (!modelNum && !uploadedImageBase64) {
+    alert('型番を入力するか、写真をアップロードしてください');
+    return;
+  }
+
+  const btn = document.getElementById('search-btn');
+  btn.disabled = true;
+
+  const resultArea = document.getElementById('result-area');
+  const resultContent = document.getElementById('result-content');
+  resultArea.style.display = 'block';
+  resultContent.innerHTML = `
+    <div class="result-card">
+      <div class="loading-wrap">
+        <div class="spinner"></div>
+        <div class="loading-text">AIが後継器を調査中...</div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const messages = buildMessages(modelNum, note);
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-access-code': getAccessCode()
+      },
+      body: JSON.stringify({
+        system: SYSTEM_PROMPT,
+        messages
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('access_code');
+        document.getElementById('app-main').style.display = 'none';
+        document.getElementById('login-gate').style.display = 'block';
+        document.getElementById('access-code-error').style.display = 'block';
+        throw new Error('アクセスコードが正しくありません。再度入力してください。');
+      }
+      throw new Error(data.error || 'サーバーエラーが発生しました');
+    }
+
+    const raw = data.content.map(i => i.text || '').join('');
+    const clean = raw.replace(/```json|```/g, '').trim();
+    let result;
+    try {
+      result = JSON.parse(clean);
+    } catch {
+      throw new Error('AI応答の解析に失敗しました。もう一度お試しください。');
+    }
+
+    renderResult(result);
+  } catch (err) {
+    resultContent.innerHTML = `
+      <div class="result-card">
+        <div class="result-body">
+          <div class="error-box">⚠️ ${err.message || 'エラーが発生しました。もう一度お試しください。'}</div>
+        </div>
+      </div>
+    `;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function buildMessages(modelNum, note) {
+  if (uploadedImageBase64) {
+    const content = [];
+    content.push({
+      type: 'image',
+      source: { type: 'base64', media_type: uploadedMimeType, data: uploadedImageBase64 }
+    });
+    let text = '画像から型番を読み取り、後継器・互換品を調べてください。';
+    if (modelNum) text += `\n入力された型番: ${modelNum}`;
+    if (note) text += `\n現場メモ: ${note}`;
+    content.push({ type: 'text', text });
+    return [{ role: 'user', content }];
+  } else {
+    let text = `型番: ${modelNum} の後継器・互換品を調べてください。`;
+    if (note) text += `\n現場メモ: ${note}`;
+    return [{ role: 'user', content: text }];
+  }
+}
+
+let lastResult = null;
+
+function renderResult(r) {
+  lastResult = r;
+  const confidenceLabel = r.confidence === 'high' ? '確度：高' : r.confidence === 'medium' ? '確度：中' : '確度：低';
+  const confidenceTag = r.confidence === 'high' ? 'tag-green' : r.confidence === 'medium' ? 'tag-yellow' : 'tag-blue';
+  const statusTag = r.status === '廃番' ? 'tag-yellow' : r.status === '現行品' ? 'tag-green' : 'tag-blue';
+
+  const successors = r.successor_models || [];
+  const successorHTML = successors.map((s, i) => `
+    <label style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;">
+      <input type="radio" name="successor-pick" value="${i}" ${i === 0 ? 'checked' : ''} onchange="onSuccessorPick(${i})" style="margin-top:4px;accent-color:var(--accent);" />
+      <div style="flex:1;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span class="field-val mono">${s.model}</span>
+          <span style="font-size:13px;color:var(--text2)">${s.manufacturer}</span>
+        </div>
+        <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${s.name}</div>
+        ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${s.note}</div>` : ''}
+      </div>
+    </label>
+  `).join('');
+
+  const orderText = r.order_text || '発注情報を生成できませんでした';
+
+  document.getElementById('result-content').innerHTML = `
+    <div class="result-card">
+      <div class="result-header">
+        <span class="result-title">調査結果</span>
+        <span class="tag ${confidenceTag}">${confidenceLabel}</span>
+      </div>
+      <div class="result-body">
+        <div class="field-row">
+          <span class="field-key">入力型番</span>
+          <span class="field-val mono">${r.original_model || '—'}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-key">メーカー</span>
+          <span class="field-val">${r.manufacturer || '—'}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-key">製品名</span>
+          <span class="field-val">${r.product_name || '—'}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-key">ステータス</span>
+          <span class="tag ${statusTag}">${r.status || '不明'}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-header">
+        <span class="result-title">後継器・互換品（見積に使う候補を選択）</span>
+        <div class="status-dot"></div>
+      </div>
+      <div class="result-body">
+        ${successorHTML || '<div style="color:var(--text2);font-size:14px;">後継器が見つかりませんでした</div>'}
+      </div>
+    </div>
+
+    <div class="result-card">
+      <div class="result-header">
+        <span class="result-title">材料屋への発注メモ</span>
+      </div>
+      <div class="result-body">
+        <div class="order-block">
+          <pre id="order-text-content">${orderText}</pre>
+        </div>
+        <button class="copy-btn" onclick="copyOrder()">📋 コピー</button>
+      </div>
+    </div>
+
+    ${r.caution ? `
+    <div class="result-card">
+      <div class="result-header">
+        <span class="result-title">⚠️ 工事メモ</span>
+      </div>
+      <div class="result-body">
+        <div style="font-size:14px;color:var(--warning);line-height:1.7;">${r.caution}</div>
+      </div>
+    </div>
+    ` : ''}
+  `;
+
+  // Reset estimate state for a new search
+  selectedSuccessorIndex = successors.length > 0 ? 0 : null;
+  document.getElementById('estimate-form-area').style.display = 'none';
+  document.getElementById('estimate-sheet-area').style.display = 'none';
+  document.getElementById('estimate-trigger').style.display = 'block';
+}
+
+let selectedSuccessorIndex = null;
+function onSuccessorPick(i) {
+  selectedSuccessorIndex = i;
+}
+
+function copyOrder() {
+  const text = document.getElementById('order-text-content')?.innerText;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = '✅ コピーしました';
+    setTimeout(() => btn.textContent = '📋 コピー', 2000);
+  });
+}
+
+function showEstimateForm() {
+  document.getElementById('estimate-form-area').style.display = 'block';
+  document.getElementById('estimate-sheet-area').style.display = 'none';
+  document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function yen(n) {
+  return '¥' + Number(n || 0).toLocaleString('ja-JP');
+}
+
+function updateEstimatePreview() {
+  const materialPrice = Number(document.getElementById('price-material').value || 0);
+  const laborPrice = Number(document.getElementById('price-labor').value || 0);
+  const visitPrice = Number(document.getElementById('price-visit').value || 0);
+  const subtotal = materialPrice + laborPrice + visitPrice;
+  const tax = Math.round(subtotal * 0.1);
+  const total = subtotal + tax;
+
+  const el = document.getElementById('estimate-preview-amount');
+  if (el) el.textContent = yen(total);
+}
+
+function generateEstimateSheet() {
+  const r = lastResult;
+  if (!r) return;
+
+  const successors = r.successor_models || [];
+  const picked = (selectedSuccessorIndex !== null && successors[selectedSuccessorIndex]) ? successors[selectedSuccessorIndex] : null;
+
+  const clientName = document.getElementById('client-name').value.trim() || 'お客様';
+  const clientSite = document.getElementById('client-site').value.trim();
+  const bizName = document.getElementById('biz-name').value.trim() || '（屋号未入力）';
+  const bizTel = document.getElementById('biz-tel').value.trim();
+  const bizLicense = document.getElementById('biz-license').value.trim();
+  const bizNote = document.getElementById('biz-note').value.trim();
+
+  const materialPrice = Number(document.getElementById('price-material').value || 0);
+  const laborPrice = Number(document.getElementById('price-labor').value || 0);
+  const visitPrice = Number(document.getElementById('price-visit').value || 0);
+  const subtotal = materialPrice + laborPrice + visitPrice;
+  const tax = Math.round(subtotal * 0.1);
+  const total = subtotal + tax;
+
+  const itemName = picked ? `${picked.name}（${picked.model}）` : (r.product_name || r.original_model || '照明器具');
+  const itemNote = picked ? `${picked.manufacturer}${picked.note ? ' / ' + picked.note : ''}` : (r.manufacturer || '');
+
+  const todayStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  document.getElementById('estimate-sheet').innerHTML = `
+    <div class="sheet-header">
+      <div>
+        <div class="sheet-title">御　見　積　書</div>
+        <div class="sheet-date">${todayStr}</div>
+      </div>
+      <div class="sheet-company">
+        <div class="name">${bizName}</div>
+        ${bizTel ? `<div>TEL: ${bizTel}</div>` : ''}
+        ${bizLicense ? `<div>${bizLicense}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="sheet-client">${clientName} 様</div>
+    ${clientSite ? `<div class="sheet-client-sub">工事場所：${clientSite}</div>` : ''}
+
+    <table class="sheet-table">
+      <thead>
+        <tr>
+          <th style="width:60%">品名・内容</th>
+          <th style="width:40%">金額</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="sheet-item-name">照明器具（材料費）</div>
+            <div class="sheet-item-note">${itemName}${itemNote ? ' — ' + itemNote : ''}</div>
+          </td>
+          <td class="num-cell">${yen(materialPrice)}</td>
+        </tr>
+        <tr>
+          <td><div class="sheet-item-name">施工費</div></td>
+          <td class="num-cell">${yen(laborPrice)}</td>
+        </tr>
+        ${visitPrice > 0 ? `
+        <tr>
+          <td><div class="sheet-item-name">出張費</div></td>
+          <td class="num-cell">${yen(visitPrice)}</td>
+        </tr>` : ''}
+      </tbody>
+    </table>
+
+    <div class="sheet-total-row"><span>小計</span><span>${yen(subtotal)}</span></div>
+    <div class="sheet-total-row"><span>消費税（10%）</span><span>${yen(tax)}</span></div>
+    <div class="sheet-total-row grand"><span>合計</span><span>${yen(total)}</span></div>
+
+    ${bizNote ? `<div class="sheet-footer-note">${bizNote}</div>` : ''}
+    <div class="sheet-footer-note">※本見積りはAIによる後継器調査結果を含みます。実際の機種・価格は現物・メーカー情報にて最終確認のうえご了承ください。</div>
+  `;
+
+  document.getElementById('estimate-form-area').style.display = 'none';
+  document.getElementById('estimate-sheet-area').style.display = 'block';
+  document.getElementById('estimate-sheet-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  window._lastEstimateText = `
+御見積書（${todayStr}）
+━━━━━━━━━━━━━━
+${clientName} 様
+${clientSite ? '工事場所：' + clientSite + '\n' : ''}
+【内容】
+照明器具：${itemName}${itemNote ? ' / ' + itemNote : ''}　${yen(materialPrice)}
+施工費：${yen(laborPrice)}
+${visitPrice > 0 ? '出張費：' + yen(visitPrice) + '\n' : ''}
+小計：${yen(subtotal)}
+消費税（10%）：${yen(tax)}
+合計：${yen(total)}
+━━━━━━━━━━━━━━
+${bizName}${bizTel ? ' / TEL: ' + bizTel : ''}
+`.trim();
+}
+
+function copyEstimateText() {
+  const text = window._lastEstimateText;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    const original = btn.textContent;
+    btn.textContent = '✅ コピーしました';
+    setTimeout(() => btn.textContent = original, 2000);
+  });
+}
+
+// Drag and drop
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('file-input').files = dt.files;
+    handleFile(document.getElementById('file-input'));
+  }
+});
+
+// Enter key
+document.getElementById('model-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+</script>
+</body>
+</html>
