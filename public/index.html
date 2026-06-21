@@ -758,7 +758,7 @@
   </div>
 
   <div class="input-card">
-    <div class="section-label">写真から読み取る（複数枚OK）</div>
+    <div class="section-label">写真から読み取る（最大5枚まで）</div>
     <div class="upload-zone" id="upload-zone">
       <input type="file" accept="image/*" id="file-input" multiple onchange="handleFile(this)" />
       <div class="upload-icon">📷</div>
@@ -941,9 +941,19 @@ function handleFile(input) {
   if (files.length === 0) return;
 
   const MAX_IMAGES = 5;
+  const remainingSlots = MAX_IMAGES - uploadedImages.length;
 
-  files.forEach(file => {
-    if (uploadedImages.length >= MAX_IMAGES) return;
+  if (remainingSlots <= 0) {
+    alert(`写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
+    input.value = '';
+    return;
+  }
+
+  if (files.length > remainingSlots) {
+    alert(`写真は最大${MAX_IMAGES}枚までです。先頭${remainingSlots}枚のみ追加します。`);
+  }
+
+  files.slice(0, remainingSlots).forEach(file => {
     const reader = new FileReader();
     reader.onload = e => {
       const dataUrl = e.target.result;
