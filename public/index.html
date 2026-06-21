@@ -868,6 +868,24 @@ function getAccessCode() {
   return localStorage.getItem('access_code') || '';
 }
 
+// AIの返答に説明文が混じっていても、最初の { から対応する } までを抜き出してJSONとして解釈する
+function extractJSON(raw) {
+  const stripped = raw.replace(/```json|```/g, '');
+  const start = stripped.indexOf('{');
+  if (start === -1) throw new Error('JSON not found');
+
+  let depth = 0;
+  for (let i = start; i < stripped.length; i++) {
+    if (stripped[i] === '{') depth++;
+    if (stripped[i] === '}') depth--;
+    if (depth === 0) {
+      const jsonStr = stripped.slice(start, i + 1);
+      return JSON.parse(jsonStr);
+    }
+  }
+  throw new Error('JSON not properly closed');
+}
+
 function submitAccessCode() {
   const input = document.getElementById('access-code-input');
   const code = input.value.trim();
@@ -968,10 +986,9 @@ async function doSearch() {
     }
 
     const raw = data.content.map(i => i.text || '').join('');
-    const clean = raw.replace(/```json|```/g, '').trim();
     let result;
     try {
-      result = JSON.parse(clean);
+      result = extractJSON(raw);
     } catch {
       throw new Error('AI応答の解析に失敗しました。もう一度お試しください。');
     }
@@ -1165,8 +1182,7 @@ async function openDetailModal(index) {
       .filter(b => b.type === 'text')
       .map(b => b.text)
       .join('');
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const detail = JSON.parse(clean);
+    const detail = extractJSON(raw);
 
     detailCache[cacheKey] = detail;
     renderDetailModal(detail, s);
