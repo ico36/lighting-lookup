@@ -562,6 +562,163 @@
     body { background: white; }
     #estimate-sheet { box-shadow: none; }
   }
+
+  /* Product detail link / modal */
+  .detail-link-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 0;
+    margin-top: 6px;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .detail-link-btn:hover { text-decoration: underline; }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+
+  .modal-sheet {
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    width: 100%;
+    max-width: 680px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 20px;
+    animation: slideUp 0.25s ease-out;
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+  .modal-title {
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .modal-close {
+    background: var(--surface2);
+    border: none;
+    color: var(--text2);
+    border-radius: 99px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .price-highlight {
+    background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(124,58,237,0.1));
+    border: 1px solid rgba(79,142,247,0.3);
+    border-radius: 10px;
+    padding: 16px;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .price-highlight .price-label {
+    font-size: 11px;
+    color: var(--text2);
+    margin-bottom: 4px;
+  }
+  .price-highlight .price-value {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--accent);
+    font-family: 'SF Mono', monospace;
+  }
+  .price-highlight .price-note {
+    font-size: 11px;
+    color: var(--text2);
+    margin-top: 6px;
+  }
+
+  .spec-table {
+    width: 100%;
+    margin-bottom: 16px;
+  }
+  .spec-table tr {
+    border-bottom: 1px solid var(--border);
+  }
+  .spec-table tr:last-child { border-bottom: none; }
+  .spec-table td {
+    padding: 9px 4px;
+    font-size: 13px;
+  }
+  .spec-table td:first-child {
+    color: var(--text2);
+    width: 100px;
+    flex-shrink: 0;
+  }
+  .spec-table td:last-child {
+    color: var(--text);
+  }
+
+  .link-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .link-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 11px 14px;
+    text-decoration: none;
+    color: var(--text);
+    font-size: 13px;
+    transition: border-color 0.2s;
+  }
+  .link-item:hover { border-color: var(--accent); }
+  .link-item .arrow { color: var(--text2); }
+
+  .modal-loading {
+    text-align: center;
+    padding: 30px 10px;
+  }
+  .modal-section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text2);
+    text-transform: uppercase;
+    margin: 18px 0 10px;
+  }
+  .modal-section-label:first-of-type { margin-top: 0; }
+
+  .confidence-note {
+    font-size: 11px;
+    color: var(--text2);
+    line-height: 1.6;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--border);
+  }
 </style>
 </head>
 <body>
@@ -672,6 +829,16 @@
   </div>
 
 </main>
+
+<div class="modal-overlay" id="detail-modal-overlay" onclick="if(event.target===this) closeDetailModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title" id="detail-modal-title">商品詳細</div>
+      <button class="modal-close" onclick="closeDetailModal()">✕</button>
+    </div>
+    <div id="detail-modal-body"></div>
+  </div>
+</div>
 
 <footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
@@ -861,6 +1028,7 @@ function renderResult(r) {
         </div>
         <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${s.name}</div>
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${s.note}</div>` : ''}
+        <button type="button" class="detail-link-btn" onclick="event.preventDefault(); event.stopPropagation(); openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
       </div>
     </label>
   `).join('');
@@ -937,6 +1105,140 @@ function renderResult(r) {
 let selectedSuccessorIndex = null;
 function onSuccessorPick(i) {
   selectedSuccessorIndex = i;
+}
+
+const detailCache = {};
+
+async function openDetailModal(index) {
+  const s = (lastResult.successor_models || [])[index];
+  if (!s) return;
+
+  const overlay = document.getElementById('detail-modal-overlay');
+  const titleEl = document.getElementById('detail-modal-title');
+  const bodyEl = document.getElementById('detail-modal-body');
+
+  titleEl.textContent = s.model;
+  overlay.classList.add('open');
+
+  const cacheKey = s.model + '|' + s.manufacturer;
+  if (detailCache[cacheKey]) {
+    renderDetailModal(detailCache[cacheKey], s);
+    return;
+  }
+
+  bodyEl.innerHTML = `
+    <div class="modal-loading">
+      <div class="spinner" style="margin:0 auto 14px;"></div>
+      <div class="loading-text">仕様・市場価格を調査中...</div>
+    </div>
+  `;
+
+  try {
+    const response = await fetch('/api/product-detail', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-access-code': getAccessCode()
+      },
+      body: JSON.stringify({
+        manufacturer: s.manufacturer,
+        model: s.model,
+        name: s.name
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('access_code');
+        closeDetailModal();
+        document.getElementById('app-main').style.display = 'none';
+        document.getElementById('login-gate').style.display = 'block';
+        document.getElementById('access-code-error').style.display = 'block';
+        return;
+      }
+      throw new Error(data.error || '取得に失敗しました');
+    }
+
+    const raw = data.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const detail = JSON.parse(clean);
+
+    detailCache[cacheKey] = detail;
+    renderDetailModal(detail, s);
+
+  } catch (err) {
+    bodyEl.innerHTML = `
+      <div class="error-box">⚠️ ${err.message || '詳細情報の取得に失敗しました。もう一度お試しください。'}</div>
+    `;
+  }
+}
+
+function closeDetailModal() {
+  document.getElementById('detail-modal-overlay').classList.remove('open');
+}
+
+function renderDetailModal(d, fallback) {
+  const bodyEl = document.getElementById('detail-modal-body');
+
+  const priceLow = d.price_estimate?.low;
+  const priceHigh = d.price_estimate?.high;
+  let priceText = '価格情報が見つかりませんでした';
+  if (priceLow && priceHigh) {
+    priceText = `${yen(priceLow)} 〜 ${yen(priceHigh)}`;
+  } else if (priceLow) {
+    priceText = `${yen(priceLow)} 〜`;
+  } else if (priceHigh) {
+    priceText = `〜 ${yen(priceHigh)}`;
+  }
+
+  const specs = d.specs || {};
+  const specRows = [
+    ['サイズ', specs.size],
+    ['電源・消費電力', specs.power],
+    ['色温度・光色', specs.color_temp],
+    ['重量', specs.weight],
+    ['その他', specs.other]
+  ].filter(([, v]) => v);
+
+  const specHTML = specRows.length
+    ? `<table class="spec-table">${specRows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`
+    : `<div style="font-size:13px;color:var(--text2);">仕様情報が見つかりませんでした</div>`;
+
+  const links = [];
+  if (d.catalog_url) links.push({ site: 'メーカー公式・カタログ', url: d.catalog_url });
+  (d.purchase_links || []).forEach(l => links.push(l));
+
+  const linksHTML = links.length
+    ? `<div class="link-list">${links.map(l => `
+        <a class="link-item" href="${l.url}" target="_blank" rel="noopener noreferrer">
+          <span>${l.site}</span>
+          <span class="arrow">↗</span>
+        </a>
+      `).join('')}</div>`
+    : `<div style="font-size:13px;color:var(--text2);">参照リンクが見つかりませんでした</div>`;
+
+  bodyEl.innerHTML = `
+    <div class="price-highlight">
+      <div class="price-label">市場価格の目安</div>
+      <div class="price-value">${priceText}</div>
+      ${d.price_estimate?.note ? `<div class="price-note">${d.price_estimate.note}</div>` : ''}
+    </div>
+
+    <div class="modal-section-label">仕様</div>
+    ${specHTML}
+
+    <div class="modal-section-label">カタログ・購入先</div>
+    ${linksHTML}
+
+    <div class="confidence-note">
+      ※ 価格・仕様はAIによるWeb検索結果に基づく目安です。実際の価格・仕様は販売店・メーカー公式情報で最終確認してください。${d.price_estimate?.source_note ? ' ' + d.price_estimate.source_note : ''}
+    </div>
+  `;
 }
 
 function copyOrder() {
