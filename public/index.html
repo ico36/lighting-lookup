@@ -843,20 +843,45 @@
 <footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
 <script>
-const SYSTEM_PROMPT = `あなたは日本の照明器具の専門家です。電気工事士が使う業務ツールとして、照明器具の型番や写真から後継器・互換品を調べて返答します。
+const SYSTEM_PROMPT = `あなたは日本の照明器具の専門家です。電気工事士が使う業務ツールとして、照明器具の型番や写真から現行品かどうかを判定し、必要に応じて後継器・互換品を調べて返答します。
 
-必ず以下のJSON形式のみで返答してください（マークダウン不要）:
+【ステータス判定の重要なルール】
+- Web検索で型番をメーカー公式サイト・主要ECサイト（モノタロウ、電材堂、楽天市場など）で確認し、現在も購入可能・カタログに掲載されている場合は必ず「現行品」としてください。
+- メーカー公式サイトの「生産終了品」「販売終了」一覧に明確に載っている場合のみ「廃番」としてください。
+- 検索しても情報が十分に見つからず判断できない場合は「不明」としてください。憶測で「廃番」と判定しないでください。
+- 「古そうな型番だから」「情報が少ないから」という理由だけで廃番と判定するのは禁止です。実際に検索して確認してください。
+
+【出力する内容の分岐】
+- status が「現行品」の場合：successor_models は空配列にしてください。代わりに current_product_info にその型番自体の情報を入れてください。もし上位機種・推奨される代替品があれば alternative_models に入れてください（なくても良い）。
+- status が「廃番」の場合：successor_models に後継器・互換品を入れてください。current_product_info は null にしてください。
+- status が「不明」の場合：successor_models に互換性がありそうな候補があれば入れてください。current_product_info は null にしてください。
+
+必ず以下のJSON形式のみで返答してください（マークダウン不要、説明文も不要、出力の最初の文字は必ず { ）:
 {
   "original_model": "入力された型番（写真から読み取った場合はその型番）",
   "manufacturer": "メーカー名",
   "product_name": "製品名（わかる範囲で）",
   "status": "廃番" or "現行品" or "不明",
+  "current_product_info": {
+    "model": "型番（originalと同じ）",
+    "manufacturer": "メーカー名",
+    "name": "製品名",
+    "note": "現行品としての補足（在庫状況、価格傾向などわかれば）"
+  } or null,
+  "alternative_models": [
+    {
+      "model": "型番",
+      "manufacturer": "メーカー名",
+      "name": "製品名",
+      "note": "上位機種・代替品としての補足（現行品の場合のみ。なければ空配列）"
+    }
+  ],
   "successor_models": [
     {
       "model": "型番",
       "manufacturer": "メーカー名",
       "name": "製品名",
-      "note": "互換性・違いなどの補足"
+      "note": "互換性・違いなどの補足（廃番の場合のみ。現行品なら空配列）"
     }
   ],
   "order_text": "材料屋への発注メモ文（型番・メーカー・数量欄を含む短い文章）",
@@ -1034,16 +1059,41 @@ function renderResult(r) {
   const confidenceTag = r.confidence === 'high' ? 'tag-green' : r.confidence === 'medium' ? 'tag-yellow' : 'tag-blue';
   const statusTag = r.status === '廃番' ? 'tag-yellow' : r.status === '現行品' ? 'tag-green' : 'tag-blue';
 
-  const successors = r.successor_models || [];
-  const successorHTML = successors.map((s, i) => `
+  const isCurrent = r.status === '現行品' && r.current_product_info;
+
+  // 「現行品」の場合は、その型番自体＋上位機種・代替候補を選択肢として扱う
+  // 「廃番／不明」の場合は、後継器・互換品を選択肢として扱う
+  let candidates = [];
+  if (isCurrent) {
+    candidates = [
+      { ...r.current_product_info, note: r.current_product_info.note || 'お客様の元の型番（現行品）', isOriginal: true },
+      ...(r.alternative_models || [])
+    ];
+  } else {
+    candidates = r.successor_models || [];
+  }
+
+  // lastResult側にも統一形式で持たせておく（見積・詳細モーダルが参照するため）
+  lastResult._candidates = candidates;
+
+  const sectionTitle = isCurrent
+    ? 'この器具の情報（見積に使う候補を選択）'
+    : '後継器・互換品（見積に使う候補を選択）';
+
+  const emptyMessage = isCurrent
+    ? '製品情報が見つかりませんでした'
+    : '後継器が見つかりませんでした';
+
+  const candidatesHTML = candidates.map((s, i) => `
     <label style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;">
       <input type="radio" name="successor-pick" value="${i}" ${i === 0 ? 'checked' : ''} onchange="onSuccessorPick(${i})" style="margin-top:4px;accent-color:var(--accent);" />
       <div style="flex:1;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span class="field-val mono">${s.model}</span>
           <span style="font-size:13px;color:var(--text2)">${s.manufacturer}</span>
+          ${s.isOriginal ? '<span class="tag tag-green" style="font-size:10px;">この型番</span>' : ''}
         </div>
-        <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${s.name}</div>
+        <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${s.name || ''}</div>
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${s.note}</div>` : ''}
         <button type="button" class="detail-link-btn" onclick="event.preventDefault(); event.stopPropagation(); openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
       </div>
@@ -1080,11 +1130,11 @@ function renderResult(r) {
 
     <div class="result-card">
       <div class="result-header">
-        <span class="result-title">後継器・互換品（見積に使う候補を選択）</span>
+        <span class="result-title">${sectionTitle}</span>
         <div class="status-dot"></div>
       </div>
       <div class="result-body">
-        ${successorHTML || '<div style="color:var(--text2);font-size:14px;">後継器が見つかりませんでした</div>'}
+        ${candidatesHTML || `<div style="color:var(--text2);font-size:14px;">${emptyMessage}</div>`}
       </div>
     </div>
 
@@ -1113,7 +1163,7 @@ function renderResult(r) {
   `;
 
   // Reset estimate state for a new search
-  selectedSuccessorIndex = successors.length > 0 ? 0 : null;
+  selectedSuccessorIndex = candidates.length > 0 ? 0 : null;
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   document.getElementById('estimate-trigger').style.display = 'block';
@@ -1127,7 +1177,7 @@ function onSuccessorPick(i) {
 const detailCache = {};
 
 async function openDetailModal(index) {
-  const s = (lastResult.successor_models || [])[index];
+  const s = (lastResult._candidates || [])[index];
   if (!s) return;
 
   const overlay = document.getElementById('detail-modal-overlay');
@@ -1293,8 +1343,8 @@ function generateEstimateSheet() {
   const r = lastResult;
   if (!r) return;
 
-  const successors = r.successor_models || [];
-  const picked = (selectedSuccessorIndex !== null && successors[selectedSuccessorIndex]) ? successors[selectedSuccessorIndex] : null;
+  const candidates = r._candidates || [];
+  const picked = (selectedSuccessorIndex !== null && candidates[selectedSuccessorIndex]) ? candidates[selectedSuccessorIndex] : null;
 
   const clientName = document.getElementById('client-name').value.trim() || 'お客様';
   const clientSite = document.getElementById('client-site').value.trim();
