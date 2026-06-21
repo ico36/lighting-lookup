@@ -166,13 +166,16 @@
   .upload-text strong { color: var(--accent); }
 
   .preview-wrap {
-    margin-top: 12px;
+    margin-top: 0;
     position: relative;
     display: inline-block;
   }
   .preview-wrap img {
-    max-width: 100%;
-    max-height: 180px;
+    max-width: 110px;
+    max-height: 110px;
+    width: 110px;
+    height: 110px;
+    object-fit: cover;
     border-radius: 8px;
     border: 1px solid var(--border);
   }
@@ -755,13 +758,13 @@
   </div>
 
   <div class="input-card">
-    <div class="section-label">写真から読み取る</div>
+    <div class="section-label">写真から読み取る（複数枚OK）</div>
     <div class="upload-zone" id="upload-zone">
-      <input type="file" accept="image/*" id="file-input" onchange="handleFile(this)" />
+      <input type="file" accept="image/*" id="file-input" multiple onchange="handleFile(this)" />
       <div class="upload-icon">📷</div>
-      <div class="upload-text"><strong>タップして写真を選択</strong><br>または、型番ラベルを撮影してアップロード</div>
+      <div class="upload-text"><strong>タップして写真を選択</strong><br>型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります</div>
     </div>
-    <div id="preview-container"></div>
+    <div id="preview-container" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;"></div>
   </div>
 
   <div class="input-card">
@@ -844,6 +847,8 @@
 
 <script>
 const SYSTEM_PROMPT = `あなたは日本の照明器具の専門家です。電気工事士が使う業務ツールとして、照明器具の型番や写真から現行品かどうかを判定し、必要に応じて後継器・互換品を調べて返答します。
+
+複数枚の画像が送られてくる場合は、同一の器具を異なる角度・距離から撮影したものです（型番ラベルの接写、器具全体、設置状況など）。すべての画像を合わせて型番・仕様を判断し、最も確度の高い型番を特定してください。画像間で読み取れる情報に矛盾がある場合は、ラベルに最も近い接写画像を優先してください。
 
 【ステータス判定の重要なルール】
 - Web検索で型番をメーカー公式サイト・主要ECサイト（モノタロウ、電材堂、楽天市場など）で確認し、現在も購入可能・カタログに掲載されている場合は必ず「現行品」としてください。
@@ -929,41 +934,53 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-let uploadedImageBase64 = null;
-let uploadedMimeType = null;
+let uploadedImages = []; // [{ base64, mimeType, dataUrl }]
 
 function handleFile(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const dataUrl = e.target.result;
-    uploadedImageBase64 = dataUrl.split(',')[1];
-    uploadedMimeType = file.type;
+  const files = Array.from(input.files || []);
+  if (files.length === 0) return;
 
-    const container = document.getElementById('preview-container');
-    container.innerHTML = `
-      <div class="preview-wrap">
-        <img src="${dataUrl}" alt="プレビュー" />
-        <button class="remove-img" onclick="removeImage()">×</button>
-      </div>
-    `;
-  };
-  reader.readAsDataURL(file);
+  const MAX_IMAGES = 5;
+
+  files.forEach(file => {
+    if (uploadedImages.length >= MAX_IMAGES) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      uploadedImages.push({
+        base64: dataUrl.split(',')[1],
+        mimeType: file.type,
+        dataUrl
+      });
+      renderPreviews();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // 同じファイルを選び直してもonchangeが発火するようにリセット
+  input.value = '';
 }
 
-function removeImage() {
-  uploadedImageBase64 = null;
-  uploadedMimeType = null;
-  document.getElementById('preview-container').innerHTML = '';
-  document.getElementById('file-input').value = '';
+function renderPreviews() {
+  const container = document.getElementById('preview-container');
+  container.innerHTML = uploadedImages.map((img, i) => `
+    <div class="preview-wrap">
+      <img src="${img.dataUrl}" alt="プレビュー${i + 1}" />
+      <button class="remove-img" onclick="removeImage(${i})">×</button>
+    </div>
+  `).join('');
+}
+
+function removeImage(index) {
+  uploadedImages.splice(index, 1);
+  renderPreviews();
 }
 
 async function doSearch() {
   const modelNum = document.getElementById('model-input').value.trim();
   const note = document.getElementById('note-input').value.trim();
 
-  if (!modelNum && !uploadedImageBase64) {
+  if (!modelNum && uploadedImages.length === 0) {
     alert('型番を入力するか、写真をアップロードしてください');
     return;
   }
@@ -1033,13 +1050,17 @@ async function doSearch() {
 }
 
 function buildMessages(modelNum, note) {
-  if (uploadedImageBase64) {
+  if (uploadedImages.length > 0) {
     const content = [];
-    content.push({
-      type: 'image',
-      source: { type: 'base64', media_type: uploadedMimeType, data: uploadedImageBase64 }
+    uploadedImages.forEach(img => {
+      content.push({
+        type: 'image',
+        source: { type: 'base64', media_type: img.mimeType, data: img.base64 }
+      });
     });
-    let text = '画像から型番を読み取り、後継器・互換品を調べてください。';
+    let text = uploadedImages.length > 1
+      ? `${uploadedImages.length}枚の画像（同一器具の異なる角度・型番ラベルなど）から型番を読み取り、後継器・互換品を調べてください。`
+      : '画像から型番を読み取り、後継器・互換品を調べてください。';
     if (modelNum) text += `\n入力された型番: ${modelNum}`;
     if (note) text += `\n現場メモ: ${note}`;
     content.push({ type: 'text', text });
@@ -1467,10 +1488,10 @@ zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
 zone.addEventListener('drop', e => {
   e.preventDefault();
   zone.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) {
+  const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+  if (files.length > 0) {
     const dt = new DataTransfer();
-    dt.items.add(file);
+    files.forEach(f => dt.items.add(f));
     document.getElementById('file-input').files = dt.files;
     handleFile(document.getElementById('file-input'));
   }
