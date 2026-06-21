@@ -1059,15 +1059,27 @@ function renderResult(r) {
   const confidenceTag = r.confidence === 'high' ? 'tag-green' : r.confidence === 'medium' ? 'tag-yellow' : 'tag-blue';
   const statusTag = r.status === '廃番' ? 'tag-yellow' : r.status === '現行品' ? 'tag-green' : 'tag-blue';
 
-  const isCurrent = r.status === '現行品' && r.current_product_info;
+  const isCurrent = r.status === '現行品';
 
   // 「現行品」の場合は、その型番自体＋上位機種・代替候補を選択肢として扱う
   // 「廃番／不明」の場合は、後継器・互換品を選択肢として扱う
   let candidates = [];
   if (isCurrent) {
+    // AIがcurrent_product_infoを省略した場合に備え、入力型番から自動補完する
+    const originalInfo = r.current_product_info || {
+      model: r.original_model,
+      manufacturer: r.manufacturer,
+      name: r.product_name,
+      note: ''
+    };
+    // AIが現行品なのにsuccessor_modelsへ代替品を入れてしまった場合も拾う（出力揺れ対策）
+    const altCandidates = [
+      ...(r.alternative_models || []),
+      ...(r.successor_models || [])
+    ];
     candidates = [
-      { ...r.current_product_info, note: r.current_product_info.note || 'お客様の元の型番（現行品）', isOriginal: true },
-      ...(r.alternative_models || [])
+      { ...originalInfo, note: originalInfo.note || 'お客様の元の型番（現行品）', isOriginal: true },
+      ...altCandidates
     ];
   } else {
     candidates = r.successor_models || [];
