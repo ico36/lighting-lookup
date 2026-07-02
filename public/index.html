@@ -197,7 +197,6 @@
     font-family: inherit;
   }
 
-  /* Result area */
   #result-area { display: none; }
 
   .result-card {
@@ -298,7 +297,6 @@
   }
   .copy-btn:hover { color: var(--text); }
 
-  /* Loading */
   .loading-wrap {
     text-align: center;
     padding: 40px 20px;
@@ -314,7 +312,6 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .loading-text { color: var(--text2); font-size: 14px; }
 
-  /* Error */
   .error-box {
     background: rgba(239,68,68,0.1);
     border: 1px solid rgba(239,68,68,0.3);
@@ -324,7 +321,6 @@
     font-size: 14px;
   }
 
-  /* Note area */
   .note-input {
     width: 100%;
     background: var(--bg);
@@ -351,7 +347,6 @@
     padding: 0 16px;
   }
 
-  /* Estimate builder */
   .estimate-trigger {
     display: none;
     text-align: center;
@@ -457,7 +452,6 @@
   .company-info-grid input:focus { border-color: var(--accent); }
   .company-info-grid input::placeholder { color: var(--text2); }
 
-  /* Printable estimate sheet */
   #estimate-sheet {
     background: #ffffff;
     color: #1a1a1a;
@@ -566,7 +560,6 @@
     #estimate-sheet { box-shadow: none; }
   }
 
-  /* Product detail link / modal */
   .detail-link-btn {
     background: none;
     border: none;
@@ -898,7 +891,6 @@ function getAccessCode() {
   return localStorage.getItem('access_code') || '';
 }
 
-// AIの返答に説明文が混じっていても、最初の { から対応する } までを抜き出してJSONとして解釈する
 function extractJSON(raw) {
   const stripped = raw.replace(/```json|```/g, '');
   const start = stripped.indexOf('{');
@@ -925,8 +917,6 @@ function submitAccessCode() {
   document.getElementById('app-main').style.display = 'block';
 }
 
-// ページ読み込み時、すでにコードが保存されていればそのまま画面を表示
-// （正しいかどうかは実際にAPIを呼んだ時にサーバー側がチェックする）
 window.addEventListener('DOMContentLoaded', () => {
   if (getAccessCode()) {
     document.getElementById('login-gate').style.display = 'none';
@@ -934,7 +924,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-let uploadedImages = []; // [{ base64, mimeType, dataUrl }]
+let uploadedImages = [];
 
 function handleFile(input) {
   const files = Array.from(input.files || []);
@@ -967,7 +957,6 @@ function handleFile(input) {
     reader.readAsDataURL(file);
   });
 
-  // 同じファイルを選び直してもonchangeが発火するようにリセット
   input.value = '';
 }
 
@@ -984,6 +973,28 @@ function renderPreviews() {
 function removeImage(index) {
   uploadedImages.splice(index, 1);
   renderPreviews();
+}
+
+// -------------------------------------------------------
+// リトライ付きfetch（コールドスタート対策）
+// 通信エラー時は最大2回まで自動で再試行する。
+// ユーザーには「再試行中...」とだけ表示され、手動操作は不要。
+// -------------------------------------------------------
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      return response;
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      const loadingText = document.querySelector('.loading-text');
+      if (loadingText) {
+        loadingText.textContent = `接続エラー。再試行中... (${attempt}/${maxRetries - 1})`;
+      }
+      // 1回目失敗→1.5秒後、2回目失敗→3秒後に再試行
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+    }
+  }
 }
 
 async function doSearch() {
@@ -1012,7 +1023,7 @@ async function doSearch() {
 
   try {
     const messages = buildMessages(modelNum, note);
-    const response = await fetch('/api/analyze', {
+    const response = await fetchWithRetry('/api/analyze', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1092,18 +1103,14 @@ function renderResult(r) {
 
   const isCurrent = r.status === '現行品';
 
-  // 「現行品」の場合は、その型番自体＋上位機種・代替候補を選択肢として扱う
-  // 「廃番／不明」の場合は、後継器・互換品を選択肢として扱う
   let candidates = [];
   if (isCurrent) {
-    // AIがcurrent_product_infoを省略した場合に備え、入力型番から自動補完する
     const originalInfo = r.current_product_info || {
       model: r.original_model,
       manufacturer: r.manufacturer,
       name: r.product_name,
       note: ''
     };
-    // AIが現行品なのにsuccessor_modelsへ代替品を入れてしまった場合も拾う（出力揺れ対策）
     const altCandidates = [
       ...(r.alternative_models || []),
       ...(r.successor_models || [])
@@ -1116,7 +1123,6 @@ function renderResult(r) {
     candidates = r.successor_models || [];
   }
 
-  // lastResult側にも統一形式で持たせておく（見積・詳細モーダルが参照するため）
   lastResult._candidates = candidates;
 
   const sectionTitle = isCurrent
@@ -1205,7 +1211,6 @@ function renderResult(r) {
     ` : ''}
   `;
 
-  // Reset estimate state for a new search
   selectedSuccessorIndex = candidates.length > 0 ? 0 : null;
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'none';
