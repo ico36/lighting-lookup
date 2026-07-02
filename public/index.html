@@ -926,39 +926,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 let uploadedImages = [];
 
-function handleFile(input) {
-  const files = Array.from(input.files || []);
-  if (files.length === 0) return;
-
-  const MAX_IMAGES = 5;
-  const remainingSlots = MAX_IMAGES - uploadedImages.length;
-
-  if (remainingSlots <= 0) {
-    alert(`写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
-    input.value = '';
-    return;
-  }
-
-  if (files.length > remainingSlots) {
-    alert(`写真は最大${MAX_IMAGES}枚までです。先頭${remainingSlots}枚のみ追加します。`);
-  }
-
-  files.slice(0, remainingSlots).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const dataUrl = e.target.result;
-      uploadedImages.push({
-        base64: dataUrl.split(',')[1],
-        mimeType: file.type,
-        dataUrl
-      });
-      renderPreviews();
-    };
-    reader.readAsDataURL(file);
-  });
-
-  input.value = '';
-}
+function handleFile(input)
 
 function renderPreviews() {
   const container = document.getElementById('preview-container');
@@ -1069,12 +1037,22 @@ async function doSearch() {
     btn.disabled = false;
   }
 }
-
 function buildMessages(modelNum, note) {
   if (uploadedImages.length > 0) {
     const content = [];
     
-    // 1. テキスト部分の組み立て
+    // 画像をClaude公式APIの形式でセット
+    uploadedImages.forEach(img => {
+      content.push({
+        type: 'image',
+        source: { 
+          type: 'base64', 
+          media_type: img.mimeType, 
+          data: img.base64 
+        }
+      });
+    });
+
     let text = uploadedImages.length > 1
       ? `${uploadedImages.length}枚の画像（同一器具の異なる角度・型番ラベルなど）から型番を読み取り、後継器・互換品を調べてください。`
       : '画像から型番を読み取り、後継器・互換品を調べてください。';
@@ -1082,17 +1060,6 @@ function buildMessages(modelNum, note) {
     if (note) text += `\n現場メモ: ${note}`;
     
     content.push({ type: 'text', text });
-
-    // 2. 画像部分の組み立て（サーバー側が処理しやすい標準的なデータURL形式に修正）
-    uploadedImages.forEach(img => {
-      content.push({
-        type: 'image_url',
-        image_url: {
-          url: img.dataUrl // 'data:image/jpeg;base64,...' の形をそのまま渡す
-        }
-      });
-    });
-
     return [{ role: 'user', content }];
   } else {
     let text = `型番: ${modelNum} の後継器・互換品を調べてください。`;
@@ -1100,7 +1067,6 @@ function buildMessages(modelNum, note) {
     return [{ role: 'user', content: text }];
   }
 }
-
 let lastResult = null;
 
 function renderResult(r) {
