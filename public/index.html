@@ -926,7 +926,68 @@ window.addEventListener('DOMContentLoaded', () => {
 
 let uploadedImages = [];
 
-function handleFile(input)
+function handleFile(input) {
+  const files = Array.from(input.files || []);
+  if (files.length === 0) return;
+
+  const MAX_IMAGES = 5;
+  const remainingSlots = MAX_IMAGES - uploadedImages.length;
+
+  if (remainingSlots <= 0) {
+    alert(`写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
+    input.value = '';
+    return;
+  }
+
+  if (files.length > remainingSlots) {
+    alert(`写真は最大${MAX_IMAGES}枚までです。先頭${remainingSlots}枚のみ追加します。`);
+  }
+
+  files.slice(0, remainingSlots).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        // --- 📸 画像の自動圧縮（リサイズ）処理 ---
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const MAX_SIZE = 1024; // 最大長辺を1024pxに制限
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // 画質を75%に落として軽量なJPEGに変換
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+
+        uploadedImages.push({
+          base64: compressedDataUrl.split(',')[1],
+          mimeType: 'image/jpeg',
+          dataUrl: compressedDataUrl
+        });
+        renderPreviews();
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  input.value = '';
+}
 
 function renderPreviews() {
   const container = document.getElementById('preview-container');
@@ -943,11 +1004,6 @@ function removeImage(index) {
   renderPreviews();
 }
 
-// -------------------------------------------------------
-// リトライ付きfetch（コールドスタート対策）
-// 通信エラー時は最大2回まで自動で再試行する。
-// ユーザーには「再試行中...」とだけ表示され、手動操作は不要。
-// -------------------------------------------------------
 async function fetchWithRetry(url, options, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -959,7 +1015,6 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
       if (loadingText) {
         loadingText.textContent = `接続エラー。再試行中... (${attempt}/${maxRetries - 1})`;
       }
-      // 1回目失敗→1.5秒後、2回目失敗→3秒後に再試行
       await new Promise(r => setTimeout(r, 1500 * attempt));
     }
   }
@@ -1037,19 +1092,15 @@ async function doSearch() {
     btn.disabled = false;
   }
 }
+
 function buildMessages(modelNum, note) {
   if (uploadedImages.length > 0) {
     const content = [];
     
-    // 画像をClaude公式APIの形式でセット
     uploadedImages.forEach(img => {
       content.push({
         type: 'image',
-        source: { 
-          type: 'base64', 
-          media_type: img.mimeType, 
-          data: img.base64 
-        }
+        source: { type: 'base64', media_type: img.mimeType, data: img.base64 }
       });
     });
 
@@ -1067,6 +1118,7 @@ function buildMessages(modelNum, note) {
     return [{ role: 'user', content: text }];
   }
 }
+
 let lastResult = null;
 
 function renderResult(r) {
@@ -1390,7 +1442,7 @@ function generateEstimateSheet() {
   document.getElementById('estimate-sheet').innerHTML = `
     <div class="sheet-header">
       <div>
-        <div class="sheet-title">御　見　積　書</div>
+        <div class="sheet-title">御 見 積 書</div>
         <div class="sheet-date">${todayStr}</div>
       </div>
       <div class="sheet-company">
@@ -1448,7 +1500,7 @@ function generateEstimateSheet() {
 ${clientName} 様
 ${clientSite ? '工事場所：' + clientSite + '\n' : ''}
 【内容】
-照明器具：${itemName}${itemNote ? ' / ' + itemNote : ''}　${yen(materialPrice)}
+照明器具：${itemName}${itemNote ? ' / ' + itemNote : ''} ${yen(materialPrice)}
 施工費：${yen(laborPrice)}
 ${visitPrice > 0 ? '出張費：' + yen(visitPrice) + '\n' : ''}
 小計：${yen(subtotal)}
