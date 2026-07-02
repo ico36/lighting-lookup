@@ -1073,18 +1073,26 @@ async function doSearch() {
 function buildMessages(modelNum, note) {
   if (uploadedImages.length > 0) {
     const content = [];
-    uploadedImages.forEach(img => {
-      content.push({
-        type: 'image',
-        source: { type: 'base64', media_type: img.mimeType, data: img.base64 }
-      });
-    });
+    
+    // 1. テキスト部分の組み立て
     let text = uploadedImages.length > 1
       ? `${uploadedImages.length}枚の画像（同一器具の異なる角度・型番ラベルなど）から型番を読み取り、後継器・互換品を調べてください。`
       : '画像から型番を読み取り、後継器・互換品を調べてください。';
     if (modelNum) text += `\n入力された型番: ${modelNum}`;
     if (note) text += `\n現場メモ: ${note}`;
+    
     content.push({ type: 'text', text });
+
+    // 2. 画像部分の組み立て（サーバー側が処理しやすい標準的なデータURL形式に修正）
+    uploadedImages.forEach(img => {
+      content.push({
+        type: 'image_url',
+        image_url: {
+          url: img.dataUrl // 'data:image/jpeg;base64,...' の形をそのまま渡す
+        }
+      });
+    });
+
     return [{ role: 'user', content }];
   } else {
     let text = `型番: ${modelNum} の後継器・互換品を調べてください。`;
