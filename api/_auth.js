@@ -3,14 +3,12 @@
 // ファイル名を _auth.js のように先頭にアンダースコアを付けておくと、
 // Vercelがこれ自体を独立したAPIエンドポイントとして公開しないため安全です。
 
-const crypto = require('crypto');
-
-const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // login.jsと同じ値にしておく
+import crypto from 'crypto';
 
 /**
  * トークンを検証し、有効なら email を返す。無効なら null を返す。
  */
-function verifySessionToken(token) {
+export function verifySessionToken(token) {
   if (!token || typeof token !== 'string') return null;
 
   let decoded;
@@ -51,21 +49,21 @@ function verifySessionToken(token) {
 
 /**
  * リクエストからトークンを取り出して検証し、
- * 無効なら401を返して true（＝処理を中断すべき）を返す補助関数。
+ * 無効なら401を返して null を返す補助関数。
  *
  * 使い方（analyze.js や product-detail.js の冒頭に追加）:
  *
- *   const { requireAuth } = require('./_auth');
+ *   import { requireAuth } from './_auth';
  *
- *   module.exports = async (req, res) => {
+ *   export default async function handler(req, res) {
  *     const email = requireAuth(req, res);
  *     if (!email) return; // requireAuth内で既に401レスポンス済みなのでここで終了
  *
- *     // ここから先は認証済みの処理（emailで誰かの利用かも分かる）
+ *     // ここから先は認証済みの処理
  *     ...
- *   };
+ *   }
  */
-function requireAuth(req, res) {
+export function requireAuth(req, res) {
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ')
     ? authHeader.slice('Bearer '.length)
@@ -74,11 +72,9 @@ function requireAuth(req, res) {
   const email = verifySessionToken(token);
 
   if (!email) {
-    res.status(401).json({ success: false, message: 'ログインが必要です' });
+    res.status(401).json({ error: 'ログインが必要です' });
     return null;
   }
 
   return email;
 }
-
-module.exports = { verifySessionToken, requireAuth };
