@@ -15,6 +15,18 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'メールアドレスが必要です' });
   }
 
+  // ==========================================
+  // 【追加】管理者制限（サービス公開前ロック）
+  // ==========================================
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase());
+
+  if (!adminEmails.includes(email.trim().toLowerCase())) {
+    return res.status(403).json({ error: '現在サービス準備中のため、新規登録は受け付けておりません。' });
+  }
+  // ==========================================
+
   try {
     // サイトのURLを動的に取得（ローカル環境とVercel本番環境の両方に対応）
     const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
