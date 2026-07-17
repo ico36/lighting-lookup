@@ -48,15 +48,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { email } = req.body || {};
-
-  if (!isValidEmail(email)) {
-    return res.status(400).json({ error: 'メールアドレスの形式が正しくありません' });
-  }
-
   const normalizedEmail = email.trim().toLowerCase();
 
+  // 変更点：管理者バイパスを「レート制限チェック」の【上】に移動しました
+  // --- 管理者バイパス（レート制限をスキップして即座にログイン） ---
+  if (getAdminEmails().includes(normalizedEmail)) {
+    const token = createSessionToken(normalizedEmail);
+    return res.status(200).json({ success: true, admin: true, token });
+  }
+
   // --- レート制限チェック（IPとメール両方で見る） ---
+  // 上のブロックで管理者はreturn（脱出）するため、ここを通るのは一般ユーザーのみになります
   const forwarded = req.headers['x-forwarded-for'];
   const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded || '')
     .split(',')[0]
@@ -77,12 +79,6 @@ export default async function handler(req, res) {
         error: 'ログイン試行回数が多すぎます。しばらく時間をおいて再度お試しください',
       });
     }
-  }
-
-  // --- 管理者バイパス ---
-  if (getAdminEmails().includes(normalizedEmail)) {
-    const token = createSessionToken(normalizedEmail);
-    return res.status(200).json({ success: true, admin: true, token });
   }
 
   // --- Stripeサブスク状態の確認 ---
