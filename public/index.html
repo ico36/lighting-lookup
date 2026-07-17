@@ -729,17 +729,15 @@
     電気工事士向けの照明器具型番検索サービスです。型番や写真から現行品・後継品を調べ、発注メモや見積書の作成までサポートします。
   </p>
   <div class="input-card">
-    <div class="section-label">アクセスコード</div>
+    <div class="section-label">メールアドレスでログイン</div>
     <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
-      このツールは関係者限定で公開しています。配布されたアクセスコードを入力してください。
+      ご契約時に登録したメールアドレスを入力してください。
     </p>
     <div class="model-input-wrap">
-      <input type="password" id="access-code-input" placeholder="アクセスコード" />
-      <button class="btn-primary" onclick="submitAccessCode()">入る</button>
+      <input type="email" id="login-email-input" placeholder="メールアドレス" />
+      <button class="btn-primary" id="login-btn" onclick="submitEmail()">ログイン</button>
     </div>
-    <div id="access-code-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;">
-      コードが正しくありません
-    </div>
+    <div id="login-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
   </div>
 </div>
 
@@ -902,8 +900,8 @@ const SYSTEM_PROMPT = `あなたは日本の照明器具の専門家です。電
   "confidence": "high" or "medium" or "low"
 }`;
 
-function getAccessCode() {
-  return localStorage.getItem('access_code') || '';
+function getSessionToken() {
+  return localStorage.getItem('session_token') || '';
 }
 
 function extractJSON(raw) {
@@ -923,19 +921,66 @@ function extractJSON(raw) {
   throw new Error('JSON not properly closed');
 }
 
-function submitAccessCode() {
-  const input = document.getElementById('access-code-input');
-  const code = input.value.trim();
-  if (!code) return;
-  localStorage.setItem('access_code', code);
-  document.getElementById('login-gate').style.display = 'none';
-  document.getElementById('app-main').style.display = 'block';
+async function submitEmail() {
+  const input = document.getElementById('login-email-input');
+  const email = input.value.trim();
+  if (!email) return;
+
+  const btn = document.getElementById('login-btn');
+  const errorEl = document.getElementById('login-error');
+  errorEl.style.display = 'none';
+  btn.disabled = true;
+  const originalBtnText = btn.textContent;
+  btn.textContent = '確認中...';
+
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      errorEl.textContent = data.error || 'ログインに失敗しました';
+      errorEl.style.display = 'block';
+      return;
+    }
+
+    localStorage.setItem('session_token', data.token);
+    document.getElementById('login-gate').style.display = 'none';
+    document.getElementById('app-main').style.display = 'block';
+  } catch (err) {
+    errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalBtnText;
+  }
+}
+
+function showLoginGate(message) {
+  localStorage.removeItem('session_token');
+  document.getElementById('app-main').style.display = 'none';
+  document.getElementById('login-gate').style.display = 'block';
+  const errorEl = document.getElementById('login-error');
+  if (message) {
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+  }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  if (getAccessCode()) {
+  if (getSessionToken()) {
     document.getElementById('login-gate').style.display = 'none';
     document.getElementById('app-main').style.display = 'block';
+  }
+
+  const loginEmailInput = document.getElementById('login-email-input');
+  if (loginEmailInput) {
+    loginEmailInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') submitEmail();
+    });
   }
 });
 
@@ -1065,7 +1110,7 @@ async function doSearch() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-access-code': getAccessCode()
+        'Authorization': 'Bearer ' + getSessionToken()
       },
       body: JSON.stringify({
         system: SYSTEM_PROMPT,
@@ -1077,11 +1122,8 @@ async function doSearch() {
 
     if (!response.ok) {
       if (response.status === 401) {
-        localStorage.removeItem('access_code');
-        document.getElementById('app-main').style.display = 'none';
-        document.getElementById('login-gate').style.display = 'block';
-        document.getElementById('access-code-error').style.display = 'block';
-        throw new Error('アクセスコードが正しくありません。再度入力してください。');
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        throw new Error('ログインが必要です。再度メールアドレスを入力してください。');
       }
       throw new Error(data.error || 'サーバーエラーが発生しました');
     }
@@ -1304,7 +1346,7 @@ async function openDetailModal(index) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-access-code': getAccessCode()
+        'Authorization': 'Bearer ' + getSessionToken()
       },
       body: JSON.stringify({
         manufacturer: s.manufacturer,
@@ -1317,11 +1359,8 @@ async function openDetailModal(index) {
 
     if (!response.ok) {
       if (response.status === 401) {
-        localStorage.removeItem('access_code');
         closeDetailModal();
-        document.getElementById('app-main').style.display = 'none';
-        document.getElementById('login-gate').style.display = 'block';
-        document.getElementById('access-code-error').style.display = 'block';
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
         return;
       }
       throw new Error(data.error || '取得に失敗しました');
