@@ -719,9 +719,13 @@
 </head>
 <body>
 
-<header>
-  <div class="logo">照明<span>サーチ</span></div>
-  <div class="badge">β版</div>
+<header style="justify-content: space-between;">
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <div class="logo">照明<span>サーチ</span></div>
+    <div class="badge">β版</div>
+  </div>
+  <!-- ログアウトボタン（初期状態は非表示） -->
+  <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
 </header>
 
 <div id="login-gate" style="max-width:400px;margin:60px auto;padding:0 16px;">
@@ -947,9 +951,15 @@ async function submitEmail() {
       return;
     }
 
+    // ========== ここが修正部分です ==========
     localStorage.setItem('session_token', data.token);
     document.getElementById('login-gate').style.display = 'none';
     document.getElementById('app-main').style.display = 'block';
+    
+    // 【追記】ログイン成功時にログアウトボタンを表示
+    document.getElementById('logout-btn').style.display = 'block';
+    // =====================================
+
   } catch (err) {
     errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
     errorEl.style.display = 'block';
@@ -970,10 +980,20 @@ function showLoginGate(message) {
   }
 }
 
+ function doLogout() {
+  if(confirm('ログアウトしますか？')) {
+    showLoginGate(''); // トークンを消してログイン画面に戻す
+    document.getElementById('logout-btn').style.display = 'none'; // ボタンを隠す
+    document.getElementById('login-email-input').value = ''; // 入力欄をクリア
+  }
+}
+ 
 window.addEventListener('DOMContentLoaded', () => {
   if (getSessionToken()) {
     document.getElementById('login-gate').style.display = 'none';
     document.getElementById('app-main').style.display = 'block';
+    // 【追記】ログイン状態ならログアウトボタンを表示
+    document.getElementById('logout-btn').style.display = 'block';
   }
 
   const loginEmailInput = document.getElementById('login-email-input');
