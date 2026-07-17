@@ -1,19 +1,15 @@
 // api/login.js
 // メールアドレス＋Stripeサブスク状態のその場確認によるログインAPI
 //
-// 必要な環境変数（Vercelに設定済み前提）:
-//   STRIPE_SECRET_KEY              - Stripeシークレットキー
-//   KV_REST_API_URL                - Upstash Redis REST URL
-//   KV_REST_API_TOKEN              - Upstash Redis REST Token（読み書き用）
-//   ADMIN_EMAILS                   - 管理者メールアドレス（カンマ区切り、例: "you@example.com,other@example.com"）
-//   SESSION_SECRET                 - セッショントークン署名用の秘密文字列（適当な長いランダム文字列でOK）
+// 必要な環境変数（Vercelに設定済み）:
+//   STRIPE_SECRET_KEY, KV_REST_API_URL, KV_REST_API_TOKEN, ADMIN_EMAILS, SESSION_SECRET
 //
-// 必要なnpmパッケージ:
-//   npm install stripe @upstash/redis
+// 必要なnpmパッケージ（package.jsonに追加済み）:
+//   stripe, @upstash/redis
 
-const Stripe = require('stripe');
-const { Redis } = require('@upstash/redis');
-const crypto = require('crypto');
+import Stripe from 'stripe';
+import { Redis } from '@upstash/redis';
+import crypto from 'crypto';
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const redis = new Redis({
@@ -37,7 +33,6 @@ function getAdminEmails() {
 }
 
 // email + 有効期限をSESSION_SECRETで署名した簡易トークンを発行
-// （別途DBを持たない設計のため、トークン自体に情報を含めて検証する方式）
 function createSessionToken(email) {
   const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
   const payload = `${email}:${expiresAt}`;
@@ -45,21 +40,18 @@ function createSessionToken(email) {
     .createHmac('sha256', process.env.SESSION_SECRET)
     .update(payload)
     .digest('hex');
-  const token = Buffer.from(`${payload}:${signature}`).toString('base64url');
-  return token;
+  return Buffer.from(`${payload}:${signature}`).toString('base64url');
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    res.status(405).json({ success: false, message: 'Method Not Allowed' });
-    return;
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { email } = req.body || {};
 
   if (!isValidEmail(email)) {
-    res.status(400).json({ success: false, message: 'メールアドレスの形式が正しくありません' });
-    return;
+    return res.status(400).json({ error: 'メールアドレスの形式が正しくありません' });
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -78,23 +70,19 @@ module.exports = async (req, res) => {
   for (const key of rateLimitKeys) {
     const attempts = await redis.incr(key);
     if (attempts === 1) {
-      // 初回アクセス時のみTTLをセット（カウントウィンドウの開始）
       await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS);
     }
     if (attempts > RATE_LIMIT_MAX_ATTEMPTS) {
-      res.status(429).json({
-        success: false,
-        message: 'ログイン試行回数が多すぎます。しばらく時間をおいて再度お試しください',
+      return res.status(429).json({
+        error: 'ログイン試行回数が多すぎます。しばらく時間をおいて再度お試しください',
       });
-      return;
     }
   }
 
   // --- 管理者バイパス ---
   if (getAdminEmails().includes(normalizedEmail)) {
     const token = createSessionToken(normalizedEmail);
-    res.status(200).json({ success: true, admin: true, token });
-    return;
+    return res.status(200).json({ success: true, admin: true, token });
   }
 
   // --- Stripeサブスク状態の確認 ---
@@ -105,11 +93,9 @@ module.exports = async (req, res) => {
     });
 
     if (customers.data.length === 0) {
-      res.status(403).json({
-        success: false,
-        message: 'このメールアドレスに対応する契約が見つかりませんでした',
+      return res.status(403).json({
+        error: 'このメールアドレスに対応する契約が見つかりませんでした',
       });
-      return;
     }
 
     const customer = customers.data[0];
@@ -125,17 +111,15 @@ module.exports = async (req, res) => {
     );
 
     if (!hasActiveSubscription) {
-      res.status(403).json({
-        success: false,
-        message: '有効なサブスクリプションが見つかりませんでした。お支払い状況をご確認ください',
+      return res.status(403).json({
+        error: '有効なサブスクリプションが見つかりませんでした。お支払い状況をご確認ください',
       });
-      return;
     }
 
     const token = createSessionToken(normalizedEmail);
-    res.status(200).json({ success: true, admin: false, token });
+    return res.status(200).json({ success: true, admin: false, token });
   } catch (err) {
     console.error('Stripe確認エラー:', err);
-    res.status(500).json({ success: false, message: 'サーバーエラーが発生しました' });
+    return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
-};
+}
