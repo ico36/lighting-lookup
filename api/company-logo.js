@@ -1,10 +1,16 @@
 // api/company-logo.js
 // 自社ロゴ画像を Vercel Blob にアップロードし、URLを返すAPI
 // 必要なnpmパッケージ: @vercel/blob（package.jsonに追加済み）
-// 必要な環境変数: BLOB_READ_WRITE_TOKEN
+//
+// 認証情報について:
 //   Vercelのプロジェクト →「Storage」→「Create Database」→「Blob」でストアを作成し
-//   プロジェクトに接続すると自動的に環境変数として付与される（Production/Preview/Development
-//   それぞれの環境に反映されているか要確認）。未設定の場合は put() が例外を投げる。
+//   プロジェクトに接続すると、@vercel/blob の put() は以下のいずれかの方法で
+//   自動的に認証情報を解決する（どちらが使われるかはVercel側の接続方式次第で、
+//   コード側で判別・分岐する必要はない）:
+//     1. 環境変数 BLOB_READ_WRITE_TOKEN（従来方式）
+//     2. 環境変数 BLOB_STORE_ID ＋ ランタイムに自動注入される VERCEL_OIDC_TOKEN（新方式）
+//   そのため、特定の環境変数の有無を事前チェックするとStorage接続方式によっては
+//   誤検知で失敗するので行わない。put() 自身の例外をそのまま拾って詳細を返す。
 
 import { put } from '@vercel/blob';
 import { requireAuth } from './_auth';
@@ -25,14 +31,6 @@ export default async function handler(req, res) {
 
   const email = requireAuth(req, res);
   if (!email) return; // requireAuth内で既に401レスポンス済み
-
-  // Blobストア未接続の場合、put()が投げる例外だけでは原因が分かりにくいため先に明示チェックする
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    console.error('[company-logo] BLOB_READ_WRITE_TOKEN が設定されていません。VercelのStorageでBlobストアを作成し、プロジェクトに接続してください（Production環境にも反映されているか要確認）。');
-    return res.status(500).json({
-      error: 'サーバー側の画像保存設定が未完了です（BLOB_READ_WRITE_TOKEN未設定）。管理者に確認してください。',
-    });
-  }
 
   try {
     const { base64, mimeType } = req.body || {};
