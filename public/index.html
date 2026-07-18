@@ -775,10 +775,11 @@
 
     <div class="section-label" style="margin-top:20px;">ロゴ画像（任意）</div>
     <div class="upload-zone" style="padding:16px;">
-      <input type="file" accept="image/*" id="setup-logo-input" onchange="handleLogoFile(this, 'setup')" />
+      <input type="file" accept="image/png,image/jpeg,image/svg+xml" id="setup-logo-input" onchange="handleLogoFile(this, 'setup')" />
       <div class="upload-icon">🖼️</div>
       <div class="upload-text"><strong>タップしてロゴを選択</strong></div>
     </div>
+    <div style="font-size:11px;color:var(--text2);margin-top:6px;">対応形式：PNG・JPEG・SVG／上限2MB</div>
     <div id="setup-logo-preview" style="margin-top:10px;"></div>
 
     <div id="setup-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
@@ -896,10 +897,11 @@
 
       <div class="modal-section-label">ロゴ画像（任意）</div>
       <div class="upload-zone" style="padding:16px;">
-        <input type="file" accept="image/*" id="settings-logo-input" onchange="handleLogoFile(this, 'settings')" />
+        <input type="file" accept="image/png,image/jpeg,image/svg+xml" id="settings-logo-input" onchange="handleLogoFile(this, 'settings')" />
         <div class="upload-icon">🖼️</div>
         <div class="upload-text"><strong>タップしてロゴを選択</strong></div>
       </div>
+      <div style="font-size:11px;color:var(--text2);margin-top:6px;">対応形式：PNG・JPEG・SVG／上限2MB</div>
       <div id="settings-logo-preview" style="margin-top:10px;"></div>
 
       <div id="settings-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
@@ -1062,6 +1064,10 @@ let companyInfo = null;
 let pendingLogo = { setup: null, settings: null };
 let logoRemoved = { setup: false, settings: false };
 
+// api/company-logo.js の上限・許可形式と揃えること
+const LOGO_MAX_BYTES = 2 * 1024 * 1024; // 2MB
+const LOGO_ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/svg+xml'];
+
 // ログイン成功後に呼び出す。自社情報が未登録なら初回設定画面へ、登録済みならメイン画面へ
 async function checkCompanyAndRoute() {
   document.getElementById('login-gate').style.display = 'none';
@@ -1117,9 +1123,51 @@ function closeCompanySettings() {
   document.getElementById('company-settings-overlay').classList.remove('open');
 }
 
+function showLogoError(scope, message) {
+  const errorEl = document.getElementById(`${scope}-error`);
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.style.display = 'block';
+  }
+}
+
 function handleLogoFile(input, scope) {
   const file = (input.files || [])[0];
   if (!file) return;
+
+  const errorEl = document.getElementById(`${scope}-error`);
+  if (errorEl) errorEl.style.display = 'none';
+
+  if (!LOGO_ALLOWED_TYPES.includes(file.type)) {
+    showLogoError(scope, '対応していないファイル形式です（PNG・JPEG・SVGのみ対応しています）');
+    input.value = '';
+    return;
+  }
+
+  if (file.size > LOGO_MAX_BYTES) {
+    showLogoError(scope, `ファイルサイズが上限（${LOGO_MAX_BYTES / (1024 * 1024)}MB）を超えています`);
+    input.value = '';
+    return;
+  }
+
+  // SVGはベクター画像なのでcanvasでラスタライズせず、そのままアップロードする
+  if (file.type === 'image/svg+xml') {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      pendingLogo[scope] = {
+        base64: dataUrl.split(',')[1],
+        mimeType: 'image/svg+xml',
+        dataUrl
+      };
+      logoRemoved[scope] = false;
+      renderLogoPreview(scope);
+    };
+    reader.onerror = () => showLogoError(scope, 'ファイルの読み込みに失敗しました。もう一度お試しください。');
+    reader.readAsDataURL(file);
+    input.value = '';
+    return;
+  }
 
   const reader = new FileReader();
   reader.onload = e => {
@@ -1152,8 +1200,10 @@ function handleLogoFile(input, scope) {
       logoRemoved[scope] = false;
       renderLogoPreview(scope);
     };
+    img.onerror = () => showLogoError(scope, '画像の読み込みに失敗しました。別のファイルをお試しください。');
     img.src = e.target.result;
   };
+  reader.onerror = () => showLogoError(scope, 'ファイルの読み込みに失敗しました。もう一度お試しください。');
   reader.readAsDataURL(file);
 
   input.value = '';
@@ -1223,9 +1273,17 @@ async function saveCompanyInfo(scope) {
           mimeType: pendingLogo[scope].mimeType
         })
       });
-      const uploadData = await uploadRes.json();
+      let uploadData;
+      try {
+        uploadData = await uploadRes.json();
+      } catch (parseErr) {
+        console.error('ロゴアップロードのレスポンス解析に失敗:', parseErr, uploadRes.status);
+        throw new Error(`ロゴ画像のアップロードに失敗しました（サーバーエラー: ${uploadRes.status}）`);
+      }
       if (!uploadRes.ok) {
-        throw new Error(uploadData.error || 'ロゴ画像のアップロードに失敗しました');
+        console.error('ロゴアップロード失敗:', uploadRes.status, uploadData);
+        const detail = uploadData.detail ? `（詳細: ${uploadData.detail}）` : '';
+        throw new Error((uploadData.error || 'ロゴ画像のアップロードに失敗しました') + detail);
       }
       logoUrl = uploadData.url;
     } else if (logoRemoved[scope]) {
@@ -1267,6 +1325,7 @@ async function saveCompanyInfo(scope) {
     }
     renderEstimateCompanyDisplay();
   } catch (err) {
+    console.error('自社情報の保存に失敗:', err);
     errorEl.textContent = err.message || '通信エラーが発生しました';
     errorEl.style.display = 'block';
   } finally {
