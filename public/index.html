@@ -452,6 +452,21 @@
   .company-info-grid input:focus { border-color: var(--accent); }
   .company-info-grid input::placeholder { color: var(--text2); }
 
+  .stacked-input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    outline: none;
+    margin-bottom: 10px;
+  }
+  .stacked-input:focus { border-color: var(--accent); }
+  .stacked-input::placeholder { color: var(--text2); }
+
   #estimate-sheet {
     background: #ffffff;
     color: #1a1a1a;
@@ -724,8 +739,11 @@
     <div class="logo">照明<span>サーチ</span></div>
     <div class="badge">β版</div>
   </div>
-  <!-- ログアウトボタン（初期状態は非表示） -->
-  <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
+  <!-- ログイン後のみ表示するボタン群（初期状態は非表示） -->
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">設定</button>
+    <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
+  </div>
 </header>
 
 <div id="login-gate" style="max-width:400px;margin:60px auto;padding:0 16px;">
@@ -742,6 +760,31 @@
       <button class="btn-primary" id="login-btn" onclick="submitEmail()">ログイン</button>
     </div>
     <div id="login-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
+  </div>
+</div>
+
+<div id="company-setup-gate" style="display:none;max-width:440px;margin:60px auto;padding:0 16px;">
+  <p style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.7;text-align:center;">
+    見積書に表示する自社情報を入力してください。ロゴ以外は後から「設定」でいつでも変更できます。
+  </p>
+  <div class="input-card">
+    <div class="section-label">自社情報（初回設定）</div>
+    <input type="text" id="setup-biz-name" class="stacked-input" placeholder="屋号・会社名（必須）" />
+    <input type="text" id="setup-biz-tel" class="stacked-input" placeholder="電話番号（任意）" />
+    <input type="text" id="setup-biz-license" class="stacked-input" placeholder="第二種電気工事士 登録番号など（任意）" style="margin-bottom:0;" />
+
+    <div class="section-label" style="margin-top:20px;">ロゴ画像（任意）</div>
+    <div class="upload-zone" style="padding:16px;">
+      <input type="file" accept="image/*" id="setup-logo-input" onchange="handleLogoFile(this, 'setup')" />
+      <div class="upload-icon">🖼️</div>
+      <div class="upload-text"><strong>タップしてロゴを選択</strong></div>
+    </div>
+    <div id="setup-logo-preview" style="margin-top:10px;"></div>
+
+    <div id="setup-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
+    <div style="margin-top:16px;">
+      <button class="btn-primary" id="setup-save-btn" style="width:100%;" onclick="saveCompanyInfo('setup')">保存して始める</button>
+    </div>
   </div>
 </div>
 
@@ -788,13 +831,12 @@
     </div>
 
     <div class="input-card">
-      <div class="section-label">自社情報（見積書に表示）</div>
-      <div class="company-info-grid">
-        <input type="text" id="biz-name" placeholder="屋号・会社名" />
-        <input type="text" id="biz-tel" placeholder="電話番号" />
-        <input type="text" id="biz-license" placeholder="第二種電気工事士 登録番号など（任意）" />
-        <input type="text" id="biz-note" placeholder="備考（任意）" />
+      <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>自社情報（見積書に表示）</span>
+        <button type="button" class="detail-link-btn" style="margin:0;" onclick="openCompanySettings()">設定で編集 →</button>
       </div>
+      <div id="estimate-company-display" style="font-size:14px;color:var(--text);line-height:1.7;"></div>
+      <input type="text" id="biz-note" class="stacked-input" placeholder="備考（任意・この見積書のみ）" style="margin-top:12px;margin-bottom:0;" />
     </div>
 
     <div class="input-card">
@@ -838,6 +880,33 @@
       <button class="modal-close" onclick="closeDetailModal()">✕</button>
     </div>
     <div id="detail-modal-body"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="company-settings-overlay" onclick="if(event.target===this) closeCompanySettings()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title">自社情報の設定</div>
+      <button class="modal-close" onclick="closeCompanySettings()">✕</button>
+    </div>
+    <div>
+      <input type="text" id="settings-biz-name" class="stacked-input" placeholder="屋号・会社名（必須）" />
+      <input type="text" id="settings-biz-tel" class="stacked-input" placeholder="電話番号（任意）" />
+      <input type="text" id="settings-biz-license" class="stacked-input" placeholder="第二種電気工事士 登録番号など（任意）" style="margin-bottom:0;" />
+
+      <div class="modal-section-label">ロゴ画像（任意）</div>
+      <div class="upload-zone" style="padding:16px;">
+        <input type="file" accept="image/*" id="settings-logo-input" onchange="handleLogoFile(this, 'settings')" />
+        <div class="upload-icon">🖼️</div>
+        <div class="upload-text"><strong>タップしてロゴを選択</strong></div>
+      </div>
+      <div id="settings-logo-preview" style="margin-top:10px;"></div>
+
+      <div id="settings-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
+      <div style="margin-top:16px;">
+        <button class="btn-primary" id="settings-save-btn" style="width:100%;" onclick="saveCompanyInfo('settings')">保存</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -951,14 +1020,8 @@ async function submitEmail() {
       return;
     }
 
-    // ========== ここが修正部分です ==========
     localStorage.setItem('session_token', data.token);
-    document.getElementById('login-gate').style.display = 'none';
-    document.getElementById('app-main').style.display = 'block';
-    
-    // 【追記】ログイン成功時にログアウトボタンを表示
-    document.getElementById('logout-btn').style.display = 'block';
-    // =====================================
+    await checkCompanyAndRoute();
 
   } catch (err) {
     errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
@@ -972,6 +1035,7 @@ async function submitEmail() {
 function showLoginGate(message) {
   localStorage.removeItem('session_token');
   document.getElementById('app-main').style.display = 'none';
+  document.getElementById('company-setup-gate').style.display = 'none';
   document.getElementById('login-gate').style.display = 'block';
   const errorEl = document.getElementById('login-error');
   if (message) {
@@ -984,16 +1048,253 @@ function showLoginGate(message) {
   if(confirm('ログアウトしますか？')) {
     showLoginGate(''); // トークンを消してログイン画面に戻す
     document.getElementById('logout-btn').style.display = 'none'; // ボタンを隠す
+    document.getElementById('settings-btn').style.display = 'none';
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
+    companyInfo = null;
+    pendingLogo = { setup: null, settings: null };
+    logoRemoved = { setup: false, settings: false };
   }
 }
- 
+
+// ===== 自社情報（社名・電話番号・登録番号・ロゴ）の保存・再利用 =====
+
+let companyInfo = null;
+let pendingLogo = { setup: null, settings: null };
+let logoRemoved = { setup: false, settings: false };
+
+// ログイン成功後に呼び出す。自社情報が未登録なら初回設定画面へ、登録済みならメイン画面へ
+async function checkCompanyAndRoute() {
+  document.getElementById('login-gate').style.display = 'none';
+
+  try {
+    const response = await fetch('/api/company', {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+      } else {
+        showLoginGate(data.error || '自社情報の確認に失敗しました。もう一度お試しください。');
+      }
+      return;
+    }
+
+    companyInfo = data.company;
+    document.getElementById('logout-btn').style.display = 'block';
+    document.getElementById('settings-btn').style.display = 'block';
+
+    if (!companyInfo) {
+      showCompanySetupGate();
+    } else {
+      document.getElementById('company-setup-gate').style.display = 'none';
+      document.getElementById('app-main').style.display = 'block';
+      renderEstimateCompanyDisplay();
+    }
+  } catch (err) {
+    showLoginGate('通信エラーが発生しました。もう一度お試しください。');
+  }
+}
+
+function showCompanySetupGate() {
+  document.getElementById('app-main').style.display = 'none';
+  document.getElementById('company-setup-gate').style.display = 'block';
+}
+
+function openCompanySettings() {
+  document.getElementById('settings-biz-name').value = companyInfo?.name || '';
+  document.getElementById('settings-biz-tel').value = companyInfo?.tel || '';
+  document.getElementById('settings-biz-license').value = companyInfo?.license || '';
+  pendingLogo.settings = null;
+  logoRemoved.settings = false;
+  renderLogoPreview('settings');
+  document.getElementById('settings-error').style.display = 'none';
+  document.getElementById('company-settings-overlay').classList.add('open');
+}
+
+function closeCompanySettings() {
+  document.getElementById('company-settings-overlay').classList.remove('open');
+}
+
+function handleLogoFile(input, scope) {
+  const file = (input.files || [])[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      const MAX_SIZE = 400; // ロゴは大きい必要がないため小さめに制限
+
+      if (width > height) {
+        if (width > MAX_SIZE) { height = Math.round((height * MAX_SIZE) / width); width = MAX_SIZE; }
+      } else {
+        if (height > MAX_SIZE) { width = Math.round((width * MAX_SIZE) / height); height = MAX_SIZE; }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // 透過を保持できるPNGとして出力
+      const compressedDataUrl = canvas.toDataURL('image/png');
+
+      pendingLogo[scope] = {
+        base64: compressedDataUrl.split(',')[1],
+        mimeType: 'image/png',
+        dataUrl: compressedDataUrl
+      };
+      logoRemoved[scope] = false;
+      renderLogoPreview(scope);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+
+  input.value = '';
+}
+
+function renderLogoPreview(scope) {
+  const container = document.getElementById(`${scope}-logo-preview`);
+  if (!container) return;
+
+  const pending = pendingLogo[scope];
+  const existingUrl = (scope === 'settings' && companyInfo?.logoUrl && !logoRemoved[scope])
+    ? companyInfo.logoUrl
+    : null;
+  const src = pending ? pending.dataUrl : existingUrl;
+
+  if (!src) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="preview-wrap">
+      <img src="${src}" alt="ロゴプレビュー" />
+      <button class="remove-img" type="button" onclick="removeLogo('${scope}')">×</button>
+    </div>
+  `;
+}
+
+function removeLogo(scope) {
+  pendingLogo[scope] = null;
+  logoRemoved[scope] = true;
+  const input = document.getElementById(`${scope}-logo-input`);
+  if (input) input.value = '';
+  renderLogoPreview(scope);
+}
+
+async function saveCompanyInfo(scope) {
+  const nameEl = document.getElementById(`${scope}-biz-name`);
+  const telEl = document.getElementById(`${scope}-biz-tel`);
+  const licenseEl = document.getElementById(`${scope}-biz-license`);
+  const errorEl = document.getElementById(`${scope}-error`);
+  const saveBtn = document.getElementById(`${scope}-save-btn`);
+
+  const name = nameEl.value.trim();
+  if (!name) {
+    errorEl.textContent = '会社名を入力してください';
+    errorEl.style.display = 'block';
+    return;
+  }
+  errorEl.style.display = 'none';
+  saveBtn.disabled = true;
+  const originalText = saveBtn.textContent;
+  saveBtn.textContent = '保存中...';
+
+  try {
+    let logoUrl = companyInfo?.logoUrl || '';
+
+    if (pendingLogo[scope]) {
+      const uploadRes = await fetch('/api/company-logo', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({
+          base64: pendingLogo[scope].base64,
+          mimeType: pendingLogo[scope].mimeType
+        })
+      });
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) {
+        throw new Error(uploadData.error || 'ロゴ画像のアップロードに失敗しました');
+      }
+      logoUrl = uploadData.url;
+    } else if (logoRemoved[scope]) {
+      logoUrl = '';
+    }
+
+    const response = await fetch('/api/company', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({
+        name,
+        tel: telEl.value.trim(),
+        license: licenseEl.value.trim(),
+        logoUrl
+      })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || '保存に失敗しました');
+    }
+
+    companyInfo = data.company;
+    pendingLogo[scope] = null;
+    logoRemoved[scope] = false;
+
+    if (scope === 'setup') {
+      document.getElementById('company-setup-gate').style.display = 'none';
+      document.getElementById('app-main').style.display = 'block';
+    } else {
+      closeCompanySettings();
+    }
+    renderEstimateCompanyDisplay();
+  } catch (err) {
+    errorEl.textContent = err.message || '通信エラーが発生しました';
+    errorEl.style.display = 'block';
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = originalText;
+  }
+}
+
+// 保存済みの自社情報を見積フォームに表示専用で反映する（編集は設定画面からのみ可能にするため、入力欄は持たない）
+function renderEstimateCompanyDisplay() {
+  const el = document.getElementById('estimate-company-display');
+  if (!el) return;
+
+  if (!companyInfo) {
+    el.innerHTML = `<div style="color:var(--text2);font-size:13px;">自社情報が未設定です。「設定で編集」から入力してください。</div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="font-weight:600;">${companyInfo.name}</div>
+    ${companyInfo.tel ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">TEL: ${companyInfo.tel}</div>` : ''}
+    ${companyInfo.license ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">${companyInfo.license}</div>` : ''}
+  `;
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   if (getSessionToken()) {
-    document.getElementById('login-gate').style.display = 'none';
-    document.getElementById('app-main').style.display = 'block';
-    // 【追記】ログイン状態ならログアウトボタンを表示
-    document.getElementById('logout-btn').style.display = 'block';
+    checkCompanyAndRoute();
   }
 
   const loginEmailInput = document.getElementById('login-email-input');
@@ -1476,6 +1777,7 @@ function copyOrder() {
 }
 
 function showEstimateForm() {
+  renderEstimateCompanyDisplay();
   document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1506,9 +1808,9 @@ function generateEstimateSheet() {
 
   const clientName = document.getElementById('client-name').value.trim() || 'お客様';
   const clientSite = document.getElementById('client-site').value.trim();
-  const bizName = document.getElementById('biz-name').value.trim() || '（屋号未入力）';
-  const bizTel = document.getElementById('biz-tel').value.trim();
-  const bizLicense = document.getElementById('biz-license').value.trim();
+  const bizName = companyInfo?.name || '（屋号未設定）';
+  const bizTel = companyInfo?.tel || '';
+  const bizLicense = companyInfo?.license || '';
   const bizNote = document.getElementById('biz-note').value.trim();
 
   const materialPrice = Number(document.getElementById('price-material').value || 0);
@@ -1522,6 +1824,9 @@ function generateEstimateSheet() {
   const itemNote = picked ? `${picked.manufacturer}${picked.note ? ' / ' + picked.note : ''}` : (r.manufacturer || '');
 
   const todayStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+  const logoHTML = companyInfo?.logoUrl
+    ? `<img src="${companyInfo.logoUrl}" alt="ロゴ" style="max-height:40px;max-width:180px;object-fit:contain;margin-bottom:6px;" />`
+    : '';
 
   document.getElementById('estimate-sheet').innerHTML = `
     <div class="sheet-header">
@@ -1530,6 +1835,7 @@ function generateEstimateSheet() {
         <div class="sheet-date">${todayStr}</div>
       </div>
       <div class="sheet-company">
+        ${logoHTML}
         <div class="name">${bizName}</div>
         ${bizTel ? `<div>TEL: ${bizTel}</div>` : ''}
         ${bizLicense ? `<div>${bizLicense}</div>` : ''}
