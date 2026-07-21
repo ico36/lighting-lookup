@@ -9,6 +9,7 @@
 //   { restoreImport: {...} }          ... ローカル保存したJSONファイルの内容で
 //                                        customerName・memo・cartItems・estimateMetaを一括復元
 //                                        （ステータスは変更しない）
+//   { customerName }                  ... 案件名（案件一覧・案件詳細の表示名）を変更
 //
 // 発注ボタンなど承認済み以降でしか出せない操作は、フロント側で
 // case.status === '承認済み' を見て判定する。
@@ -23,6 +24,7 @@ import {
   removeCartItem,
   updateEstimateMeta,
   restoreCaseFromImport,
+  updateCaseName,
   listSearchesForCase,
   listStatusLogs,
 } from '../../lib/cases';
@@ -48,7 +50,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { status, cartAdd, cartUpdate, cartRemove, estimateMeta, restoreImport } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartRemove, estimateMeta, restoreImport, customerName } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -91,6 +93,11 @@ export default async function handler(req, res) {
 
       if (restoreImport) {
         const updated = await restoreCaseFromImport(id, restoreImport);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (customerName !== undefined) {
+        const updated = await updateCaseName(id, customerName);
         return res.status(200).json({ case: updated });
       }
 

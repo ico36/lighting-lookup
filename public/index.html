@@ -1624,6 +1624,13 @@ function renderCaseDetail(c, searches) {
   const cartSubtotal = cartItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
 
   document.getElementById('case-detail-body').innerHTML = `
+    <div class="input-card">
+      <div class="section-label">案件名</div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="case-name-input" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;flex:1;" />
+        <button class="btn-primary" onclick="saveCaseName('${c.id}')">保存</button>
+      </div>
+    </div>
     <div class="result-card">
       <div class="result-body">
         <div class="field-row">
@@ -1652,6 +1659,40 @@ function renderCaseDetail(c, searches) {
     <div class="section-label" style="margin-top:16px;">検索履歴</div>
     ${searchesHTML}
   `;
+
+  // 属性エスケープを気にせず安全に反映するため、値はプロパティ代入で設定する
+  document.getElementById('case-name-input').value = c.customerName || '';
+}
+
+async function saveCaseName(caseId) {
+  const input = document.getElementById('case-name-input');
+  const newName = input.value.trim();
+
+  try {
+    const response = await fetch(`/api/cases/${caseId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({ customerName: newName })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || '案件名の保存に失敗しました');
+    }
+
+    currentCaseDetailData = data.case;
+    document.getElementById('case-detail-title').textContent = data.case.customerName || '（無題の案件）';
+    if (cartCase && cartCase.id === caseId) cartCase = data.case;
+  } catch (err) {
+    alert(err.message || '通信エラーが発生しました');
+  }
 }
 
 async function changeCaseStatus(newStatus) {
