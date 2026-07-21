@@ -1590,23 +1590,21 @@ function renderCaseDetail(c, searches) {
       `).join('')
     : `<div style="color:var(--text2);font-size:13px;">まだ検索履歴がありません</div>`;
 
-  let actionsHTML = '';
-  if (c.status === '下書き') {
-    actionsHTML = `
-      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('承認待ち')">承認待ちにする</button>
-      <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
-    `;
-  } else if (c.status === '承認待ち') {
-    actionsHTML = `
-      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('承認済み')">承認済みにする</button>
-      <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
-    `;
-  } else if (c.status === '承認済み') {
-    actionsHTML = `
-      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('完了')">完了にする</button>
-      <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
-    `;
-  }
+  // ステータスは任意の組み合わせで自由に遷移できる（バックエンドは元々制限していない）
+  const ALL_STATUSES = ['下書き', '承認待ち', '承認済み', '完了', '失注・キャンセル'];
+  const statusOptionsHTML = ALL_STATUSES
+    .filter(s => s !== c.status)
+    .map(s => `<option value="${s}">${s}</option>`)
+    .join('');
+
+  const actionsHTML = `
+    <div style="display:flex;gap:8px;">
+      <select id="case-status-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:inherit;font-size:14px;">
+        ${statusOptionsHTML}
+      </select>
+      <button class="btn-primary" onclick="changeCaseStatus(document.getElementById('case-status-select').value)">変更</button>
+    </div>
+  `;
 
   const cartItems = c.cartItems || [];
   const cartSubtotal = cartItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
@@ -1621,14 +1619,18 @@ function renderCaseDetail(c, searches) {
         ${c.memo ? `<div style="font-size:13px;color:var(--text2);margin-top:8px;">${c.memo}</div>` : ''}
       </div>
     </div>
-    ${actionsHTML ? `<div class="input-card">${actionsHTML}</div>` : ''}
+    <div class="input-card">
+      <div class="section-label">ステータスを変更</div>
+      ${actionsHTML}
+    </div>
 
     <div class="input-card">
       <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
         <span>カート内容</span>
         <span class="field-val">${cartItems.length}点 / ${yen(cartSubtotal)}</span>
       </div>
-      <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>
+      <button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>
+      <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>
     </div>
 
     <div class="section-label" style="margin-top:16px;">検索履歴</div>
@@ -1862,6 +1864,17 @@ function setAsCartTarget(caseId) {
   localStorage.setItem('cart_case_id', caseId);
   refreshCartCase();
   alert('この案件をカートの対象に設定しました。');
+}
+
+// 案件詳細画面から、その案件のcartItems・estimateMetaで見積書フォームを開く
+// （見積書生成ロジックは cartCase / currentCartCaseId を参照するため、この案件を
+//  カートの対象にしてから最新データを取得して開く）
+async function openEstimateFromCaseDetail(caseId) {
+  currentCartCaseId = caseId;
+  localStorage.setItem('cart_case_id', caseId);
+  await refreshCartCase();
+  closeCaseDetail();
+  showEstimateForm();
 }
 
 async function refreshCartCase() {
@@ -2598,6 +2611,15 @@ function copyOrder() {
 function showEstimateForm() {
   renderEstimateCompanyDisplay();
   renderEstimateCartItems();
+
+  // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考を引き継ぐ
+  const meta = (cartCase && cartCase.estimateMeta) || {};
+  document.getElementById('client-name').value = meta.clientName || '';
+  document.getElementById('client-site').value = meta.clientSite || '';
+  document.getElementById('price-labor').value = meta.laborPrice || '';
+  document.getElementById('price-visit').value = meta.visitPrice || '';
+  document.getElementById('biz-note').value = meta.bizNote || '';
+
   updateEstimatePreview();
   document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').style.display = 'none';
@@ -2730,6 +2752,29 @@ ${visitPrice > 0 ? '出張費：' + yen(visitPrice) + '\n' : ''}
 ━━━━━━━━━━━━━━
 ${bizName}${bizTel ? ' / TEL: ' + bizTel : ''}
 `.trim();
+
+  // お客様名・工事場所・施工費・出張費・備考を案件に保存し、次回開いたときも引き継ぐ
+  saveEstimateMeta({ clientName, clientSite, laborPrice, visitPrice, bizNote });
+}
+
+async function saveEstimateMeta(meta) {
+  if (!currentCartCaseId) return;
+  try {
+    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({ estimateMeta: meta })
+    });
+    if (response.ok) {
+      const data = await response.json();
+      cartCase = data.case;
+    }
+  } catch (err) {
+    // 見積書自体は生成済みのため、保存失敗時は静かに無視する
+  }
 }
 
 function copyEstimateText() {

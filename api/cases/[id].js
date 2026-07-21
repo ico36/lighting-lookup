@@ -1,10 +1,11 @@
 // api/cases/[id].js
 // GET   /api/cases/{id}  ... 案件詳細(検索履歴・ステータス履歴・カート内容込み)を取得
 // PATCH /api/cases/{id}  ... 以下のいずれかを指定して更新する(1回のリクエストにつき1種類)
-//   { status }                       ... ステータスを変更(承認済み / 完了 / 失注・キャンセル 等)
+//   { status }                       ... ステータスを変更（任意のステータス間で自由に遷移可能）
 //   { cartAdd: {...} }                ... カートに器具を1点追加
 //   { cartUpdate: { itemId, ... } }   ... カート内アイテムの単価・数量を更新
 //   { cartRemove: { itemId } }        ... カートからアイテムを削除
+//   { estimateMeta: {...} }           ... 見積書の付随情報（お客様名・工事場所・施工費・出張費・備考）を更新
 //
 // 発注ボタンなど承認済み以降でしか出せない操作は、フロント側で
 // case.status === '承認済み' を見て判定する。
@@ -17,6 +18,7 @@ import {
   addCartItem,
   updateCartItem,
   removeCartItem,
+  updateEstimateMeta,
   listSearchesForCase,
   listStatusLogs,
 } from '../../lib/cases';
@@ -42,7 +44,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { status, cartAdd, cartUpdate, cartRemove } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartRemove, estimateMeta } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -75,6 +77,11 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'itemIdが指定されていません' });
         }
         const updated = await removeCartItem(id, cartRemove.itemId);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (estimateMeta) {
+        const updated = await updateEstimateMeta(id, estimateMeta);
         return res.status(200).json({ case: updated });
       }
 
