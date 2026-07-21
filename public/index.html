@@ -566,9 +566,18 @@
   .sheet-actions button { flex: 1; }
 
   @media print {
-    header, .input-card, .sheet-actions, footer { display: none !important; }
+    /* 見積書(#estimate-sheet)以外はすべて非表示にする。検索結果・商品詳細・
+       案件一覧などのモーダルが開いていても印刷対象に含めないための対策。 */
+    body * { visibility: hidden; }
+    #estimate-sheet, #estimate-sheet * { visibility: visible; }
+    #estimate-sheet {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      box-shadow: none;
+    }
     body { background: white; }
-    #estimate-sheet { box-shadow: none; }
   }
 
   .detail-link-btn {
@@ -920,8 +929,10 @@
       <div class="modal-title">案件一覧</div>
       <button class="modal-close" onclick="closeCasesModal()">✕</button>
     </div>
-    <div style="margin-bottom:14px;">
-      <button class="btn-secondary" style="width:100%;" onclick="openNewCaseForm()">＋ 新規案件</button>
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button class="btn-secondary" style="flex:1;" onclick="openNewCaseForm()">＋ 新規案件</button>
+      <button class="btn-secondary" style="flex:1;" onclick="document.getElementById('import-file-input').click()">📂 ファイルから読み込む</button>
+      <input type="file" id="import-file-input" accept="application/json" style="display:none;" onchange="handleImportFile(this)" />
     </div>
     <div id="new-case-form" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
       <input type="text" id="new-case-customer" class="stacked-input" placeholder="お客様名（例：山田様）" />
@@ -1425,6 +1436,7 @@ function renderEstimateCompanyDisplay() {
 
 let casesCache = [];
 let currentCaseDetailId = null;
+let currentCaseDetailData = null;
 let openCasesForAttach = [];
 
 function caseStatusTagClass(status) {
@@ -1576,6 +1588,7 @@ function backToCasesList() {
 }
 
 function renderCaseDetail(c, searches) {
+  currentCaseDetailData = c;
   document.getElementById('case-detail-title').textContent = c.customerName || '（無題の案件）';
 
   const searchesHTML = searches.length
@@ -1631,6 +1644,7 @@ function renderCaseDetail(c, searches) {
       </div>
       <button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>
       <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>
+      <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="exportCaseToFile('${c.id}')">💾 ファイルに保存</button>
     </div>
 
     <div class="section-label" style="margin-top:16px;">検索履歴</div>
@@ -1875,6 +1889,162 @@ async function openEstimateFromCaseDetail(caseId) {
   await refreshCartCase();
   closeCaseDetail();
   showEstimateForm();
+}
+
+// ===== 見積もりのローカル保存・再編集（JSONファイル） =====
+
+// 案件のcartItems・お客様情報・自社情報・ステータス等をJSON化してダウンロードする
+function exportCaseToFile(caseId) {
+  const c = currentCaseDetailData;
+  if (!c || c.id !== caseId) return;
+
+  const payload = {
+    caseId: c.id,
+    customerName: c.customerName || '',
+    memo: c.memo || '',
+    status: c.status,
+    cartItems: (c.cartItems || []).map(item => ({
+      name: item.name,
+      modelNumber: item.modelNumber,
+      manufacturer: item.manufacturer,
+      unitPrice: item.unitPrice,
+      quantity: item.quantity
+      // rawDetail（検索結果の仕様・価格情報）は見積書に不要なため保存しない
+    })),
+    estimateMeta: c.estimateMeta || {},
+    companyInfo: companyInfo || null,
+    exportedAt: new Date().toISOString()
+  };
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `estimate_${c.id}_${dateStr}.json`;
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ローカルのJSONファイルを選択して、案件として復元する
+async function handleImportFile(input) {
+  const file = (input.files || [])[0];
+  input.value = '';
+  if (!file) return;
+
+  let data;
+  try {
+    const text = await file.text();
+    data = JSON.parse(text);
+  } catch (err) {
+    alert('ファイルの読み込みに失敗しました。正しいJSON形式のファイルを選択してください。');
+    return;
+  }
+
+  if (!Array.isArray(data.cartItems)) {
+    alert('見積もりファイルの形式が正しくありません。');
+    return;
+  }
+
+  // 元の案件がまだ存在するか確認し、存在すれば上書きか新規かをその場で選んでもらう
+  let matchedCase = null;
+  if (data.caseId) {
+    try {
+      const response = await fetch('/api/cases', {
+        headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+      });
+      if (response.ok) {
+        const listData = await response.json();
+        matchedCase = (listData.cases || []).find(cc => cc.id === data.caseId) || null;
+      }
+    } catch (err) {
+      matchedCase = null;
+    }
+  }
+
+  let overwrite = false;
+  if (matchedCase) {
+    overwrite = confirm(
+      `このファイルはもともと案件「${matchedCase.customerName || '（無題の案件）'}」のものです。\n\n` +
+      `OK： この案件を上書きして読み込む\n` +
+      `キャンセル： 新規案件として読み込む`
+    );
+  }
+
+  const restorePayload = {
+    customerName: data.customerName || '',
+    memo: data.memo || '',
+    cartItems: data.cartItems,
+    estimateMeta: data.estimateMeta || {}
+  };
+
+  try {
+    let targetCaseId;
+
+    if (overwrite && matchedCase) {
+      targetCaseId = matchedCase.id;
+      const response = await fetch(`/api/cases/${targetCaseId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({ restoreImport: restorePayload })
+      });
+      const resData = await response.json();
+      if (!response.ok) {
+        if (response.status === 401) {
+          showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+          return;
+        }
+        throw new Error(resData.error || '読み込みに失敗しました');
+      }
+    } else {
+      const createRes = await fetch('/api/cases', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({ customerName: data.customerName || '', memo: data.memo || '' })
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) {
+        if (createRes.status === 401) {
+          showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+          return;
+        }
+        throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
+      }
+      targetCaseId = createData.case.id;
+
+      const restoreRes = await fetch(`/api/cases/${targetCaseId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({ restoreImport: restorePayload })
+      });
+      const restoreData = await restoreRes.json();
+      if (!restoreRes.ok) {
+        throw new Error(restoreData.error || '読み込みに失敗しました');
+      }
+    }
+
+    // 読み込んだ案件をカートの対象にし、続けて検索→カート追加が同じ案件に積まれるようにする
+    currentCartCaseId = targetCaseId;
+    localStorage.setItem('cart_case_id', targetCaseId);
+
+    closeCasesModal();
+    await openCaseDetail(targetCaseId);
+  } catch (err) {
+    alert(err.message || '通信エラーが発生しました');
+  }
 }
 
 async function refreshCartCase() {

@@ -6,6 +6,9 @@
 //   { cartUpdate: { itemId, ... } }   ... カート内アイテムの単価・数量を更新
 //   { cartRemove: { itemId } }        ... カートからアイテムを削除
 //   { estimateMeta: {...} }           ... 見積書の付随情報（お客様名・工事場所・施工費・出張費・備考）を更新
+//   { restoreImport: {...} }          ... ローカル保存したJSONファイルの内容で
+//                                        customerName・memo・cartItems・estimateMetaを一括復元
+//                                        （ステータスは変更しない）
 //
 // 発注ボタンなど承認済み以降でしか出せない操作は、フロント側で
 // case.status === '承認済み' を見て判定する。
@@ -19,6 +22,7 @@ import {
   updateCartItem,
   removeCartItem,
   updateEstimateMeta,
+  restoreCaseFromImport,
   listSearchesForCase,
   listStatusLogs,
 } from '../../lib/cases';
@@ -44,7 +48,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { status, cartAdd, cartUpdate, cartRemove, estimateMeta } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartRemove, estimateMeta, restoreImport } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -82,6 +86,11 @@ export default async function handler(req, res) {
 
       if (estimateMeta) {
         const updated = await updateEstimateMeta(id, estimateMeta);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (restoreImport) {
+        const updated = await restoreCaseFromImport(id, restoreImport);
         return res.status(200).json({ case: updated });
       }
 
