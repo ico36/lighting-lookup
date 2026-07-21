@@ -929,11 +929,12 @@
       <div class="modal-title">案件一覧</div>
       <button class="modal-close" onclick="closeCasesModal()">✕</button>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:14px;">
+    <div style="display:flex;gap:8px;">
       <button class="btn-secondary" style="flex:1;" onclick="openNewCaseForm()">＋ 新規案件</button>
-      <button class="btn-secondary" style="flex:1;" onclick="document.getElementById('import-file-input').click()">📂 ファイルから読み込む</button>
+      <button class="btn-secondary" style="flex:1;" onclick="document.getElementById('import-file-input').click()">📂 保存した見積もりを開く</button>
       <input type="file" id="import-file-input" accept="application/json" style="display:none;" onchange="handleImportFile(this)" />
     </div>
+    <div style="font-size:12px;color:var(--text2);margin-top:6px;margin-bottom:14px;">「見積もりを保存」で保存したファイルを選んでください</div>
     <div id="new-case-form" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
       <input type="text" id="new-case-customer" class="stacked-input" placeholder="お客様名（例：山田様）" />
       <input type="text" id="new-case-memo" class="stacked-input" placeholder="メモ（任意）" style="margin-bottom:0;" />
@@ -1644,7 +1645,8 @@ function renderCaseDetail(c, searches) {
       </div>
       <button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>
       <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>
-      <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="exportCaseToFile('${c.id}')">💾 ファイルに保存</button>
+      <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="exportCaseToFile('${c.id}')">💾 見積もりを保存</button>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px;">保存したファイルは、あとでこの画面から呼び出して編集できます</div>
     </div>
 
     <div class="section-label" style="margin-top:16px;">検索履歴</div>
@@ -1917,7 +1919,10 @@ function exportCaseToFile(caseId) {
   };
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = `estimate_${c.id}_${dateStr}.json`;
+  const rawName = c.customerName || c.estimateMeta?.clientName || '案件';
+  // ファイル名に使えない記号を除いて安全な名前にする
+  const safeName = rawName.replace(/[\\/:*?"<>|]/g, '').trim() || '案件';
+  const filename = `見積もり_${safeName}_${dateStr}.json`;
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1941,12 +1946,12 @@ async function handleImportFile(input) {
     const text = await file.text();
     data = JSON.parse(text);
   } catch (err) {
-    alert('ファイルの読み込みに失敗しました。正しいJSON形式のファイルを選択してください。');
+    alert('このファイルは見積もりデータではないようです。「見積もりを保存」で保存したファイルを選んでください。');
     return;
   }
 
   if (!Array.isArray(data.cartItems)) {
-    alert('見積もりファイルの形式が正しくありません。');
+    alert('このファイルは見積もりデータではないようです。「見積もりを保存」で保存したファイルを選んでください。');
     return;
   }
 
