@@ -1,9 +1,11 @@
 // api/cases/index.js
 // GET  /api/cases  ... ログイン中アカウントの案件一覧(非アーカイブ)を取得
 // POST /api/cases  ... 案件を新規作成
+//   body.draft === true の場合、customerName未設定の下書き案件を作成する
+//   （カート機能で「対象の案件がまだ無い」ときの自動作成用）
 
 import { requireAuth } from '../_auth';
-import { createCase, listVisibleCases } from '../../lib/cases';
+import { createCase, createDraftCase, listVisibleCases } from '../../lib/cases';
 
 export default async function handler(req, res) {
   const email = requireAuth(req, res);
@@ -16,7 +18,9 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const record = await createCase(email, req.body || {});
+      const record = req.body?.draft
+        ? await createDraftCase(email)
+        : await createCase(email, req.body || {});
       return res.status(201).json({ case: record });
     } catch (err) {
       if (err.code === 'CASE_LIMIT_REACHED') {

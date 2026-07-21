@@ -267,6 +267,7 @@
   .tag-green { background: rgba(34,197,94,0.15); color: var(--success); }
   .tag-yellow { background: rgba(245,158,11,0.15); color: var(--warning); }
   .tag-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
+  .tag-gray { background: rgba(139,144,184,0.15); color: var(--text2); }
 
   .order-block {
     background: var(--bg);
@@ -347,11 +348,6 @@
     padding: 0 16px;
   }
 
-  .estimate-trigger {
-    display: none;
-    text-align: center;
-    margin: 20px 0;
-  }
   .btn-secondary {
     background: var(--surface2);
     color: var(--text);
@@ -570,7 +566,7 @@
   .sheet-actions button { flex: 1; }
 
   @media print {
-    header, .input-card, .estimate-trigger, .sheet-actions, footer { display: none !important; }
+    header, .input-card, .sheet-actions, footer { display: none !important; }
     body { background: white; }
     #estimate-sheet { box-shadow: none; }
   }
@@ -741,6 +737,7 @@
   </div>
   <!-- ログイン後のみ表示するボタン群（初期状態は非表示） -->
   <div style="display: flex; align-items: center; gap: 8px;">
+    <button id="cart-btn" onclick="openCartModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">🛒 カート</button>
     <button id="cases-btn" onclick="openCasesModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">📋 案件</button>
     <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">設定</button>
     <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
@@ -819,10 +816,6 @@
     <div id="result-content"></div>
   </div>
 
-  <div class="estimate-trigger" id="estimate-trigger">
-    <button class="btn-secondary" onclick="showEstimateForm()">📄 この内容で見積書を作成</button>
-  </div>
-
   <div id="estimate-form-area" style="display:none;">
     <div class="input-card">
       <div class="section-label">お客様情報</div>
@@ -842,11 +835,19 @@
     </div>
 
     <div class="input-card">
-      <div class="section-label">金額入力</div>
-      <div class="estimate-form-row">
-        <span class="field-key">材料費</span>
-        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-material" placeholder="0" oninput="updateEstimatePreview()" /></div>
+      <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>器具明細（カートの内容）</span>
+        <button type="button" class="detail-link-btn" style="margin:0;" onclick="closeEstimateForm(); openCartModal();">カートを編集 →</button>
       </div>
+      <div id="estimate-cart-items"></div>
+      <div class="estimate-form-row" style="margin-top:4px;">
+        <span class="field-key">材料費小計</span>
+        <span class="field-val" id="estimate-material-subtotal" style="text-align:right;flex:1;">¥0</span>
+      </div>
+    </div>
+
+    <div class="input-card">
+      <div class="section-label">金額入力</div>
       <div class="estimate-form-row">
         <span class="field-key">施工費</span>
         <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
@@ -952,6 +953,24 @@
     </div>
     <button type="button" class="detail-link-btn" style="margin:0 0 12px;" onclick="backToCasesList()">← 案件一覧に戻る</button>
     <div id="case-detail-body"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="cart-overlay" onclick="if(event.target===this) closeCartModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title">カート</div>
+      <button class="modal-close" onclick="closeCartModal()">✕</button>
+    </div>
+    <div id="cart-target-info" style="font-size:13px;color:var(--text2);margin-bottom:14px;"></div>
+    <div id="cart-items-body"></div>
+    <div class="total-line" style="margin-top:16px;">
+      <span>小計</span>
+      <span class="total-amount" id="cart-subtotal-amount">¥0</span>
+    </div>
+    <div style="margin-top:16px;">
+      <button class="btn-primary" style="width:100%;" onclick="openEstimateFromCart()">📄 この内容で見積書を作成</button>
+    </div>
   </div>
 </div>
 
@@ -1095,10 +1114,14 @@ function showLoginGate(message) {
     document.getElementById('logout-btn').style.display = 'none'; // ボタンを隠す
     document.getElementById('settings-btn').style.display = 'none';
     document.getElementById('cases-btn').style.display = 'none';
+    document.getElementById('cart-btn').style.display = 'none';
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
     companyInfo = null;
     pendingLogo = { setup: null, settings: null };
     logoRemoved = { setup: false, settings: false };
+    currentCartCaseId = null;
+    localStorage.removeItem('cart_case_id');
+    cartCase = null;
   }
 }
 
@@ -1135,6 +1158,8 @@ async function checkCompanyAndRoute() {
     document.getElementById('logout-btn').style.display = 'block';
     document.getElementById('settings-btn').style.display = 'block';
     document.getElementById('cases-btn').style.display = 'block';
+    document.getElementById('cart-btn').style.display = 'block';
+    refreshCartCase();
 
     if (!companyInfo) {
       showCompanySetupGate();
@@ -1406,6 +1431,7 @@ function caseStatusTagClass(status) {
   if (status === '承認済み') return 'tag-green';
   if (status === '完了') return 'tag-blue';
   if (status === '失注・キャンセル') return 'tag-yellow';
+  if (status === '下書き') return 'tag-gray';
   return 'tag-blue'; // 承認待ち
 }
 
@@ -1565,7 +1591,12 @@ function renderCaseDetail(c, searches) {
     : `<div style="color:var(--text2);font-size:13px;">まだ検索履歴がありません</div>`;
 
   let actionsHTML = '';
-  if (c.status === '承認待ち') {
+  if (c.status === '下書き') {
+    actionsHTML = `
+      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('承認待ち')">承認待ちにする</button>
+      <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
+    `;
+  } else if (c.status === '承認待ち') {
     actionsHTML = `
       <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('承認済み')">承認済みにする</button>
       <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
@@ -1576,6 +1607,9 @@ function renderCaseDetail(c, searches) {
       <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
     `;
   }
+
+  const cartItems = c.cartItems || [];
+  const cartSubtotal = cartItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
 
   document.getElementById('case-detail-body').innerHTML = `
     <div class="result-card">
@@ -1588,6 +1622,15 @@ function renderCaseDetail(c, searches) {
       </div>
     </div>
     ${actionsHTML ? `<div class="input-card">${actionsHTML}</div>` : ''}
+
+    <div class="input-card">
+      <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>カート内容</span>
+        <span class="field-val">${cartItems.length}点 / ${yen(cartSubtotal)}</span>
+      </div>
+      <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>
+    </div>
+
     <div class="section-label" style="margin-top:16px;">検索履歴</div>
     ${searchesHTML}
   `;
@@ -1780,6 +1823,276 @@ async function attachCurrentSearchToCase() {
     msgEl.textContent = err.message || '通信エラーが発生しました';
     msgEl.style.color = 'var(--error)';
   }
+}
+
+// ===== カート機能（検索候補→カート→見積書） =====
+
+let currentCartCaseId = localStorage.getItem('cart_case_id') || null;
+let cartCase = null;
+
+// 「対象の案件」がまだ無ければ下書き案件を自動作成し、以後はそれをカートの対象にする
+async function ensureCartCase() {
+  if (currentCartCaseId) return currentCartCaseId;
+
+  const response = await fetch('/api/cases', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + getSessionToken()
+    },
+    body: JSON.stringify({ draft: true })
+  });
+  const data = await response.json();
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+    }
+    throw new Error(data.message || data.error || '案件の作成に失敗しました');
+  }
+
+  currentCartCaseId = data.case.id;
+  localStorage.setItem('cart_case_id', currentCartCaseId);
+  return currentCartCaseId;
+}
+
+// 案件一覧・詳細から、既存の案件をカートの対象に切り替える
+function setAsCartTarget(caseId) {
+  currentCartCaseId = caseId;
+  localStorage.setItem('cart_case_id', caseId);
+  refreshCartCase();
+  alert('この案件をカートの対象に設定しました。');
+}
+
+async function refreshCartCase() {
+  if (!currentCartCaseId) {
+    cartCase = null;
+    renderCartItems();
+    updateCartBadge();
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      // 案件が見つからない等の場合はカート対象をリセットする
+      currentCartCaseId = null;
+      localStorage.removeItem('cart_case_id');
+      cartCase = null;
+      renderCartItems();
+      updateCartBadge();
+      return;
+    }
+
+    cartCase = data.case;
+  } catch (err) {
+    cartCase = null;
+  }
+  renderCartItems();
+  updateCartBadge();
+}
+
+function updateCartBadge() {
+  const btn = document.getElementById('cart-btn');
+  if (!btn) return;
+  const count = (cartCase && cartCase.cartItems) ? cartCase.cartItems.length : 0;
+  btn.textContent = count > 0 ? `🛒 カート (${count})` : '🛒 カート';
+}
+
+// 検索結果の候補（カード or 詳細モーダル）から、対象の案件のカートに1点追加する
+async function addCandidateToCart(index) {
+  const candidate = (lastResult && lastResult._candidates || [])[index];
+  if (!candidate) return;
+
+  const cacheKey = candidate.model + '|' + candidate.manufacturer;
+  const rawDetail = detailCache[cacheKey] || null;
+
+  try {
+    const caseId = await ensureCartCase();
+    const response = await fetch(`/api/cases/${caseId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({
+        cartAdd: {
+          name: candidate.name || '',
+          modelNumber: candidate.model || '',
+          manufacturer: candidate.manufacturer || '',
+          rawDetail
+        }
+      })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || 'カートへの追加に失敗しました');
+    }
+
+    cartCase = data.case;
+    updateCartBadge();
+  } catch (err) {
+    alert(err.message || '通信エラーが発生しました');
+  }
+}
+
+async function openCartModal() {
+  document.getElementById('cart-overlay').classList.add('open');
+  await refreshCartCase();
+}
+
+function closeCartModal() {
+  document.getElementById('cart-overlay').classList.remove('open');
+}
+
+function renderCartItems() {
+  const targetInfoEl = document.getElementById('cart-target-info');
+  const bodyEl = document.getElementById('cart-items-body');
+  const subtotalEl = document.getElementById('cart-subtotal-amount');
+  if (!bodyEl) return;
+
+  const items = (cartCase && cartCase.cartItems) || [];
+
+  if (targetInfoEl) {
+    targetInfoEl.textContent = cartCase
+      ? `対象の案件：${cartCase.customerName || '（無題の案件）'}（${cartCase.status}）`
+      : '対象の案件はまだありません（候補をカートに追加すると自動作成されます）';
+  }
+
+  bodyEl.innerHTML = items.length
+    ? items.map(item => `
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div style="flex:1;">
+              <div style="font-weight:600;">${item.manufacturer || ''} ${item.name || ''}</div>
+              <div style="font-size:12px;color:var(--text2);margin-top:2px;">${item.modelNumber || ''}</div>
+            </div>
+            <button class="modal-close" style="width:24px;height:24px;font-size:13px;" onclick="removeCartItemUI('${item.itemId}')">✕</button>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+            <div class="yen-prefix" style="flex:1;"><span>¥</span><input type="number" class="num-input" value="${item.unitPrice}" min="0" onchange="updateCartItemUI('${item.itemId}', 'unitPrice', this.value)" /></div>
+            <div style="width:70px;"><input type="number" class="num-input" value="${item.quantity}" min="1" onchange="updateCartItemUI('${item.itemId}', 'quantity', this.value)" /></div>
+            <span style="font-size:12px;color:var(--text2);">台</span>
+          </div>
+          <div style="text-align:right;font-size:13px;color:var(--text2);margin-top:6px;">小計: ${yen(item.unitPrice * item.quantity)}</div>
+        </div>
+      `).join('')
+    : `<div style="color:var(--text2);font-size:14px;text-align:center;padding:20px 0;">カートに器具がまだありません</div>`;
+
+  const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  if (subtotalEl) subtotalEl.textContent = yen(subtotal);
+}
+
+async function updateCartItemUI(itemId, field, value) {
+  if (!currentCartCaseId) return;
+  const payload = { itemId };
+  payload[field] = Number(value);
+
+  try {
+    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({ cartUpdate: payload })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || '更新に失敗しました');
+    }
+
+    cartCase = data.case;
+    renderCartItems();
+    updateCartBadge();
+  } catch (err) {
+    alert(err.message || '通信エラーが発生しました');
+  }
+}
+
+async function removeCartItemUI(itemId) {
+  if (!currentCartCaseId) return;
+
+  try {
+    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({ cartRemove: { itemId } })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || '削除に失敗しました');
+    }
+
+    cartCase = data.case;
+    renderCartItems();
+    updateCartBadge();
+  } catch (err) {
+    alert(err.message || '通信エラーが発生しました');
+  }
+}
+
+// カートの中身をもとに見積書フォームを開く
+async function openEstimateFromCart() {
+  await refreshCartCase();
+  if (!cartCase || !cartCase.cartItems || cartCase.cartItems.length === 0) {
+    alert('カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
+    return;
+  }
+  closeCartModal();
+  showEstimateForm();
+}
+
+function closeEstimateForm() {
+  document.getElementById('estimate-form-area').style.display = 'none';
+}
+
+function renderEstimateCartItems() {
+  const container = document.getElementById('estimate-cart-items');
+  const subtotalEl = document.getElementById('estimate-material-subtotal');
+  if (!container) return;
+
+  const items = (cartCase && cartCase.cartItems) || [];
+
+  container.innerHTML = items.length
+    ? items.map(item => `
+        <div class="item-line">
+          <div>
+            <div class="item-name">${item.manufacturer || ''} ${item.name || ''}${item.modelNumber ? '（' + item.modelNumber + '）' : ''}</div>
+          </div>
+          <div class="item-price">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</div>
+        </div>
+      `).join('')
+    : `<div style="color:var(--text2);font-size:13px;">カートに器具が追加されていません。</div>`;
+
+  const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  if (subtotalEl) subtotalEl.textContent = yen(subtotal);
 }
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -2029,8 +2342,7 @@ function renderResult(r) {
     : '後継器が見つかりませんでした';
 
   const candidatesHTML = candidates.map((s, i) => `
-    <label style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;">
-      <input type="radio" name="successor-pick" value="${i}" ${i === 0 ? 'checked' : ''} onchange="onSuccessorPick(${i})" style="margin-top:4px;accent-color:var(--accent);" />
+    <div style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
       <div style="flex:1;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
           <span class="field-val mono">${s.model}</span>
@@ -2039,9 +2351,12 @@ function renderResult(r) {
         </div>
         <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${s.name || ''}</div>
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${s.note}</div>` : ''}
-        <button type="button" class="detail-link-btn" onclick="event.preventDefault(); event.stopPropagation(); openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
+        <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap;">
+          <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
+          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(${i})">🛒 カートに追加</button>
+        </div>
       </div>
-    </label>
+    </div>
   `).join('');
 
   const orderText = r.order_text || '発注情報を生成できませんでした';
@@ -2129,24 +2444,19 @@ function renderResult(r) {
     </div>
   `;
 
-  selectedSuccessorIndex = candidates.length > 0 ? 0 : null;
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'none';
-  document.getElementById('estimate-trigger').style.display = 'block';
   loadOpenCasesForAttach();
 }
 
-let selectedSuccessorIndex = null;
-function onSuccessorPick(i) {
-  selectedSuccessorIndex = i;
-}
-
 const detailCache = {};
+let currentDetailIndex = null;
 
 async function openDetailModal(index) {
   const s = (lastResult._candidates || [])[index];
   if (!s) return;
 
+  currentDetailIndex = index;
   const overlay = document.getElementById('detail-modal-overlay');
   const titleEl = document.getElementById('detail-modal-title');
   const bodyEl = document.getElementById('detail-modal-body');
@@ -2268,6 +2578,10 @@ function renderDetailModal(d, fallback) {
     <div class="confidence-note">
       ※ 価格・仕様はAIによるWeb検索結果に基づく目安です。実際の価格・仕様は販売店・メーカー公式情報で最終確認してください。${d.price_estimate?.source_note ? ' ' + d.price_estimate.source_note : ''}
     </div>
+
+    <div style="margin-top:16px;">
+      <button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(currentDetailIndex)">🛒 カートに追加</button>
+    </div>
   `;
 }
 
@@ -2283,6 +2597,8 @@ function copyOrder() {
 
 function showEstimateForm() {
   renderEstimateCompanyDisplay();
+  renderEstimateCartItems();
+  updateEstimatePreview();
   document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2292,11 +2608,16 @@ function yen(n) {
   return '¥' + Number(n || 0).toLocaleString('ja-JP');
 }
 
+function cartMaterialSubtotal() {
+  const items = (cartCase && cartCase.cartItems) || [];
+  return items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+}
+
 function updateEstimatePreview() {
-  const materialPrice = Number(document.getElementById('price-material').value || 0);
+  const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
-  const subtotal = materialPrice + laborPrice + visitPrice;
+  const subtotal = materialSubtotal + laborPrice + visitPrice;
   const tax = Math.round(subtotal * 0.1);
   const total = subtotal + tax;
 
@@ -2305,11 +2626,11 @@ function updateEstimatePreview() {
 }
 
 function generateEstimateSheet() {
-  const r = lastResult;
-  if (!r) return;
-
-  const candidates = r._candidates || [];
-  const picked = (selectedSuccessorIndex !== null && candidates[selectedSuccessorIndex]) ? candidates[selectedSuccessorIndex] : null;
+  const items = (cartCase && cartCase.cartItems) || [];
+  if (items.length === 0) {
+    alert('カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
+    return;
+  }
 
   const clientName = document.getElementById('client-name').value.trim() || 'お客様';
   const clientSite = document.getElementById('client-site').value.trim();
@@ -2318,20 +2639,27 @@ function generateEstimateSheet() {
   const bizLicense = companyInfo?.license || '';
   const bizNote = document.getElementById('biz-note').value.trim();
 
-  const materialPrice = Number(document.getElementById('price-material').value || 0);
+  const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
-  const subtotal = materialPrice + laborPrice + visitPrice;
+  const subtotal = materialSubtotal + laborPrice + visitPrice;
   const tax = Math.round(subtotal * 0.1);
   const total = subtotal + tax;
-
-  const itemName = picked ? `${picked.name}（${picked.model}）` : (r.product_name || r.original_model || '照明器具');
-  const itemNote = picked ? `${picked.manufacturer}${picked.note ? ' / ' + picked.note : ''}` : (r.manufacturer || '');
 
   const todayStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
   const logoHTML = companyInfo?.logoUrl
     ? `<img src="${companyInfo.logoUrl}" alt="ロゴ" style="max-height:40px;max-width:180px;object-fit:contain;margin-bottom:6px;" />`
     : '';
+
+  // 見積書には器具名・型番・メーカー・金額のみを出力する（rawDetailなどの検索詳細情報は含めない）
+  const itemRowsHTML = items.map(item => `
+    <tr>
+      <td>
+        <div class="sheet-item-name">${item.manufacturer || ''} ${item.name || ''}${item.modelNumber ? '（' + item.modelNumber + '）' : ''}</div>
+      </td>
+      <td class="num-cell">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</td>
+    </tr>
+  `).join('');
 
   document.getElementById('estimate-sheet').innerHTML = `
     <div class="sheet-header">
@@ -2358,13 +2686,7 @@ function generateEstimateSheet() {
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td>
-            <div class="sheet-item-name">照明器具（材料費）</div>
-            <div class="sheet-item-note">${itemName}${itemNote ? ' — ' + itemNote : ''}</div>
-          </td>
-          <td class="num-cell">${yen(materialPrice)}</td>
-        </tr>
+        ${itemRowsHTML}
         <tr>
           <td><div class="sheet-item-name">施工費</div></td>
           <td class="num-cell">${yen(laborPrice)}</td>
@@ -2389,13 +2711,17 @@ function generateEstimateSheet() {
   document.getElementById('estimate-sheet-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+  const itemsText = items.map(item =>
+    `・${item.manufacturer || ''} ${item.name || ''}${item.modelNumber ? '（' + item.modelNumber + '）' : ''}：${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円`
+  ).join('\n');
+
   window._lastEstimateText = `
 御見積書（${todayStr}）
 ━━━━━━━━━━━━━━
 ${clientName} 様
 ${clientSite ? '工事場所：' + clientSite + '\n' : ''}
 【内容】
-照明器具：${itemName}${itemNote ? ' / ' + itemNote : ''} ${yen(materialPrice)}
+${itemsText}
 施工費：${yen(laborPrice)}
 ${visitPrice > 0 ? '出張費：' + yen(visitPrice) + '\n' : ''}
 小計：${yen(subtotal)}
