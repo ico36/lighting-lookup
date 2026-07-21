@@ -932,6 +932,15 @@
       </div>
     </div>
     <div id="cases-list-body"></div>
+
+    <div class="section-label" style="margin-top:24px;">過去の案件を検索（完了・失注案件）</div>
+    <div id="archive-search-campaign-banner" style="display:none;font-size:12px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6;"></div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+      <input type="date" id="archive-search-from" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
+      <input type="date" id="archive-search-to" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
+      <button class="btn-secondary" onclick="searchArchivedCasesUI()">検索</button>
+    </div>
+    <div id="archive-search-results"></div>
   </div>
 </div>
 
@@ -1404,6 +1413,7 @@ async function openCasesModal() {
   closeNewCaseForm();
   document.getElementById('cases-list-overlay').classList.add('open');
   await loadCasesList();
+  await searchArchivedCasesUI();
 }
 
 function closeCasesModal() {
@@ -1610,6 +1620,65 @@ async function changeCaseStatus(newStatus) {
     await openCaseDetail(currentCaseDetailId);
   } catch (err) {
     alert(err.message || '通信エラーが発生しました');
+  }
+}
+
+// ----- 過去の案件を検索（完了・失注案件、アーカイブ済み） -----
+
+async function searchArchivedCasesUI() {
+  const fromEl = document.getElementById('archive-search-from');
+  const toEl = document.getElementById('archive-search-to');
+  const bannerEl = document.getElementById('archive-search-campaign-banner');
+  const resultsEl = document.getElementById('archive-search-results');
+  if (!resultsEl) return;
+
+  resultsEl.innerHTML = `<div style="color:var(--text2);font-size:13px;">検索中...</div>`;
+
+  const params = new URLSearchParams();
+  if (fromEl.value) params.set('from', fromEl.value);
+  if (toEl.value) params.set('to', toEl.value);
+
+  try {
+    const response = await fetch(`/api/cases/archive?${params.toString()}`, {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        closeCasesModal();
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      if (response.status === 403) {
+        bannerEl.style.display = 'none';
+        resultsEl.innerHTML = `<div class="error-box">⚠️ ${data.message || 'この機能は利用できません'}</div>`;
+        return;
+      }
+      throw new Error(data.error || '検索に失敗しました');
+    }
+
+    if (data.campaign && data.campaign.active) {
+      bannerEl.textContent = '🎁 ' + data.campaign.message;
+      bannerEl.style.display = 'block';
+    } else {
+      bannerEl.style.display = 'none';
+    }
+
+    const cases = data.cases || [];
+    resultsEl.innerHTML = cases.length
+      ? cases.map(c => `
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="font-weight:600;">${c.customerName || '（無題の案件）'}</span>
+              <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px;">アーカイブ日: ${new Date(c.archivedAt).toLocaleDateString('ja-JP')}</div>
+          </div>
+        `).join('')
+      : `<div style="color:var(--text2);font-size:13px;">該当する案件はありませんでした</div>`;
+  } catch (err) {
+    resultsEl.innerHTML = `<div class="error-box">⚠️ ${err.message || '通信エラーが発生しました'}</div>`;
   }
 }
 
