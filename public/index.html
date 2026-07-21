@@ -741,6 +741,7 @@
   </div>
   <!-- ログイン後のみ表示するボタン群（初期状態は非表示） -->
   <div style="display: flex; align-items: center; gap: 8px;">
+    <button id="cases-btn" onclick="openCasesModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">📋 案件</button>
     <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">設定</button>
     <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
   </div>
@@ -912,6 +913,39 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="cases-list-overlay" onclick="if(event.target===this) closeCasesModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title">案件一覧</div>
+      <button class="modal-close" onclick="closeCasesModal()">✕</button>
+    </div>
+    <div style="margin-bottom:14px;">
+      <button class="btn-secondary" style="width:100%;" onclick="openNewCaseForm()">＋ 新規案件</button>
+    </div>
+    <div id="new-case-form" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+      <input type="text" id="new-case-customer" class="stacked-input" placeholder="お客様名（例：山田様）" />
+      <input type="text" id="new-case-memo" class="stacked-input" placeholder="メモ（任意）" style="margin-bottom:0;" />
+      <div id="new-case-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn-primary" style="flex:1;" onclick="submitNewCase()">作成</button>
+        <button class="btn-secondary" style="flex:1;" onclick="closeNewCaseForm()">キャンセル</button>
+      </div>
+    </div>
+    <div id="cases-list-body"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="case-detail-overlay" onclick="if(event.target===this) closeCaseDetail()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title" id="case-detail-title">案件詳細</div>
+      <button class="modal-close" onclick="closeCaseDetail()">✕</button>
+    </div>
+    <button type="button" class="detail-link-btn" style="margin:0 0 12px;" onclick="backToCasesList()">← 案件一覧に戻る</button>
+    <div id="case-detail-body"></div>
+  </div>
+</div>
+
 <footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
 <script>
@@ -1051,6 +1085,7 @@ function showLoginGate(message) {
     showLoginGate(''); // トークンを消してログイン画面に戻す
     document.getElementById('logout-btn').style.display = 'none'; // ボタンを隠す
     document.getElementById('settings-btn').style.display = 'none';
+    document.getElementById('cases-btn').style.display = 'none';
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
     companyInfo = null;
     pendingLogo = { setup: null, settings: null };
@@ -1090,6 +1125,7 @@ async function checkCompanyAndRoute() {
     companyInfo = data.company;
     document.getElementById('logout-btn').style.display = 'block';
     document.getElementById('settings-btn').style.display = 'block';
+    document.getElementById('cases-btn').style.display = 'block';
 
     if (!companyInfo) {
       showCompanySetupGate();
@@ -1349,6 +1385,332 @@ function renderEstimateCompanyDisplay() {
     ${companyInfo.tel ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">TEL: ${companyInfo.tel}</div>` : ''}
     ${companyInfo.license ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">${companyInfo.license}</div>` : ''}
   `;
+}
+
+// ===== 案件管理（案件の作成・一覧・ステータス変更・検索履歴の紐づけ） =====
+
+let casesCache = [];
+let currentCaseDetailId = null;
+let openCasesForAttach = [];
+
+function caseStatusTagClass(status) {
+  if (status === '承認済み') return 'tag-green';
+  if (status === '完了') return 'tag-blue';
+  if (status === '失注・キャンセル') return 'tag-yellow';
+  return 'tag-blue'; // 承認待ち
+}
+
+async function openCasesModal() {
+  closeNewCaseForm();
+  document.getElementById('cases-list-overlay').classList.add('open');
+  await loadCasesList();
+}
+
+function closeCasesModal() {
+  document.getElementById('cases-list-overlay').classList.remove('open');
+}
+
+function openNewCaseForm() {
+  document.getElementById('new-case-customer').value = '';
+  document.getElementById('new-case-memo').value = '';
+  document.getElementById('new-case-error').style.display = 'none';
+  document.getElementById('new-case-form').style.display = 'block';
+}
+
+function closeNewCaseForm() {
+  document.getElementById('new-case-form').style.display = 'none';
+}
+
+async function loadCasesList() {
+  const bodyEl = document.getElementById('cases-list-body');
+  bodyEl.innerHTML = `<div class="modal-loading"><div class="spinner" style="margin:0 auto 14px;"></div><div class="loading-text">読み込み中...</div></div>`;
+
+  try {
+    const response = await fetch('/api/cases', {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        closeCasesModal();
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || '案件一覧の取得に失敗しました');
+    }
+
+    casesCache = data.cases || [];
+    renderCasesList();
+  } catch (err) {
+    bodyEl.innerHTML = `<div class="error-box">⚠️ ${err.message || '通信エラーが発生しました'}</div>`;
+  }
+}
+
+function renderCasesList() {
+  const bodyEl = document.getElementById('cases-list-body');
+  if (casesCache.length === 0) {
+    bodyEl.innerHTML = `<div style="color:var(--text2);font-size:14px;text-align:center;padding:20px 0;">案件はまだありません</div>`;
+    return;
+  }
+
+  bodyEl.innerHTML = casesCache.map(c => `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
+      <div>
+        <div style="font-weight:600;">${c.customerName || '（無題の案件）'}</div>
+        <div style="font-size:12px;color:var(--text2);margin-top:2px;">${new Date(c.createdAt).toLocaleDateString('ja-JP')}</div>
+      </div>
+      <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
+    </div>
+  `).join('');
+}
+
+async function submitNewCase() {
+  const nameEl = document.getElementById('new-case-customer');
+  const memoEl = document.getElementById('new-case-memo');
+  const errorEl = document.getElementById('new-case-error');
+  const name = nameEl.value.trim();
+
+  errorEl.style.display = 'none';
+
+  try {
+    const response = await fetch('/api/cases', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({ customerName: name, memo: memoEl.value.trim() })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        closeCasesModal();
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.message || data.error || '案件の作成に失敗しました');
+    }
+
+    closeNewCaseForm();
+    await loadCasesList();
+  } catch (err) {
+    errorEl.textContent = err.message || '通信エラーが発生しました';
+    errorEl.style.display = 'block';
+  }
+}
+
+async function openCaseDetail(caseId) {
+  currentCaseDetailId = caseId;
+  closeCasesModal();
+  document.getElementById('case-detail-overlay').classList.add('open');
+  const bodyEl = document.getElementById('case-detail-body');
+  bodyEl.innerHTML = `<div class="modal-loading"><div class="spinner" style="margin:0 auto 14px;"></div><div class="loading-text">読み込み中...</div></div>`;
+
+  try {
+    const response = await fetch(`/api/cases/${caseId}`, {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        closeCaseDetail();
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.error || '案件詳細の取得に失敗しました');
+    }
+
+    renderCaseDetail(data.case, data.searches || []);
+  } catch (err) {
+    bodyEl.innerHTML = `<div class="error-box">⚠️ ${err.message || '通信エラーが発生しました'}</div>`;
+  }
+}
+
+function closeCaseDetail() {
+  document.getElementById('case-detail-overlay').classList.remove('open');
+  currentCaseDetailId = null;
+}
+
+function backToCasesList() {
+  closeCaseDetail();
+  openCasesModal();
+}
+
+function renderCaseDetail(c, searches) {
+  document.getElementById('case-detail-title').textContent = c.customerName || '（無題の案件）';
+
+  const searchesHTML = searches.length
+    ? searches.slice().reverse().map(s => `
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span class="field-val mono">${s.model}</span>
+            <span style="font-size:11px;color:var(--text2);">${new Date(s.searchedAt).toLocaleDateString('ja-JP')}</span>
+          </div>
+          <div style="font-size:13px;color:var(--text2);margin-top:2px;">${s.manufacturer || ''} ${s.name || ''}</div>
+        </div>
+      `).join('')
+    : `<div style="color:var(--text2);font-size:13px;">まだ検索履歴がありません</div>`;
+
+  let actionsHTML = '';
+  if (c.status === '承認待ち') {
+    actionsHTML = `
+      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('承認済み')">承認済みにする</button>
+      <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
+    `;
+  } else if (c.status === '承認済み') {
+    actionsHTML = `
+      <button class="btn-primary" style="width:100%;margin-bottom:8px;" onclick="changeCaseStatus('完了')">完了にする</button>
+      <button class="btn-secondary" style="width:100%;" onclick="changeCaseStatus('失注・キャンセル')">失注・キャンセルにする</button>
+    `;
+  }
+
+  document.getElementById('case-detail-body').innerHTML = `
+    <div class="result-card">
+      <div class="result-body">
+        <div class="field-row">
+          <span class="field-key">ステータス</span>
+          <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
+        </div>
+        ${c.memo ? `<div style="font-size:13px;color:var(--text2);margin-top:8px;">${c.memo}</div>` : ''}
+      </div>
+    </div>
+    ${actionsHTML ? `<div class="input-card">${actionsHTML}</div>` : ''}
+    <div class="section-label" style="margin-top:16px;">検索履歴</div>
+    ${searchesHTML}
+  `;
+}
+
+async function changeCaseStatus(newStatus) {
+  if (!currentCaseDetailId) return;
+  if (newStatus === '失注・キャンセル' && !confirm('この案件を「失注・キャンセル」にしますか？')) return;
+
+  try {
+    const response = await fetch(`/api/cases/${currentCaseDetailId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({ status: newStatus })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        closeCaseDetail();
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(data.message || data.error || 'ステータスの変更に失敗しました');
+    }
+
+    await openCaseDetail(currentCaseDetailId);
+  } catch (err) {
+    alert(err.message || '通信エラーが発生しました');
+  }
+}
+
+// ----- 検索結果を案件に保存 -----
+
+async function loadOpenCasesForAttach() {
+  try {
+    const response = await fetch('/api/cases', {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    openCasesForAttach = (data.cases || []).filter(c => c.status === '承認待ち' || c.status === '承認済み');
+  } catch (err) {
+    openCasesForAttach = [];
+  }
+  renderCaseAttachSelect();
+}
+
+function renderCaseAttachSelect() {
+  const select = document.getElementById('case-attach-select');
+  if (!select) return;
+  const options = openCasesForAttach.map(c => `<option value="${c.id}">${c.customerName || '（無題の案件）'}・${c.status}</option>`);
+  options.push(`<option value="__new__">＋ 新規案件を作成</option>`);
+  select.innerHTML = options.join('');
+  onCaseAttachSelectChange();
+}
+
+function onCaseAttachSelectChange() {
+  const select = document.getElementById('case-attach-select');
+  const wrap = document.getElementById('case-attach-new-wrap');
+  if (!select || !wrap) return;
+  wrap.style.display = select.value === '__new__' ? 'block' : 'none';
+}
+
+async function attachCurrentSearchToCase() {
+  const select = document.getElementById('case-attach-select');
+  const msgEl = document.getElementById('case-attach-msg');
+  if (!select || !lastResult) return;
+
+  msgEl.textContent = '';
+  let caseId = select.value;
+
+  try {
+    if (caseId === '__new__') {
+      const nameInput = document.getElementById('case-attach-new-name');
+      const name = nameInput.value.trim();
+      if (!name) {
+        msgEl.textContent = 'お客様名を入力してください';
+        msgEl.style.color = 'var(--error)';
+        return;
+      }
+      const createRes = await fetch('/api/cases', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + getSessionToken()
+        },
+        body: JSON.stringify({ customerName: name })
+      });
+      const createData = await createRes.json();
+      if (!createRes.ok) {
+        if (createRes.status === 401) {
+          showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+          return;
+        }
+        throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
+      }
+      caseId = createData.case.id;
+    }
+
+    const searchRes = await fetch(`/api/cases/${caseId}/searches`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getSessionToken()
+      },
+      body: JSON.stringify({
+        model: lastResult.original_model,
+        manufacturer: lastResult.manufacturer,
+        name: lastResult.product_name,
+        status: lastResult.status,
+        note: lastResult.caution || ''
+      })
+    });
+    const searchData = await searchRes.json();
+    if (!searchRes.ok) {
+      if (searchRes.status === 401) {
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        return;
+      }
+      throw new Error(searchData.error || '保存に失敗しました');
+    }
+
+    msgEl.textContent = '保存しました';
+    msgEl.style.color = 'var(--success)';
+    await loadOpenCasesForAttach();
+  } catch (err) {
+    msgEl.textContent = err.message || '通信エラーが発生しました';
+    msgEl.style.color = 'var(--error)';
+  }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -1682,12 +2044,27 @@ function renderResult(r) {
       </div>
     </div>
     ` : ''}
+
+    <div class="result-card">
+      <div class="result-header">
+        <span class="result-title">この検索を案件に保存</span>
+      </div>
+      <div class="result-body">
+        <select id="case-attach-select" onchange="onCaseAttachSelectChange()" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;font-family:inherit;"></select>
+        <div id="case-attach-new-wrap" style="display:none;margin-top:10px;">
+          <input type="text" id="case-attach-new-name" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;" />
+        </div>
+        <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="attachCurrentSearchToCase()">この案件に保存</button>
+        <div id="case-attach-msg" style="font-size:12px;margin-top:8px;"></div>
+      </div>
+    </div>
   `;
 
   selectedSuccessorIndex = candidates.length > 0 ? 0 : null;
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   document.getElementById('estimate-trigger').style.display = 'block';
+  loadOpenCasesForAttach();
 }
 
 let selectedSuccessorIndex = null;
