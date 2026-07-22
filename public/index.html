@@ -749,6 +749,7 @@
     <button id="cart-btn" onclick="openCartModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">🛒 カート</button>
     <button id="cases-btn" onclick="openCasesModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">📋 案件</button>
     <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">設定</button>
+    <button id="contact-btn" onclick="openContactModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">お問い合わせ</button>
     <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
   </div>
 </header>
@@ -918,6 +919,25 @@
       <div id="settings-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
       <div style="margin-top:16px;">
         <button class="btn-primary" id="settings-save-btn" style="width:100%;" onclick="saveCompanyInfo('settings')">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="contact-overlay" onclick="if(event.target===this) closeContactModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title">お問い合わせ</div>
+      <button class="modal-close" onclick="closeContactModal()">✕</button>
+    </div>
+    <div>
+      <input type="text" id="contact-name" class="stacked-input" placeholder="お名前（必須）" oninput="updateContactSubmitState()" />
+      <textarea id="contact-message" class="note-input" placeholder="お問い合わせ内容（必須）" style="min-height:120px;" oninput="updateContactSubmitState()"></textarea>
+
+      <div id="contact-error" style="display:none;color:var(--error);font-size:13px;margin-top:6px;"></div>
+      <div style="margin-top:16px;">
+        <button class="btn-primary" id="contact-submit-btn" style="width:100%;" onclick="submitContact()" disabled>送信</button>
+        <div style="font-size:11px;color:var(--text2);margin-top:8px;line-height:1.6;">送信ボタンを押すと、内容を入力した状態でメールアプリが開きます。実際にお問い合わせが届くのは、メールアプリ側で送信操作をした後です。</div>
       </div>
     </div>
   </div>
@@ -1125,6 +1145,7 @@ function showLoginGate(message) {
     showLoginGate(''); // トークンを消してログイン画面に戻す
     document.getElementById('logout-btn').style.display = 'none'; // ボタンを隠す
     document.getElementById('settings-btn').style.display = 'none';
+    document.getElementById('contact-btn').style.display = 'none';
     document.getElementById('cases-btn').style.display = 'none';
     document.getElementById('cart-btn').style.display = 'none';
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
@@ -1169,6 +1190,7 @@ async function checkCompanyAndRoute() {
     companyInfo = data.company;
     document.getElementById('logout-btn').style.display = 'block';
     document.getElementById('settings-btn').style.display = 'block';
+    document.getElementById('contact-btn').style.display = 'block';
     document.getElementById('cases-btn').style.display = 'block';
     document.getElementById('cart-btn').style.display = 'block';
     refreshCartCase();
@@ -1203,6 +1225,84 @@ function openCompanySettings() {
 
 function closeCompanySettings() {
   document.getElementById('company-settings-overlay').classList.remove('open');
+}
+
+// ===== お問い合わせ =====
+
+function openContactModal() {
+  document.getElementById('contact-name').value = '';
+  document.getElementById('contact-message').value = '';
+  document.getElementById('contact-error').style.display = 'none';
+  updateContactSubmitState();
+  document.getElementById('contact-overlay').classList.add('open');
+}
+
+function closeContactModal() {
+  document.getElementById('contact-overlay').classList.remove('open');
+}
+
+function updateContactSubmitState() {
+  const name = document.getElementById('contact-name').value.trim();
+  const message = document.getElementById('contact-message').value.trim();
+  document.getElementById('contact-submit-btn').disabled = !(name && message);
+}
+
+async function submitContact() {
+  const name = document.getElementById('contact-name').value.trim();
+  const message = document.getElementById('contact-message').value.trim();
+  const errorEl = document.getElementById('contact-error');
+  errorEl.style.display = 'none';
+
+  if (!name || !message) {
+    errorEl.textContent = 'お名前とお問い合わせ内容を入力してください';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('contact-submit-btn');
+  btn.disabled = true;
+  const originalBtnText = btn.textContent;
+  btn.textContent = '準備中...';
+
+  try {
+    const response = await fetch('/api/contact-config', {
+      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        closeContactModal();
+        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+      } else {
+        errorEl.textContent = data.error || 'お問い合わせフォームの準備に失敗しました。もう一度お試しください。';
+        errorEl.style.display = 'block';
+      }
+      return;
+    }
+
+    const subject = '【照明サーチ】お問い合わせ';
+    const body =
+      '【お名前】\n' + name + '\n\n' +
+      '【アカウント】\n' + data.accountEmail + '\n\n' +
+      '【現在のプラン】\n' + data.planName + '\n\n' +
+      '【お問い合わせ内容】\n' + message;
+
+    const mailtoUrl =
+      'mailto:' + data.supportEmail +
+      '?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(body);
+
+    window.location.href = mailtoUrl;
+    closeContactModal();
+  } catch (err) {
+    errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalBtnText;
+    updateContactSubmitState();
+  }
 }
 
 function showLogoError(scope, message) {
