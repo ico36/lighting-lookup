@@ -1282,7 +1282,7 @@ async function submitContact() {
   btn.textContent = '準備中...';
 
   try {
-    const response = await fetch('/api/contact-config', {
+    const response = await fetch('/api/info/contact-config', {
       headers: { 'Authorization': 'Bearer ' + getSessionToken() }
     });
     const data = await response.json();
@@ -1329,7 +1329,7 @@ let announcementsCache = [];
 
 async function refreshAnnouncementsDot() {
   try {
-    const response = await fetch('/api/announcements', {
+    const response = await fetch('/api/info/announcements', {
       headers: { 'Authorization': 'Bearer ' + getSessionToken() }
     });
     if (!response.ok) return;
@@ -1353,7 +1353,7 @@ async function openAnnouncementsModal() {
   bodyEl.innerHTML = `<div class="modal-loading"><div class="spinner" style="margin:0 auto 14px;"></div><div class="loading-text">読み込み中...</div></div>`;
 
   try {
-    const response = await fetch('/api/announcements', {
+    const response = await fetch('/api/info/announcements', {
       headers: { 'Authorization': 'Bearer ' + getSessionToken() }
     });
     const data = await response.json();
