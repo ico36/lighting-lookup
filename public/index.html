@@ -62,6 +62,79 @@
     letter-spacing: 0.5px;
   }
 
+  .header-actions-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+  }
+
+  .header-menu-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .header-menu-actions .btn-icon-mobile {
+    display: none;
+  }
+
+  .hamburger-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text2);
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  @media (max-width: 767px) {
+    .hamburger-btn {
+      display: flex;
+    }
+
+    .header-menu-actions {
+      display: none;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: 220px;
+      max-width: calc(100vw - 32px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px;
+      z-index: 20;
+    }
+    .header-menu-actions.open {
+      display: flex;
+    }
+    .header-menu-actions button {
+      width: 100%;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-align: left;
+      justify-content: flex-start;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    .header-menu-actions .btn-icon-mobile {
+      display: inline;
+    }
+  }
+
   main {
     max-width: 680px;
     margin: 0 auto;
@@ -778,17 +851,20 @@
     <div class="badge">β版</div>
   </div>
   <!-- ログイン後のみ表示するボタン群（初期状態は非表示） -->
-  <div style="display: flex; align-items: center; gap: 8px;">
+  <div class="header-actions-wrap">
     <button id="announcements-btn" onclick="openAnnouncementsModal()" style="display: none; position: relative; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 10px; border-radius: 6px; font-size: 14px; line-height: 1; cursor: pointer; font-family: inherit;">
       🔔
       <span id="announcements-dot" style="display: none; position: absolute; top: 3px; right: 3px; width: 8px; height: 8px; border-radius: 50%; background: var(--error);"></span>
     </button>
-    <button id="cart-btn" onclick="openCartModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">🛒 カート</button>
-    <button id="cases-btn" onclick="openCasesModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">📋 案件</button>
-    <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">設定</button>
-    <button id="contact-btn" onclick="openContactModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">お問い合わせ</button>
-    <button id="help-btn" onclick="openHelpModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">❓ ヘルプ</button>
-    <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
+    <div id="header-menu-actions" class="header-menu-actions">
+      <button id="cart-btn" onclick="openCartModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">🛒 カート</button>
+      <button id="cases-btn" onclick="openCasesModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">📋 案件</button>
+      <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;"><span class="btn-icon-mobile">⚙️</span>設定</button>
+      <button id="contact-btn" onclick="openContactModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;"><span class="btn-icon-mobile">✉️</span>お問い合わせ</button>
+      <button id="help-btn" onclick="openHelpModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">❓ ヘルプ</button>
+      <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;"><span class="btn-icon-mobile">🚪</span>ログアウト</button>
+    </div>
+    <button id="hamburger-btn" class="hamburger-btn" onclick="toggleHeaderMenu(event)" aria-label="メニュー" aria-expanded="false" style="display: none;">☰</button>
   </div>
 </header>
 
@@ -1242,6 +1318,28 @@ function showLoginGate(message) {
   }
 }
 
+// ===== ヘッダーメニュー（モバイル幅でのハンバーガーメニュー） =====
+
+function toggleHeaderMenu(event) {
+  if (event) event.stopPropagation();
+  document.getElementById('header-menu-actions').classList.toggle('open');
+}
+
+function closeHeaderMenu() {
+  document.getElementById('header-menu-actions').classList.remove('open');
+}
+
+document.addEventListener('click', function(e) {
+  const menu = document.getElementById('header-menu-actions');
+  if (!menu.classList.contains('open')) return;
+  if (menu.contains(e.target) || document.getElementById('hamburger-btn').contains(e.target)) return;
+  closeHeaderMenu();
+});
+
+document.getElementById('header-menu-actions').addEventListener('click', function(e) {
+  if (e.target.closest('button')) closeHeaderMenu();
+});
+
  function doLogout() {
   if(confirm('ログアウトしますか？')) {
     showLoginGate(''); // トークンを消してログイン画面に戻す
@@ -1252,6 +1350,8 @@ function showLoginGate(message) {
     document.getElementById('announcements-btn').style.display = 'none';
     document.getElementById('cases-btn').style.display = 'none';
     document.getElementById('cart-btn').style.display = 'none';
+    document.getElementById('hamburger-btn').style.display = 'none';
+    closeHeaderMenu();
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
     companyInfo = null;
     pendingLogo = { setup: null, settings: null };
@@ -1299,6 +1399,7 @@ async function checkCompanyAndRoute() {
     document.getElementById('announcements-btn').style.display = 'block';
     document.getElementById('cases-btn').style.display = 'block';
     document.getElementById('cart-btn').style.display = 'block';
+    document.getElementById('hamburger-btn').style.display = ''; // CSSのメディアクエリ（PC/モバイル）に表示を委ねる
     refreshCartCase();
     refreshAnnouncementsDot();
 
