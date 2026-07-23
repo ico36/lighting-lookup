@@ -735,6 +735,39 @@
     padding-top: 14px;
     border-top: 1px dashed var(--border);
   }
+
+  .help-toc {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .help-toc a {
+    display: block;
+    font-size: 13px;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 6px 4px;
+    border-radius: 6px;
+  }
+  .help-toc a:hover { background: var(--surface2); }
+
+  .help-section { margin-bottom: 22px; }
+  .help-section:last-child { margin-bottom: 0; }
+  .help-section-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    scroll-margin-top: 8px;
+  }
+  .help-section p {
+    font-size: 13px;
+    color: var(--text2);
+    line-height: 1.8;
+  }
+  .help-section p + p { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -754,6 +787,7 @@
     <button id="cases-btn" onclick="openCasesModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">📋 案件</button>
     <button id="settings-btn" onclick="openCompanySettings()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">設定</button>
     <button id="contact-btn" onclick="openContactModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">お問い合わせ</button>
+    <button id="help-btn" onclick="openHelpModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">❓ ヘルプ</button>
     <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">ログアウト</button>
   </div>
 </header>
@@ -942,6 +976,60 @@
       <div style="margin-top:16px;">
         <button class="btn-primary" id="contact-submit-btn" style="width:100%;" onclick="submitContact()" disabled>送信</button>
         <div style="font-size:11px;color:var(--text2);margin-top:8px;line-height:1.6;">送信ボタンを押すと、内容を入力した状態でメールアプリが開きます。実際にお問い合わせが届くのは、メールアプリ側で送信操作をした後です。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="help-overlay" onclick="if(event.target===this) closeHelpModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title">ヘルプ</div>
+      <button class="modal-close" onclick="closeHelpModal()">✕</button>
+    </div>
+    <div class="help-toc">
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-1')">1. 器具を調べる（型番入力・写真検索）</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-2')">2. 後継品候補・アップグレード提案の見方</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-3')">3. カートに入れて見積書を作る</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-4')">4. 見積書をPDFで保存する</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-5')">5. 案件管理（ステータス・履歴・アーカイブ検索）</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-6')">6. 自社情報の設定（社名・ロゴなど）</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-7')">7. お問い合わせ・お知らせ</a>
+    </div>
+    <div class="help-content">
+      <div class="help-section" id="help-sec-1">
+        <div class="help-section-title">1. 器具を調べる（型番入力・写真検索）</div>
+        <p>型番がわかる場合は「型番で検索」欄に品番を入力して「調べる」を押してください。型番が読み取れない・わからない場合は、写真から調べることもできます。型番ラベルのアップ、器具全体がわかる写真など、角度の違う写真を複数枚（最大5枚）アップロードすると精度が上がります。</p>
+        <p>「現場メモ」には設置場所や取り付け方法、お客様の要望などを自由に書き込めます（任意）。</p>
+      </div>
+      <div class="help-section" id="help-sec-2">
+        <div class="help-section-title">2. 後継品候補・アップグレード提案の見方</div>
+        <p>「調べる」を押すとAIが型番・写真から器具を特定し、現行品か廃番かを判定します。結果には確度（高・中・低）が表示されるので、確度が低いときは写真や型番を追加して再確認してください。</p>
+        <p>現行品と判定された場合はその器具自体の情報が、廃番と判定された場合は後継器・互換品の候補が一覧表示されます。各候補の「📋 詳細・市場価格を見る」から仕様や参考価格を確認できます。写真だけでは取付方式（直付・埋込・シーリング・ペンダントなど）が確定できなかった場合は注意書きが表示されるので、必ず確認してください。</p>
+      </div>
+      <div class="help-section" id="help-sec-3">
+        <div class="help-section-title">3. カートに入れて見積書を作る</div>
+        <p>候補一覧の「🛒 カートに追加」を押すと、その候補がカートに入り、対応する案件が自動的に作成されます（すでにカートに案件がある場合はそこに追加されます）。ヘッダーの「🛒 カート」ボタンからいつでも中身を確認でき、数量や単価もその場で編集できます。</p>
+      </div>
+      <div class="help-section" id="help-sec-4">
+        <div class="help-section-title">4. 見積書をPDFで保存する</div>
+        <p>検索結果の画面から見積書作成に進むと、お客様情報（お客様名・工事場所）と施工費・出張費を入力できます。自社情報（社名・電話番号・ロゴなど）は表示専用なので、変更したい場合は「設定で編集」リンクから設定画面を開いてください。器具明細にはカートの内容がそのまま反映されます。</p>
+        <p>「見積書を生成」を押すと見積書の画面が表示されます。「🖨️ PDF保存／印刷」から印刷ダイアログを開いてPDFとして保存でき、「📋 テキストをコピー」で文章としてコピーすることもできます。</p>
+      </div>
+      <div class="help-section" id="help-sec-5">
+        <div class="help-section-title">5. 案件管理（ステータス・履歴・アーカイブ検索）</div>
+        <p>ヘッダーの「📋 案件」ボタンから、これまでに検索・見積作成した案件の一覧を確認できます。各案件のステータス（下書き・承認待ち・承認済み・完了・失注／キャンセル）は案件詳細の画面からいつでも変更できます。案件ごとに、これまでの型番検索履歴も確認できます。</p>
+        <p>完了・失注などでアーカイブされた過去の案件は、日付範囲を指定して検索できます。</p>
+      </div>
+      <div class="help-section" id="help-sec-6">
+        <div class="help-section-title">6. 自社情報の設定（社名・ロゴなど）</div>
+        <p>初めてログインした際は、見積書に表示する自社情報（屋号・会社名、電話番号、登録番号、ロゴ画像）の入力が必要です。ロゴ以外の項目は後からいつでも変更できます。</p>
+        <p>登録後、型番検索や見積書作成の画面では自社情報は表示のみとなり編集できません。変更したい場合は、ヘッダーの「設定」ボタンから設定画面を開いてください。</p>
+      </div>
+      <div class="help-section" id="help-sec-7">
+        <div class="help-section-title">7. お問い合わせ・お知らせ</div>
+        <p>操作方法がわからない、不具合を見つけたなどの際は、ヘッダーの「お問い合わせ」ボタンからお名前とお問い合わせ内容を入力してください。送信ボタンを押すと、入力内容が入った状態でメールアプリが起動します。実際にお問い合わせが届くのは、メールアプリ側で送信操作をした後です。</p>
+        <p>ヘッダーの🔔アイコンからは運営からのお知らせを確認できます。未読のお知らせがあると右上に赤い印が表示されます。</p>
       </div>
     </div>
   </div>
@@ -1160,6 +1248,7 @@ function showLoginGate(message) {
     document.getElementById('logout-btn').style.display = 'none'; // ボタンを隠す
     document.getElementById('settings-btn').style.display = 'none';
     document.getElementById('contact-btn').style.display = 'none';
+    document.getElementById('help-btn').style.display = 'none';
     document.getElementById('announcements-btn').style.display = 'none';
     document.getElementById('cases-btn').style.display = 'none';
     document.getElementById('cart-btn').style.display = 'none';
@@ -1206,6 +1295,7 @@ async function checkCompanyAndRoute() {
     document.getElementById('logout-btn').style.display = 'block';
     document.getElementById('settings-btn').style.display = 'block';
     document.getElementById('contact-btn').style.display = 'block';
+    document.getElementById('help-btn').style.display = 'block';
     document.getElementById('announcements-btn').style.display = 'block';
     document.getElementById('cases-btn').style.display = 'block';
     document.getElementById('cart-btn').style.display = 'block';
@@ -1242,6 +1332,21 @@ function openCompanySettings() {
 
 function closeCompanySettings() {
   document.getElementById('company-settings-overlay').classList.remove('open');
+}
+
+// ===== ヘルプ =====
+
+function openHelpModal() {
+  document.getElementById('help-overlay').classList.add('open');
+}
+
+function closeHelpModal() {
+  document.getElementById('help-overlay').classList.remove('open');
+}
+
+function scrollToHelpSection(id) {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ===== お問い合わせ =====
