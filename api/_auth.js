@@ -69,7 +69,16 @@ export function requireAuth(req, res) {
     ? authHeader.slice('Bearer '.length)
     : null;
 
-  const email = verifySessionToken(token);
+  let email;
+  try {
+    email = verifySessionToken(token);
+  } catch (err) {
+    // SESSION_SECRET未設定・破損など設定不備が主な原因。詳細はログのみに残し、
+    // クライアントには一貫したJSON形式のエラーのみ返す（生の500ページを防ぐ）。
+    console.error('[auth] セッション検証中にエラーが発生しました（SESSION_SECRETの設定を確認してください）:', err);
+    res.status(500).json({ error: '認証エラーが発生しました' });
+    return null;
+  }
 
   if (!email) {
     res.status(401).json({ error: 'ログインが必要です' });
