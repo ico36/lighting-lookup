@@ -1251,6 +1251,23 @@ function getSessionToken() {
   return localStorage.getItem('session_token') || '';
 }
 
+// AI(Claude web_search)の調査結果やユーザー入力など、外部由来の値をHTMLとして
+// innerHTMLに差し込む前に必ず通す。XSS(セッショントークン窃取)対策。
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// href属性に使うURLは http/https のみ許可し、javascript: 等のスキームを弾く
+function isSafeHttpUrl(url) {
+  return typeof url === 'string' && /^https?:\/\//i.test(url);
+}
+
 function extractJSON(raw) {
   const stripped = raw.replace(/```json|```/g, '');
   const start = stripped.indexOf('{');
@@ -1597,9 +1614,9 @@ function renderAnnouncementsList() {
 
   bodyEl.innerHTML = announcementsCache.map((a) => `
     <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;">
-      <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">${a.date || ''}</div>
-      <div style="font-weight:600;margin-bottom:6px;">${a.title || ''}</div>
-      <div style="font-size:13px;color:var(--text);line-height:1.7;white-space:pre-wrap;">${a.body || ''}</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:4px;">${escapeHtml(a.date)}</div>
+      <div style="font-weight:600;margin-bottom:6px;">${escapeHtml(a.title)}</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.7;white-space:pre-wrap;">${escapeHtml(a.body)}</div>
     </div>
   `).join('');
 }
@@ -1826,9 +1843,9 @@ function renderEstimateCompanyDisplay() {
   }
 
   el.innerHTML = `
-    <div style="font-weight:600;">${companyInfo.name}</div>
-    ${companyInfo.tel ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">TEL: ${companyInfo.tel}</div>` : ''}
-    ${companyInfo.license ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">${companyInfo.license}</div>` : ''}
+    <div style="font-weight:600;">${escapeHtml(companyInfo.name)}</div>
+    ${companyInfo.tel ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">TEL: ${escapeHtml(companyInfo.tel)}</div>` : ''}
+    ${companyInfo.license ? `<div style="color:var(--text2);font-size:13px;margin-top:2px;">${escapeHtml(companyInfo.license)}</div>` : ''}
   `;
 }
 
@@ -1905,7 +1922,7 @@ function renderCasesList() {
   bodyEl.innerHTML = casesCache.map(c => `
     <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
       <div>
-        <div style="font-weight:600;">${c.customerName || '（無題の案件）'}</div>
+        <div style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</div>
         <div style="font-size:12px;color:var(--text2);margin-top:2px;">${new Date(c.createdAt).toLocaleDateString('ja-JP')}</div>
       </div>
       <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
@@ -1995,10 +2012,10 @@ function renderCaseDetail(c, searches) {
     ? searches.slice().reverse().map(s => `
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span class="field-val mono">${s.model}</span>
+            <span class="field-val mono">${escapeHtml(s.model)}</span>
             <span style="font-size:11px;color:var(--text2);">${new Date(s.searchedAt).toLocaleDateString('ja-JP')}</span>
           </div>
-          <div style="font-size:13px;color:var(--text2);margin-top:2px;">${s.manufacturer || ''} ${s.name || ''}</div>
+          <div style="font-size:13px;color:var(--text2);margin-top:2px;">${escapeHtml(s.manufacturer)} ${escapeHtml(s.name)}</div>
         </div>
       `).join('')
     : `<div style="color:var(--text2);font-size:13px;">まだ検索履歴がありません</div>`;
@@ -2036,7 +2053,7 @@ function renderCaseDetail(c, searches) {
           <span class="field-key">ステータス</span>
           <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
         </div>
-        ${c.memo ? `<div style="font-size:13px;color:var(--text2);margin-top:8px;">${c.memo}</div>` : ''}
+        ${c.memo ? `<div style="font-size:13px;color:var(--text2);margin-top:8px;">${escapeHtml(c.memo)}</div>` : ''}
       </div>
     </div>
     <div class="input-card">
@@ -2171,7 +2188,7 @@ async function searchArchivedCasesUI() {
       ? cases.map(c => `
           <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-weight:600;">${c.customerName || '（無題の案件）'}</span>
+              <span style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</span>
               <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
             </div>
             <div style="font-size:12px;color:var(--text2);margin-top:2px;">アーカイブ日: ${new Date(c.archivedAt).toLocaleDateString('ja-JP')}</div>
@@ -2202,7 +2219,7 @@ async function loadOpenCasesForAttach() {
 function renderCaseAttachSelect() {
   const select = document.getElementById('case-attach-select');
   if (!select) return;
-  const options = openCasesForAttach.map(c => `<option value="${c.id}">${c.customerName || '（無題の案件）'}・${c.status}</option>`);
+  const options = openCasesForAttach.map(c => `<option value="${c.id}">${escapeHtml(c.customerName) || '（無題の案件）'}・${c.status}</option>`);
   options.push(`<option value="__new__">＋ 新規案件を作成</option>`);
   select.innerHTML = options.join('');
   onCaseAttachSelectChange();
@@ -2605,8 +2622,8 @@ function renderCartItems() {
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div style="flex:1;">
-              <div style="font-weight:600;">${item.manufacturer || ''} ${item.name || ''}</div>
-              <div style="font-size:12px;color:var(--text2);margin-top:2px;">${item.modelNumber || ''}</div>
+              <div style="font-weight:600;">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}</div>
+              <div style="font-size:12px;color:var(--text2);margin-top:2px;">${escapeHtml(item.modelNumber)}</div>
             </div>
             <button class="modal-close" style="width:24px;height:24px;font-size:13px;" onclick="removeCartItemUI('${item.itemId}')">✕</button>
           </div>
@@ -2712,7 +2729,7 @@ function renderEstimateCartItems() {
     ? items.map(item => `
         <div class="item-line">
           <div>
-            <div class="item-name">${item.manufacturer || ''} ${item.name || ''}${item.modelNumber ? '（' + item.modelNumber + '）' : ''}</div>
+            <div class="item-name">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}${item.modelNumber ? '（' + escapeHtml(item.modelNumber) + '）' : ''}</div>
           </div>
           <div class="item-price">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</div>
         </div>
@@ -2973,12 +2990,12 @@ function renderResult(r) {
     <div style="display:flex;gap:10px;align-items:flex-start;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
       <div style="flex:1;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-          <span class="field-val mono">${s.model}</span>
-          <span style="font-size:13px;color:var(--text2)">${s.manufacturer}</span>
+          <span class="field-val mono">${escapeHtml(s.model)}</span>
+          <span style="font-size:13px;color:var(--text2)">${escapeHtml(s.manufacturer)}</span>
           ${s.isOriginal ? '<span class="tag tag-green" style="font-size:10px;">この型番</span>' : ''}
         </div>
-        <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${s.name || ''}</div>
-        ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${s.note}</div>` : ''}
+        <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${escapeHtml(s.name)}</div>
+        ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${escapeHtml(s.note)}</div>` : ''}
         <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap;">
           <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
           <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(${i})">🛒 カートに追加</button>
@@ -2998,23 +3015,23 @@ function renderResult(r) {
       <div class="result-body">
         <div class="field-row">
           <span class="field-key">入力型番</span>
-          <span class="field-val mono">${r.original_model || '—'}</span>
+          <span class="field-val mono">${escapeHtml(r.original_model) || '—'}</span>
         </div>
         <div class="field-row">
           <span class="field-key">メーカー</span>
-          <span class="field-val">${r.manufacturer || '—'}</span>
+          <span class="field-val">${escapeHtml(r.manufacturer) || '—'}</span>
         </div>
         <div class="field-row">
           <span class="field-key">製品名</span>
-          <span class="field-val">${r.product_name || '—'}</span>
+          <span class="field-val">${escapeHtml(r.product_name) || '—'}</span>
         </div>
         <div class="field-row">
           <span class="field-key">取付方式</span>
-          <span class="field-val">${r.mounting_type || '—'}</span>
+          <span class="field-val">${escapeHtml(r.mounting_type) || '—'}</span>
         </div>
         <div class="field-row">
           <span class="field-key">ステータス</span>
-          <span class="tag ${statusTag}">${r.status || '不明'}</span>
+          <span class="tag ${statusTag}">${escapeHtml(r.status) || '不明'}</span>
         </div>
       </div>
       ${r.mounting_type_confidence === 'low' ? `
@@ -3040,7 +3057,7 @@ function renderResult(r) {
       </div>
       <div class="result-body">
         <div class="order-block">
-          <pre id="order-text-content">${orderText}</pre>
+          <pre id="order-text-content">${escapeHtml(orderText)}</pre>
         </div>
         <button class="copy-btn" onclick="copyOrder()">📋 コピー</button>
       </div>
@@ -3052,7 +3069,7 @@ function renderResult(r) {
         <span class="result-title">⚠️ 工事メモ</span>
       </div>
       <div class="result-body">
-        <div style="font-size:14px;color:var(--warning);line-height:1.7;">${r.caution}</div>
+        <div style="font-size:14px;color:var(--warning);line-height:1.7;">${escapeHtml(r.caution)}</div>
       </div>
     </div>
     ` : ''}
@@ -3141,7 +3158,7 @@ async function openDetailModal(index) {
 
   } catch (err) {
     bodyEl.innerHTML = `
-      <div class="error-box">⚠️ ${err.message || '詳細情報の取得に失敗しました。もう一度お試しください。'}</div>
+      <div class="error-box">⚠️ ${escapeHtml(err.message) || '詳細情報の取得に失敗しました。もう一度お試しください。'}</div>
     `;
   }
 }
@@ -3174,7 +3191,7 @@ function renderDetailModal(d, fallback) {
   ].filter(([, v]) => v);
 
   const specHTML = specRows.length
-    ? `<table class="spec-table">${specRows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`
+    ? `<table class="spec-table">${specRows.map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`).join('')}</table>`
     : `<div style="font-size:13px;color:var(--text2);">仕様情報が見つかりませんでした</div>`;
 
   const links = [];
@@ -3182,19 +3199,24 @@ function renderDetailModal(d, fallback) {
   (d.purchase_links || []).forEach(l => links.push(l));
 
   const linksHTML = links.length
-    ? `<div class="link-list">${links.map(l => `
-        <a class="link-item" href="${l.url}" target="_blank" rel="noopener noreferrer">
-          <span>${l.site}</span>
+    ? `<div class="link-list">${links.map(l => {
+        const safeUrl = isSafeHttpUrl(l.url);
+        return safeUrl
+          ? `<a class="link-item" href="${escapeHtml(l.url)}" target="_blank" rel="noopener noreferrer">
+          <span>${escapeHtml(l.site)}</span>
           <span class="arrow">↗</span>
-        </a>
-      `).join('')}</div>`
+        </a>`
+          : `<div class="link-item" style="opacity:0.6;cursor:not-allowed;">
+          <span>${escapeHtml(l.site)}（無効なリンクのため表示できません）</span>
+        </div>`;
+      }).join('')}</div>`
     : `<div style="font-size:13px;color:var(--text2);">参照リンクが見つかりませんでした</div>`;
 
   bodyEl.innerHTML = `
     <div class="price-highlight">
       <div class="price-label">市場価格の目安</div>
-      <div class="price-value">${priceText}</div>
-      ${d.price_estimate?.note ? `<div class="price-note">${d.price_estimate.note}</div>` : ''}
+      <div class="price-value">${escapeHtml(priceText)}</div>
+      ${d.price_estimate?.note ? `<div class="price-note">${escapeHtml(d.price_estimate.note)}</div>` : ''}
     </div>
 
     <div class="modal-section-label">仕様</div>
@@ -3204,7 +3226,7 @@ function renderDetailModal(d, fallback) {
     ${linksHTML}
 
     <div class="confidence-note">
-      ※ 価格・仕様はAIによるWeb検索結果に基づく目安です。実際の価格・仕様は販売店・メーカー公式情報で最終確認してください。${d.price_estimate?.source_note ? ' ' + d.price_estimate.source_note : ''}
+      ※ 価格・仕様はAIによるWeb検索結果に基づく目安です。実際の価格・仕様は販売店・メーカー公式情報で最終確認してください。${d.price_estimate?.source_note ? ' ' + escapeHtml(d.price_estimate.source_note) : ''}
     </div>
 
     <div style="margin-top:16px;">
@@ -3292,7 +3314,7 @@ function generateEstimateSheet() {
   const itemRowsHTML = items.map(item => `
     <tr>
       <td>
-        <div class="sheet-item-name">${item.manufacturer || ''} ${item.name || ''}${item.modelNumber ? '（' + item.modelNumber + '）' : ''}</div>
+        <div class="sheet-item-name">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}${item.modelNumber ? '（' + escapeHtml(item.modelNumber) + '）' : ''}</div>
       </td>
       <td class="num-cell">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</td>
     </tr>
@@ -3306,14 +3328,14 @@ function generateEstimateSheet() {
       </div>
       <div class="sheet-company">
         ${logoHTML}
-        <div class="name">${bizName}</div>
-        ${bizTel ? `<div>TEL: ${bizTel}</div>` : ''}
-        ${bizLicense ? `<div>${bizLicense}</div>` : ''}
+        <div class="name">${escapeHtml(bizName)}</div>
+        ${bizTel ? `<div>TEL: ${escapeHtml(bizTel)}</div>` : ''}
+        ${bizLicense ? `<div>${escapeHtml(bizLicense)}</div>` : ''}
       </div>
     </div>
 
-    <div class="sheet-client">${clientName} 様</div>
-    ${clientSite ? `<div class="sheet-client-sub">工事場所：${clientSite}</div>` : ''}
+    <div class="sheet-client">${escapeHtml(clientName)} 様</div>
+    ${clientSite ? `<div class="sheet-client-sub">工事場所：${escapeHtml(clientSite)}</div>` : ''}
 
     <table class="sheet-table">
       <thead>
@@ -3340,7 +3362,7 @@ function generateEstimateSheet() {
     <div class="sheet-total-row"><span>消費税（10%）</span><span>${yen(tax)}</span></div>
     <div class="sheet-total-row grand"><span>合計</span><span>${yen(total)}</span></div>
 
-    ${bizNote ? `<div class="sheet-footer-note">${bizNote}</div>` : ''}
+    ${bizNote ? `<div class="sheet-footer-note">${escapeHtml(bizNote)}</div>` : ''}
     <div class="sheet-footer-note">※本見積りはAIによる後継器調査結果を含みます。実際の機種・価格は現物・メーカー情報にて最終確認のうえご了承ください。</div>
   `;
 
