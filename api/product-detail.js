@@ -1,6 +1,10 @@
 import { requireAuth } from './_auth';
 
 // 後継器の詳細情報（仕様・市場価格目安・販売ページ）をWeb検索付きで調査するAPI
+// web_search込みのClaude API呼び出しは数十秒かかることがあるため、
+// Vercel Hobbyプランで許容される上限（60秒）まで実行時間を延長する。
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });

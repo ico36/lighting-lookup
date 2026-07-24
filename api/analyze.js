@@ -2,6 +2,10 @@ import { requireAuth } from './_auth';
 
 // このファイルはサーバー側で実行されます。
 // ブラウザから直接見えることはなく、APIキーも安全に保たれます。
+// web_search込みのClaude API呼び出しは数十秒かかることがあるため、
+// Vercel Hobbyプランで許容される上限（60秒）まで実行時間を延長する。
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   // POST以外は受け付けない
   if (req.method !== 'POST') {
