@@ -2023,8 +2023,7 @@ function renderCaseDetail(c, searches) {
   // ステータスは任意の組み合わせで自由に遷移できる（バックエンドは元々制限していない）
   const ALL_STATUSES = ['下書き', '承認待ち', '承認済み', '完了', '失注・キャンセル'];
   const statusOptionsHTML = ALL_STATUSES
-    .filter(s => s !== c.status)
-    .map(s => `<option value="${s}">${s}</option>`)
+    .map(s => `<option value="${s}"${s === c.status ? ' selected' : ''}>${s}</option>`)
     .join('');
 
   const actionsHTML = `
@@ -2202,6 +2201,11 @@ async function searchArchivedCasesUI() {
 
 // ----- 検索結果を案件に保存 -----
 
+// '下書き'（カート追加時に自動作成される案件のデフォルト状態）も含めて一覧化する。
+// ここで'下書き'を除外すると、現在アクティブな案件（カート対象）が選択肢から漏れ、
+// 気づかず別案件を新規作成してしまう原因になる。
+const OPEN_CASE_STATUSES = ['下書き', '承認待ち', '承認済み'];
+
 async function loadOpenCasesForAttach() {
   try {
     const response = await fetch('/api/cases', {
@@ -2209,7 +2213,7 @@ async function loadOpenCasesForAttach() {
     });
     if (!response.ok) return;
     const data = await response.json();
-    openCasesForAttach = (data.cases || []).filter(c => c.status === '承認待ち' || c.status === '承認済み');
+    openCasesForAttach = (data.cases || []).filter(c => OPEN_CASE_STATUSES.includes(c.status));
   } catch (err) {
     openCasesForAttach = [];
   }
@@ -2222,6 +2226,10 @@ function renderCaseAttachSelect() {
   const options = openCasesForAttach.map(c => `<option value="${c.id}">${escapeHtml(c.customerName) || '（無題の案件）'}・${c.status}</option>`);
   options.push(`<option value="__new__">＋ 新規案件を作成</option>`);
   select.innerHTML = options.join('');
+  // 現在アクティブな案件（カートの対象）が選択肢にあれば、それを既定選択にする
+  if (currentCartCaseId && openCasesForAttach.some(c => c.id === currentCartCaseId)) {
+    select.value = currentCartCaseId;
+  }
   onCaseAttachSelectChange();
 }
 
@@ -2293,6 +2301,13 @@ async function attachCurrentSearchToCase() {
 
     msgEl.textContent = '保存しました';
     msgEl.style.color = 'var(--success)';
+
+    // この検索を保存した案件を「現在アクティブな案件」にも合わせる。
+    // これをしないと、直後に候補を「カートに追加」した際、対象がここで
+    // 選んだ案件とズレて別の(重複した)案件が作られてしまう。
+    if (caseId !== currentCartCaseId) {
+      await setActiveCase(caseId);
+    }
     await loadOpenCasesForAttach();
   } catch (err) {
     msgEl.textContent = err.message || '通信エラーが発生しました';
@@ -2331,11 +2346,17 @@ async function ensureCartCase() {
   return currentCartCaseId;
 }
 
-// 案件一覧・詳細から、既存の案件をカートの対象に切り替える
-function setAsCartTarget(caseId) {
+// 「現在アクティブな案件」(カート対象・検索の紐付け先など、画面をまたいで
+// 参照される唯一の案件ID)を切り替える。currentCartCaseIdが単一の管理箇所。
+async function setActiveCase(caseId) {
   currentCartCaseId = caseId;
   localStorage.setItem('cart_case_id', caseId);
-  refreshCartCase();
+  await refreshCartCase();
+}
+
+// 案件一覧・詳細から、既存の案件をカートの対象に切り替える
+async function setAsCartTarget(caseId) {
+  await setActiveCase(caseId);
   alert('この案件をカートの対象に設定しました。');
 }
 
@@ -2343,9 +2364,7 @@ function setAsCartTarget(caseId) {
 // （見積書生成ロジックは cartCase / currentCartCaseId を参照するため、この案件を
 //  カートの対象にしてから最新データを取得して開く）
 async function openEstimateFromCaseDetail(caseId) {
-  currentCartCaseId = caseId;
-  localStorage.setItem('cart_case_id', caseId);
-  await refreshCartCase();
+  await setActiveCase(caseId);
   closeCaseDetail();
   showEstimateForm();
 }
