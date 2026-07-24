@@ -2553,12 +2553,23 @@ function updateCartBadge() {
 }
 
 // 検索結果の候補（カード or 詳細モーダル）から、対象の案件のカートに1点追加する
+// 詳細情報(price_estimate)がキャッシュ済みなら、その下限価格をカート追加時の
+// 単価の初期値として使う（詳細を未取得の場合は0のままとし、新たなAI呼び出しは行わない）
+function estimateUnitPriceFromDetail(detail) {
+  const low = Number(detail?.price_estimate?.low);
+  if (Number.isFinite(low) && low > 0) return low;
+  const high = Number(detail?.price_estimate?.high);
+  if (Number.isFinite(high) && high > 0) return high;
+  return 0;
+}
+
 async function addCandidateToCart(index) {
   const candidate = (lastResult && lastResult._candidates || [])[index];
   if (!candidate) return;
 
   const cacheKey = candidate.model + '|' + candidate.manufacturer;
   const rawDetail = detailCache[cacheKey] || null;
+  const estimatedUnitPrice = estimateUnitPriceFromDetail(rawDetail);
 
   try {
     const caseId = await ensureCartCase();
@@ -2573,6 +2584,7 @@ async function addCandidateToCart(index) {
           name: candidate.name || '',
           modelNumber: candidate.model || '',
           manufacturer: candidate.manufacturer || '',
+          unitPrice: estimatedUnitPrice,
           rawDetail
         }
       })
@@ -2618,8 +2630,10 @@ function renderCartItems() {
   }
 
   bodyEl.innerHTML = items.length
-    ? items.map(item => `
-        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;">
+    ? items.map(item => {
+        const isZeroPrice = !item.unitPrice || item.unitPrice <= 0;
+        return `
+        <div style="background:var(--bg);border:1px solid ${isZeroPrice ? 'var(--error)' : 'var(--border)'};border-radius:8px;padding:12px 14px;margin-bottom:10px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
             <div style="flex:1;">
               <div style="font-weight:600;">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}</div>
@@ -2627,6 +2641,7 @@ function renderCartItems() {
             </div>
             <button class="modal-close" style="width:24px;height:24px;font-size:13px;" onclick="removeCartItemUI('${item.itemId}')">✕</button>
           </div>
+          ${isZeroPrice ? `<div style="font-size:12px;color:var(--error);margin-top:8px;">⚠️ 単価が未設定です。金額を入力してください</div>` : ''}
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
             <div class="yen-prefix" style="flex:1;"><span>¥</span><input type="number" class="num-input" value="${item.unitPrice}" min="0" onchange="updateCartItemUI('${item.itemId}', 'unitPrice', this.value)" /></div>
             <div style="width:70px;"><input type="number" class="num-input" value="${item.quantity}" min="1" onchange="updateCartItemUI('${item.itemId}', 'quantity', this.value)" /></div>
@@ -2634,7 +2649,8 @@ function renderCartItems() {
           </div>
           <div style="text-align:right;font-size:13px;color:var(--text2);margin-top:6px;">小計: ${yen(item.unitPrice * item.quantity)}</div>
         </div>
-      `).join('')
+      `;
+      }).join('')
     : `<div style="color:var(--text2);font-size:14px;text-align:center;padding:20px 0;">カートに器具がまだありません</div>`;
 
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
@@ -2726,14 +2742,18 @@ function renderEstimateCartItems() {
   const items = (cartCase && cartCase.cartItems) || [];
 
   container.innerHTML = items.length
-    ? items.map(item => `
+    ? items.map(item => {
+        const isZeroPrice = !item.unitPrice || item.unitPrice <= 0;
+        return `
         <div class="item-line">
           <div>
             <div class="item-name">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}${item.modelNumber ? '（' + escapeHtml(item.modelNumber) + '）' : ''}</div>
+            ${isZeroPrice ? `<div style="font-size:12px;color:var(--error);margin-top:2px;">⚠️ 単価が未設定です（カートで金額を入力してください）</div>` : ''}
           </div>
-          <div class="item-price">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</div>
+          <div class="item-price" style="${isZeroPrice ? 'color:var(--error);' : ''}">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</div>
         </div>
-      `).join('')
+      `;
+      }).join('')
     : `<div style="color:var(--text2);font-size:13px;">カートに器具が追加されていません。</div>`;
 
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
@@ -3289,6 +3309,17 @@ function generateEstimateSheet() {
   if (items.length === 0) {
     alert('カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
     return;
+  }
+
+  const zeroPriceItems = items.filter(item => !item.unitPrice || item.unitPrice <= 0);
+  if (zeroPriceItems.length > 0) {
+    const names = zeroPriceItems
+      .map(item => `・${item.manufacturer || ''} ${item.name || ''}`.trim())
+      .join('\n');
+    const proceed = confirm(
+      `単価が¥0のまま設定されている品目があります。\n\n${names}\n\nこのまま見積書を生成しますか？`
+    );
+    if (!proceed) return;
   }
 
   const clientName = document.getElementById('client-name').value.trim() || 'お客様';
