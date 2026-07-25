@@ -10,6 +10,7 @@
 //                                        customerName・memo・cartItems・estimateMetaを一括復元
 //                                        （ステータスは変更しない）
 //   { customerName }                  ... 案件名（案件一覧・案件詳細の表示名）を変更
+// DELETE /api/cases/{id} ... 案件を完全に削除する（archiveとは異なり物理削除。取り消し不可）
 //
 // 発注ボタンなど承認済み以降でしか出せない操作は、フロント側で
 // case.status === '承認済み' を見て判定する。
@@ -25,6 +26,7 @@ import {
   updateEstimateMeta,
   restoreCaseFromImport,
   updateCaseName,
+  deleteCase,
   listSearchesForCase,
   listStatusLogs,
 } from '../../lib/cases';
@@ -111,6 +113,16 @@ export default async function handler(req, res) {
     }
   }
 
-  res.setHeader('Allow', ['GET', 'PATCH']);
+  if (req.method === 'DELETE') {
+    try {
+      await deleteCase(id);
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      console.error('[cases] 削除エラー:', err);
+      return res.status(500).json({ error: 'INTERNAL_ERROR' });
+    }
+  }
+
+  res.setHeader('Allow', ['GET', 'PATCH', 'DELETE']);
   return res.status(405).json({ error: 'Method not allowed' });
 }

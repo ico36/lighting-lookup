@@ -2123,6 +2123,10 @@ function renderCaseDetail(c, searches) {
 
     <div class="section-label" style="margin-top:16px;">検索履歴</div>
     ${searchesHTML}
+
+    <div style="margin-top:24px;padding-top:16px;border-top:1px dashed var(--border);text-align:center;">
+      <button type="button" class="detail-link-btn" style="margin:0;color:var(--error);" onclick="deleteCaseHandler(this, '${c.id}')">🗑 この案件を完全に削除</button>
+    </div>
   `;
 
   // 属性エスケープを気にせず安全に反映するため、値はプロパティ代入で設定する
@@ -2245,6 +2249,42 @@ async function reSearchFromHistory(btn, index) {
 
     await doSearch();
   }, '再検索中...');
+}
+
+// 案件を完全に削除する(archiveCase/アーカイブとは異なり物理削除。取り消し不可)。
+// ステータスに関わらず削除可能(既存のステータス変更が任意遷移可能な方針と一貫させている)。
+// このアプリに「入力して確認」のような厳格な確認パターンは無く、confirm()一発のみを
+// 唯一の確認手段としているため、それを踏襲しつつ文言だけ強めにして安全弁とする。
+async function deleteCaseHandler(btn, caseId) {
+  const name = currentCaseDetailData?.customerName || '（無題の案件）';
+  const confirmed = confirm(
+    `「${name}」を完全に削除します。カート内容・見積り設定・検索履歴もすべて削除され、元に戻すことはできません。\n\n本当に削除しますか？`
+  );
+  if (!confirmed) return;
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/${caseId}`, { method: 'DELETE' });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeCaseDetail);
+          return;
+        }
+        throw new Error(data.error || '削除に失敗しました');
+      }
+
+      // 削除した案件が現在のカート対象だった場合、既存の404自己修復ロジックで
+      // currentCartCaseId・cartCase・カートバッジを整合させる
+      if (currentCartCaseId === caseId) {
+        await refreshCartCase();
+      }
+      backToCasesList();
+    } catch (err) {
+      alert(err.message || '通信エラーが発生しました');
+    }
+  }, '削除中...');
 }
 
 // ----- 過去の案件を検索（完了・失注案件、アーカイブ済み） -----
