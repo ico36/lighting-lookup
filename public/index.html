@@ -1905,6 +1905,9 @@ let casesCache = [];
 let currentCaseDetailId = null;
 let currentCaseDetailData = null;
 let openCasesForAttach = [];
+// 検索履歴カードの「カートに追加」「型番で再検索」ボタンから参照する。
+// renderCaseDetail()の表示順(新しい順)と揃えたインデックスで保持する。
+let currentCaseDetailSearches = [];
 
 function caseStatusTagClass(status) {
   if (status === '承認済み') return 'tag-green';
@@ -2050,14 +2053,19 @@ function renderCaseDetail(c, searches) {
   currentCaseDetailData = c;
   document.getElementById('case-detail-title').textContent = c.customerName || '（無題の案件）';
 
-  const searchesHTML = searches.length
-    ? searches.slice().reverse().map(s => `
+  currentCaseDetailSearches = searches.slice().reverse();
+  const searchesHTML = currentCaseDetailSearches.length
+    ? currentCaseDetailSearches.map((s, i) => `
         <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span class="field-val mono">${escapeHtml(s.model)}</span>
             <span style="font-size:11px;color:var(--text2);">${new Date(s.searchedAt).toLocaleDateString('ja-JP')}</span>
           </div>
           <div style="font-size:13px;color:var(--text2);margin-top:2px;">${escapeHtml(s.manufacturer)} ${escapeHtml(s.name)}</div>
+          <div style="display:flex;gap:14px;margin-top:6px;">
+            <button type="button" class="detail-link-btn" style="margin:0;" onclick="addHistoryToCart(this, ${i})">🛒 カートに追加</button>
+            <button type="button" class="detail-link-btn" style="margin:0;" onclick="reSearchFromHistory(this, ${i})">🔄 型番で再検索</button>
+          </div>
         </div>
       `).join('')
     : `<div style="color:var(--text2);font-size:13px;">まだ検索履歴がありません</div>`;
@@ -2177,6 +2185,66 @@ async function changeCaseStatus(btn, newStatus) {
       alert(err.message || '通信エラーが発生しました');
     }
   }, '変更中...');
+}
+
+// 検索履歴に保存済みの型番・メーカー・製品名をそのままこの案件のカートに追加する。
+// 価格情報は履歴に保存されていないため単価は¥0で追加される(見積書生成前に手入力が必要。
+// 単価¥0のまま見積書を生成しようとすると既存の確認ダイアログが出る仕様の範囲内)。
+async function addHistoryToCart(btn, index) {
+  const search = currentCaseDetailSearches[index];
+  if (!search || !currentCaseDetailId) return;
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/${currentCaseDetailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cartAdd: {
+            name: search.name,
+            modelNumber: search.model,
+            manufacturer: search.manufacturer
+          }
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeCaseDetail);
+          return;
+        }
+        throw new Error(data.error || 'カートへの追加に失敗しました');
+      }
+
+      await openCaseDetail(currentCaseDetailId);
+    } catch (err) {
+      alert(err.message || '通信エラーが発生しました');
+    }
+  }, '追加中...');
+}
+
+// 検索履歴の型番を使ってトップの検索フォームから再検索する。写真検索由来の履歴でも
+// 元画像は保持していないため、保存済みの型番文字列によるテキスト再検索として行う。
+// 最新の価格・在庫・後継品情報を確認したい場合に使う(A案の「そのままカートに追加」に対する、
+// 手間はかかるが情報が新しくなる選択肢)。
+async function reSearchFromHistory(btn, index) {
+  const search = currentCaseDetailSearches[index];
+  if (!search || !currentCaseDetailId) return;
+
+  await withButtonGuard(btn, async () => {
+    // 再検索結果をこの案件のカートに追加できるよう、先にカート対象をこの案件にする
+    await setActiveCase(currentCaseDetailId);
+    closeCaseDetail();
+
+    uploadedImages = [];
+    renderPreviews();
+    document.getElementById('model-input').value = search.model;
+    document.getElementById('note-input').value = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    await doSearch();
+  }, '再検索中...');
 }
 
 // ----- 過去の案件を検索（完了・失注案件、アーカイブ済み） -----
