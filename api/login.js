@@ -23,6 +23,20 @@ function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// クライアントの実IPを取得する。
+// Vercelはエッジ層でx-forwarded-forを上書きし、外部からの偽装値は転送しない
+// 仕様のため通常はx-forwarded-forのままでも安全だが
+// (https://vercel.com/docs/headers/request-headers#x-forwarded-for)、
+// 将来Vercelの手前に別プロキシ(CDN等)を追加した場合はx-forwarded-forが
+// そちらの値で上書きされる可能性がある。x-vercel-forwarded-forは
+// 「x-forwarded-forと同一だが外部プロキシの影響を受けないVercel内部専用の値」
+// のため、これを優先して使う。
+function getClientIp(req) {
+  const raw = req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '';
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value.split(',')[0].trim() || 'unknown-ip';
+}
+
 // email + 有効期限をSESSION_SECRETで署名した簡易トークンを発行
 function createSessionToken(email) {
   const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
@@ -55,11 +69,7 @@ export default async function handler(req, res) {
   }
 
   // --- レート制限チェック（ここから下は一般ユーザーのみ進む） ---
-  const forwarded = req.headers['x-forwarded-for'];
-  
-  const ip = (Array.isArray(forwarded) ? forwarded[0] : forwarded || '')
-    .split(',')[0]
-    .trim() || 'unknown-ip';
+  const ip = getClientIp(req);
 
   const rateLimitKeys = [
     `ratelimit:login:email:${normalizedEmail}`,
