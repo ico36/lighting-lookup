@@ -985,7 +985,7 @@
         <span class="total-amount" id="estimate-preview-amount">¥0</span>
       </div>
       <div style="margin-top:16px;">
-        <button class="btn-primary" style="width:100%;" onclick="generateEstimateSheet()">見積書を生成</button>
+        <button class="btn-primary" style="width:100%;" onclick="generateEstimateSheet(this)">見積書を生成</button>
       </div>
     </div>
   </div>
@@ -1138,7 +1138,7 @@
       <input type="text" id="new-case-memo" class="stacked-input" placeholder="メモ（任意）" style="margin-bottom:0;" />
       <div id="new-case-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
       <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn-primary" style="flex:1;" onclick="submitNewCase()">作成</button>
+        <button class="btn-primary" style="flex:1;" onclick="submitNewCase(this)">作成</button>
         <button class="btn-secondary" style="flex:1;" onclick="closeNewCaseForm()">キャンセル</button>
       </div>
     </div>
@@ -1149,7 +1149,7 @@
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <input type="date" id="archive-search-from" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
       <input type="date" id="archive-search-to" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
-      <button class="btn-secondary" onclick="searchArchivedCasesUI()">検索</button>
+      <button class="btn-secondary" onclick="searchArchivedCasesUI(this)">検索</button>
     </div>
     <div id="archive-search-results"></div>
   </div>
@@ -1302,34 +1302,30 @@ async function submitEmail() {
   const btn = document.getElementById('login-btn');
   const errorEl = document.getElementById('login-error');
   errorEl.style.display = 'none';
-  btn.disabled = true;
-  const originalBtnText = btn.textContent;
-  btn.textContent = '確認中...';
 
-  try {
-    const response = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email })
-    });
-    const data = await response.json();
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await response.json();
 
-    if (!response.ok) {
-      errorEl.textContent = data.error || 'ログインに失敗しました';
+      if (!response.ok) {
+        errorEl.textContent = data.error || 'ログインに失敗しました';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      localStorage.setItem('session_token', data.token);
+      await checkCompanyAndRoute();
+
+    } catch (err) {
+      errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
       errorEl.style.display = 'block';
-      return;
     }
-
-    localStorage.setItem('session_token', data.token);
-    await checkCompanyAndRoute();
-
-  } catch (err) {
-    errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
-    errorEl.style.display = 'block';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = originalBtnText;
-  }
+  }, '確認中...');
 }
 
 function showLoginGate(message) {
@@ -1349,6 +1345,28 @@ function showLoginGate(message) {
 function handleSessionExpired(cleanup) {
   if (typeof cleanup === 'function') cleanup();
   showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+}
+
+// 送信中はボタンをdisabledにして連打による二重送信を防ぐ共通ヘルパー。
+// 実行中(btn.disabled===true)に再度呼ばれた場合は何もしない。
+// btnを渡さない(ボタンクリック以外から呼ばれる)場合は、ガードなしでfnをそのまま実行する。
+// 入力チェックなど「送信前に弾く」判定は、呼び出し側でこれを呼ぶ前に行うこと
+// (弾かれた場合にボタンを触らないため)。
+async function withButtonGuard(btn, fn, loadingText) {
+  if (btn && btn.disabled) return;
+  const originalText = btn ? btn.textContent : null;
+  if (btn) {
+    btn.disabled = true;
+    if (loadingText) btn.textContent = loadingText;
+  }
+  try {
+    return await fn();
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
 }
 
 // ===== ヘッダーメニュー（モバイル幅でのハンバーガーメニュー） =====
@@ -1514,46 +1532,43 @@ async function submitContact() {
   }
 
   const btn = document.getElementById('contact-submit-btn');
-  btn.disabled = true;
-  const originalBtnText = btn.textContent;
-  btn.textContent = '準備中...';
 
-  try {
-    const response = await authFetch('/api/info/contact-config');
-    const data = await response.json();
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch('/api/info/contact-config');
+      const data = await response.json();
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired(closeContactModal);
-      } else {
-        errorEl.textContent = data.error || 'お問い合わせフォームの準備に失敗しました。もう一度お試しください。';
-        errorEl.style.display = 'block';
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeContactModal);
+        } else {
+          errorEl.textContent = data.error || 'お問い合わせフォームの準備に失敗しました。もう一度お試しください。';
+          errorEl.style.display = 'block';
+        }
+        return;
       }
-      return;
+
+      const subject = '【照明サーチ】お問い合わせ';
+      const body =
+        '【お名前】\n' + name + '\n\n' +
+        '【アカウント】\n' + data.accountEmail + '\n\n' +
+        '【現在のプラン】\n' + data.planName + '\n\n' +
+        '【お問い合わせ内容】\n' + message;
+
+      const mailtoUrl =
+        'mailto:' + data.supportEmail +
+        '?subject=' + encodeURIComponent(subject) +
+        '&body=' + encodeURIComponent(body);
+
+      window.location.href = mailtoUrl;
+      closeContactModal();
+    } catch (err) {
+      errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
+      errorEl.style.display = 'block';
     }
+  }, '準備中...');
 
-    const subject = '【照明サーチ】お問い合わせ';
-    const body =
-      '【お名前】\n' + name + '\n\n' +
-      '【アカウント】\n' + data.accountEmail + '\n\n' +
-      '【現在のプラン】\n' + data.planName + '\n\n' +
-      '【お問い合わせ内容】\n' + message;
-
-    const mailtoUrl =
-      'mailto:' + data.supportEmail +
-      '?subject=' + encodeURIComponent(subject) +
-      '&body=' + encodeURIComponent(body);
-
-    window.location.href = mailtoUrl;
-    closeContactModal();
-  } catch (err) {
-    errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
-    errorEl.style.display = 'block';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = originalBtnText;
-    updateContactSubmitState();
-  }
+  updateContactSubmitState();
 }
 
 // ===== お知らせ =====
@@ -1758,78 +1773,74 @@ async function saveCompanyInfo(scope) {
     return;
   }
   errorEl.style.display = 'none';
-  saveBtn.disabled = true;
-  const originalText = saveBtn.textContent;
-  saveBtn.textContent = '保存中...';
 
-  try {
-    let logoUrl = companyInfo?.logoUrl || '';
+  await withButtonGuard(saveBtn, async () => {
+    try {
+      let logoUrl = companyInfo?.logoUrl || '';
 
-    if (pendingLogo[scope]) {
-      const uploadRes = await authFetch('/api/company-logo', {
+      if (pendingLogo[scope]) {
+        const uploadRes = await authFetch('/api/company-logo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base64: pendingLogo[scope].base64,
+            mimeType: pendingLogo[scope].mimeType
+          })
+        });
+        let uploadData;
+        try {
+          uploadData = await uploadRes.json();
+        } catch (parseErr) {
+          console.error('ロゴアップロードのレスポンス解析に失敗:', parseErr, uploadRes.status);
+          throw new Error(`ロゴ画像のアップロードに失敗しました（サーバーエラー: ${uploadRes.status}）`);
+        }
+        if (!uploadRes.ok) {
+          console.error('ロゴアップロード失敗:', uploadRes.status, uploadData);
+          const detail = uploadData.detail ? `（詳細: ${uploadData.detail}）` : '';
+          throw new Error((uploadData.error || 'ロゴ画像のアップロードに失敗しました') + detail);
+        }
+        logoUrl = uploadData.url;
+      } else if (logoRemoved[scope]) {
+        logoUrl = '';
+      }
+
+      const response = await authFetch('/api/company', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          base64: pendingLogo[scope].base64,
-          mimeType: pendingLogo[scope].mimeType
+          name,
+          tel: telEl.value.trim(),
+          license: licenseEl.value.trim(),
+          logoUrl
         })
       });
-      let uploadData;
-      try {
-        uploadData = await uploadRes.json();
-      } catch (parseErr) {
-        console.error('ロゴアップロードのレスポンス解析に失敗:', parseErr, uploadRes.status);
-        throw new Error(`ロゴ画像のアップロードに失敗しました（サーバーエラー: ${uploadRes.status}）`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          return;
+        }
+        throw new Error(data.error || '保存に失敗しました');
       }
-      if (!uploadRes.ok) {
-        console.error('ロゴアップロード失敗:', uploadRes.status, uploadData);
-        const detail = uploadData.detail ? `（詳細: ${uploadData.detail}）` : '';
-        throw new Error((uploadData.error || 'ロゴ画像のアップロードに失敗しました') + detail);
+
+      companyInfo = data.company;
+      pendingLogo[scope] = null;
+      logoRemoved[scope] = false;
+
+      if (scope === 'setup') {
+        document.getElementById('company-setup-gate').style.display = 'none';
+        document.getElementById('app-main').style.display = 'block';
+      } else {
+        closeCompanySettings();
       }
-      logoUrl = uploadData.url;
-    } else if (logoRemoved[scope]) {
-      logoUrl = '';
+      renderEstimateCompanyDisplay();
+    } catch (err) {
+      console.error('自社情報の保存に失敗:', err);
+      errorEl.textContent = err.message || '通信エラーが発生しました';
+      errorEl.style.display = 'block';
     }
-
-    const response = await authFetch('/api/company', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        tel: telEl.value.trim(),
-        license: licenseEl.value.trim(),
-        logoUrl
-      })
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired();
-        return;
-      }
-      throw new Error(data.error || '保存に失敗しました');
-    }
-
-    companyInfo = data.company;
-    pendingLogo[scope] = null;
-    logoRemoved[scope] = false;
-
-    if (scope === 'setup') {
-      document.getElementById('company-setup-gate').style.display = 'none';
-      document.getElementById('app-main').style.display = 'block';
-    } else {
-      closeCompanySettings();
-    }
-    renderEstimateCompanyDisplay();
-  } catch (err) {
-    console.error('自社情報の保存に失敗:', err);
-    errorEl.textContent = err.message || '通信エラーが発生しました';
-    errorEl.style.display = 'block';
-  } finally {
-    saveBtn.disabled = false;
-    saveBtn.textContent = originalText;
-  }
+  }, '保存中...');
 }
 
 // 保存済みの自社情報を見積フォームに表示専用で反映する（編集は設定画面からのみ可能にするため、入力欄は持たない）
@@ -1927,7 +1938,7 @@ function renderCasesList() {
   `).join('');
 }
 
-async function submitNewCase() {
+async function submitNewCase(btn) {
   const nameEl = document.getElementById('new-case-customer');
   const memoEl = document.getElementById('new-case-memo');
   const errorEl = document.getElementById('new-case-error');
@@ -1935,28 +1946,30 @@ async function submitNewCase() {
 
   errorEl.style.display = 'none';
 
-  try {
-    const response = await authFetch('/api/cases', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerName: name, memo: memoEl.value.trim() })
-    });
-    const data = await response.json();
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch('/api/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerName: name, memo: memoEl.value.trim() })
+      });
+      const data = await response.json();
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired(closeCasesModal);
-        return;
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeCasesModal);
+          return;
+        }
+        throw new Error(data.message || data.error || '案件の作成に失敗しました');
       }
-      throw new Error(data.message || data.error || '案件の作成に失敗しました');
-    }
 
-    closeNewCaseForm();
-    await loadCasesList();
-  } catch (err) {
-    errorEl.textContent = err.message || '通信エラーが発生しました';
-    errorEl.style.display = 'block';
-  }
+      closeNewCaseForm();
+      await loadCasesList();
+    } catch (err) {
+      errorEl.textContent = err.message || '通信エラーが発生しました';
+      errorEl.style.display = 'block';
+    }
+  }, '作成中...');
 }
 
 async function openCaseDetail(caseId) {
@@ -2021,7 +2034,7 @@ function renderCaseDetail(c, searches) {
       <select id="case-status-select" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:inherit;font-size:14px;">
         ${statusOptionsHTML}
       </select>
-      <button class="btn-primary" onclick="changeCaseStatus(document.getElementById('case-status-select').value)">変更</button>
+      <button class="btn-primary" onclick="changeCaseStatus(this, document.getElementById('case-status-select').value)">変更</button>
     </div>
   `;
 
@@ -2033,7 +2046,7 @@ function renderCaseDetail(c, searches) {
       <div class="section-label">案件名</div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="case-name-input" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;flex:1;" />
-        <button class="btn-primary" onclick="saveCaseName('${c.id}')">保存</button>
+        <button class="btn-primary" onclick="saveCaseName(this, '${c.id}')">保存</button>
       </div>
     </div>
     <div class="result-card">
@@ -2069,63 +2082,67 @@ function renderCaseDetail(c, searches) {
   document.getElementById('case-name-input').value = c.customerName || '';
 }
 
-async function saveCaseName(caseId) {
+async function saveCaseName(btn, caseId) {
   const input = document.getElementById('case-name-input');
   const newName = input.value.trim();
 
-  try {
-    const response = await authFetch(`/api/cases/${caseId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ customerName: newName })
-    });
-    const data = await response.json();
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/${caseId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerName: newName })
+      });
+      const data = await response.json();
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired();
-        return;
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          return;
+        }
+        throw new Error(data.error || '案件名の保存に失敗しました');
       }
-      throw new Error(data.error || '案件名の保存に失敗しました');
-    }
 
-    currentCaseDetailData = data.case;
-    document.getElementById('case-detail-title').textContent = data.case.customerName || '（無題の案件）';
-    if (cartCase && cartCase.id === caseId) cartCase = data.case;
-  } catch (err) {
-    alert(err.message || '通信エラーが発生しました');
-  }
+      currentCaseDetailData = data.case;
+      document.getElementById('case-detail-title').textContent = data.case.customerName || '（無題の案件）';
+      if (cartCase && cartCase.id === caseId) cartCase = data.case;
+    } catch (err) {
+      alert(err.message || '通信エラーが発生しました');
+    }
+  }, '保存中...');
 }
 
-async function changeCaseStatus(newStatus) {
+async function changeCaseStatus(btn, newStatus) {
   if (!currentCaseDetailId) return;
   if (newStatus === '失注・キャンセル' && !confirm('この案件を「失注・キャンセル」にしますか？')) return;
 
-  try {
-    const response = await authFetch(`/api/cases/${currentCaseDetailId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus })
-    });
-    const data = await response.json();
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/${currentCaseDetailId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+      const data = await response.json();
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired(closeCaseDetail);
-        return;
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeCaseDetail);
+          return;
+        }
+        throw new Error(data.message || data.error || 'ステータスの変更に失敗しました');
       }
-      throw new Error(data.message || data.error || 'ステータスの変更に失敗しました');
-    }
 
-    await openCaseDetail(currentCaseDetailId);
-  } catch (err) {
-    alert(err.message || '通信エラーが発生しました');
-  }
+      await openCaseDetail(currentCaseDetailId);
+    } catch (err) {
+      alert(err.message || '通信エラーが発生しました');
+    }
+  }, '変更中...');
 }
 
 // ----- 過去の案件を検索（完了・失注案件、アーカイブ済み） -----
 
-async function searchArchivedCasesUI() {
+async function searchArchivedCasesUI(btn) {
   const fromEl = document.getElementById('archive-search-from');
   const toEl = document.getElementById('archive-search-to');
   const bannerEl = document.getElementById('archive-search-campaign-banner');
@@ -2138,45 +2155,47 @@ async function searchArchivedCasesUI() {
   if (fromEl.value) params.set('from', fromEl.value);
   if (toEl.value) params.set('to', toEl.value);
 
-  try {
-    const response = await authFetch(`/api/cases/archive?${params.toString()}`);
-    const data = await response.json();
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/archive?${params.toString()}`);
+      const data = await response.json();
 
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired(closeCasesModal);
-        return;
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeCasesModal);
+          return;
+        }
+        if (response.status === 403) {
+          bannerEl.style.display = 'none';
+          resultsEl.innerHTML = `<div class="error-box">⚠️ ${data.message || 'この機能は利用できません'}</div>`;
+          return;
+        }
+        throw new Error(data.error || '検索に失敗しました');
       }
-      if (response.status === 403) {
+
+      if (data.campaign && data.campaign.active) {
+        bannerEl.textContent = '🎁 ' + data.campaign.message;
+        bannerEl.style.display = 'block';
+      } else {
         bannerEl.style.display = 'none';
-        resultsEl.innerHTML = `<div class="error-box">⚠️ ${data.message || 'この機能は利用できません'}</div>`;
-        return;
       }
-      throw new Error(data.error || '検索に失敗しました');
-    }
 
-    if (data.campaign && data.campaign.active) {
-      bannerEl.textContent = '🎁 ' + data.campaign.message;
-      bannerEl.style.display = 'block';
-    } else {
-      bannerEl.style.display = 'none';
-    }
-
-    const cases = data.cases || [];
-    resultsEl.innerHTML = cases.length
-      ? cases.map(c => `
-          <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <span style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</span>
-              <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
+      const cases = data.cases || [];
+      resultsEl.innerHTML = cases.length
+        ? cases.map(c => `
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</span>
+                <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
+              </div>
+              <div style="font-size:12px;color:var(--text2);margin-top:2px;">アーカイブ日: ${new Date(c.archivedAt).toLocaleDateString('ja-JP')}</div>
             </div>
-            <div style="font-size:12px;color:var(--text2);margin-top:2px;">アーカイブ日: ${new Date(c.archivedAt).toLocaleDateString('ja-JP')}</div>
-          </div>
-        `).join('')
-      : `<div style="color:var(--text2);font-size:13px;">該当する案件はありませんでした</div>`;
-  } catch (err) {
-    resultsEl.innerHTML = `<div class="error-box">⚠️ ${err.message || '通信エラーが発生しました'}</div>`;
-  }
+          `).join('')
+        : `<div style="color:var(--text2);font-size:13px;">該当する案件はありませんでした</div>`;
+    } catch (err) {
+      resultsEl.innerHTML = `<div class="error-box">⚠️ ${err.message || '通信エラーが発生しました'}</div>`;
+    }
+  });
 }
 
 // ----- 検索結果を案件に保存 -----
@@ -2218,73 +2237,75 @@ function onCaseAttachSelectChange() {
   wrap.style.display = select.value === '__new__' ? 'block' : 'none';
 }
 
-async function attachCurrentSearchToCase() {
+async function attachCurrentSearchToCase(btn) {
   const select = document.getElementById('case-attach-select');
   const msgEl = document.getElementById('case-attach-msg');
   if (!select || !lastResult) return;
 
   msgEl.textContent = '';
-  let caseId = select.value;
 
-  try {
-    if (caseId === '__new__') {
-      const nameInput = document.getElementById('case-attach-new-name');
-      const name = nameInput.value.trim();
-      if (!name) {
-        msgEl.textContent = 'お客様名を入力してください';
-        msgEl.style.color = 'var(--error)';
-        return;
+  await withButtonGuard(btn, async () => {
+    let caseId = select.value;
+    try {
+      if (caseId === '__new__') {
+        const nameInput = document.getElementById('case-attach-new-name');
+        const name = nameInput.value.trim();
+        if (!name) {
+          msgEl.textContent = 'お客様名を入力してください';
+          msgEl.style.color = 'var(--error)';
+          return;
+        }
+        const createRes = await authFetch('/api/cases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerName: name })
+        });
+        const createData = await createRes.json();
+        if (!createRes.ok) {
+          if (createRes.status === 401) {
+            handleSessionExpired();
+            return;
+          }
+          throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
+        }
+        caseId = createData.case.id;
       }
-      const createRes = await authFetch('/api/cases', {
+
+      const searchRes = await authFetch(`/api/cases/${caseId}/searches`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerName: name })
+        body: JSON.stringify({
+          model: lastResult.original_model,
+          manufacturer: lastResult.manufacturer,
+          name: lastResult.product_name,
+          status: lastResult.status,
+          note: lastResult.caution || ''
+        })
       });
-      const createData = await createRes.json();
-      if (!createRes.ok) {
-        if (createRes.status === 401) {
+      const searchData = await searchRes.json();
+      if (!searchRes.ok) {
+        if (searchRes.status === 401) {
           handleSessionExpired();
           return;
         }
-        throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
+        throw new Error(searchData.error || '保存に失敗しました');
       }
-      caseId = createData.case.id;
-    }
 
-    const searchRes = await authFetch(`/api/cases/${caseId}/searches`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: lastResult.original_model,
-        manufacturer: lastResult.manufacturer,
-        name: lastResult.product_name,
-        status: lastResult.status,
-        note: lastResult.caution || ''
-      })
-    });
-    const searchData = await searchRes.json();
-    if (!searchRes.ok) {
-      if (searchRes.status === 401) {
-        handleSessionExpired();
-        return;
+      msgEl.textContent = '保存しました';
+      msgEl.style.color = 'var(--success)';
+
+      // この検索を保存した案件を「現在アクティブな案件」にも合わせる。
+      // これをしないと、直後に候補を「カートに追加」した際、対象がここで
+      // 選んだ案件とズレて別の(重複した)案件が作られてしまう。
+      if (caseId !== currentCartCaseId) {
+        await setActiveCase(caseId);
       }
-      throw new Error(searchData.error || '保存に失敗しました');
+      await loadOpenCasesForAttach();
+    } catch (err) {
+      msgEl.textContent = err.message || '通信エラーが発生しました';
+      msgEl.style.color = 'var(--error)';
     }
-
-    msgEl.textContent = '保存しました';
-    msgEl.style.color = 'var(--success)';
-
-    // この検索を保存した案件を「現在アクティブな案件」にも合わせる。
-    // これをしないと、直後に候補を「カートに追加」した際、対象がここで
-    // 選んだ案件とズレて別の(重複した)案件が作られてしまう。
-    if (caseId !== currentCartCaseId) {
-      await setActiveCase(caseId);
-    }
-    await loadOpenCasesForAttach();
-  } catch (err) {
-    msgEl.textContent = err.message || '通信エラーが発生しました';
-    msgEl.style.color = 'var(--error)';
-  }
+  }, '保存中...');
 }
 
 // ===== カート機能（検索候補→カート→見積書） =====
@@ -2538,7 +2559,7 @@ function estimateUnitPriceFromDetail(detail) {
   return 0;
 }
 
-async function addCandidateToCart(index) {
+async function addCandidateToCart(btn, index) {
   const candidate = (lastResult && lastResult._candidates || [])[index];
   if (!candidate) return;
 
@@ -2546,36 +2567,38 @@ async function addCandidateToCart(index) {
   const rawDetail = detailCache[cacheKey] || null;
   const estimatedUnitPrice = estimateUnitPriceFromDetail(rawDetail);
 
-  try {
-    const caseId = await ensureCartCase();
-    const response = await authFetch(`/api/cases/${caseId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        cartAdd: {
-          name: candidate.name || '',
-          modelNumber: candidate.model || '',
-          manufacturer: candidate.manufacturer || '',
-          unitPrice: estimatedUnitPrice,
-          rawDetail
+  await withButtonGuard(btn, async () => {
+    try {
+      const caseId = await ensureCartCase();
+      const response = await authFetch(`/api/cases/${caseId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cartAdd: {
+            name: candidate.name || '',
+            modelNumber: candidate.model || '',
+            manufacturer: candidate.manufacturer || '',
+            unitPrice: estimatedUnitPrice,
+            rawDetail
+          }
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          return;
         }
-      })
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired();
-        return;
+        throw new Error(data.error || 'カートへの追加に失敗しました');
       }
-      throw new Error(data.error || 'カートへの追加に失敗しました');
-    }
 
-    cartCase = data.case;
-    updateCartBadge();
-  } catch (err) {
-    alert(err.message || '通信エラーが発生しました');
-  }
+      cartCase = data.case;
+      updateCartBadge();
+    } catch (err) {
+      alert(err.message || '通信エラーが発生しました');
+    }
+  }, '追加中...');
 }
 
 async function openCartModal() {
@@ -2845,7 +2868,6 @@ async function doSearch() {
   }
 
   const btn = document.getElementById('search-btn');
-  btn.disabled = true;
 
   const resultArea = document.getElementById('result-area');
   const resultContent = document.getElementById('result-content');
@@ -2859,47 +2881,47 @@ async function doSearch() {
     </div>
   `;
 
-  try {
-    const messages = buildMessages(modelNum, note);
-    const response = await fetchWithRetry('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system: SYSTEM_PROMPT,
-        messages
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      if (response.status === 401) {
-        handleSessionExpired();
-        throw new Error('ログインが必要です。再度メールアドレスを入力してください。');
-      }
-      throw new Error(data.error || 'サーバーエラーが発生しました');
-    }
-
-    const raw = data.content.map(i => i.text || '').join('');
-    let result;
+  await withButtonGuard(btn, async () => {
     try {
-      result = extractJSON(raw);
-    } catch {
-      throw new Error('AI応答の解析に失敗しました。もう一度お試しください。');
-    }
+      const messages = buildMessages(modelNum, note);
+      const response = await fetchWithRetry('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: SYSTEM_PROMPT,
+          messages
+        })
+      });
 
-    renderResult(result);
-  } catch (err) {
-    resultContent.innerHTML = `
-      <div class="result-card">
-        <div class="result-body">
-          <div class="error-box">⚠️ ${err.message || 'エラーが発生しました。もう一度お試しください。'}</div>
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          throw new Error('ログインが必要です。再度メールアドレスを入力してください。');
+        }
+        throw new Error(data.error || 'サーバーエラーが発生しました');
+      }
+
+      const raw = data.content.map(i => i.text || '').join('');
+      let result;
+      try {
+        result = extractJSON(raw);
+      } catch {
+        throw new Error('AI応答の解析に失敗しました。もう一度お試しください。');
+      }
+
+      renderResult(result);
+    } catch (err) {
+      resultContent.innerHTML = `
+        <div class="result-card">
+          <div class="result-body">
+            <div class="error-box">⚠️ ${err.message || 'エラーが発生しました。もう一度お試しください。'}</div>
+          </div>
         </div>
-      </div>
-    `;
-  } finally {
-    btn.disabled = false;
-  }
+      `;
+    }
+  });
 }
 
 function buildMessages(modelNum, note) {
@@ -2981,7 +3003,7 @@ function renderResult(r) {
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${escapeHtml(s.note)}</div>` : ''}
         <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap;">
           <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
-          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(${i})">🛒 カートに追加</button>
+          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i})">🛒 カートに追加</button>
         </div>
       </div>
     </div>
@@ -3066,7 +3088,7 @@ function renderResult(r) {
         <div id="case-attach-new-wrap" style="display:none;margin-top:10px;">
           <input type="text" id="case-attach-new-name" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;" />
         </div>
-        <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="attachCurrentSearchToCase()">この案件に保存</button>
+        <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="attachCurrentSearchToCase(this)">この案件に保存</button>
         <div id="case-attach-msg" style="font-size:12px;margin-top:8px;"></div>
       </div>
     </div>
@@ -3209,7 +3231,7 @@ function renderDetailModal(d, fallback) {
     </div>
 
     <div style="margin-top:16px;">
-      <button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(currentDetailIndex)">🛒 カートに追加</button>
+      <button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(this, currentDetailIndex)">🛒 カートに追加</button>
     </div>
   `;
 }
@@ -3263,7 +3285,7 @@ function updateEstimatePreview() {
   if (el) el.textContent = yen(total);
 }
 
-function generateEstimateSheet() {
+async function generateEstimateSheet(btn) {
   const items = (cartCase && cartCase.cartItems) || [];
   if (items.length === 0) {
     alert('カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
@@ -3280,6 +3302,8 @@ function generateEstimateSheet() {
     );
     if (!proceed) return;
   }
+
+  await withButtonGuard(btn, async () => {
 
   const clientName = document.getElementById('client-name').value.trim() || 'お客様';
   const clientSite = document.getElementById('client-site').value.trim();
@@ -3381,7 +3405,8 @@ ${bizName}${bizTel ? ' / TEL: ' + bizTel : ''}
 `.trim();
 
   // お客様名・工事場所・施工費・出張費・備考を案件に保存し、次回開いたときも引き継ぐ
-  saveEstimateMeta({ clientName, clientSite, laborPrice, visitPrice, bizNote });
+  await saveEstimateMeta({ clientName, clientSite, laborPrice, visitPrice, bizNote });
+  }, '生成中...');
 }
 
 async function saveEstimateMeta(meta) {
