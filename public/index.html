@@ -967,6 +967,7 @@
       <div class="upload-icon">📷</div>
       <div class="upload-text"><strong>タップして写真を選択</strong><br>型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります</div>
     </div>
+    <div id="upload-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
     <div id="preview-container" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;"></div>
   </div>
 
@@ -975,11 +976,13 @@
     <textarea class="note-input" id="note-input" placeholder="設置場所、取り付け方法、お客さんの要望など"></textarea>
   </div>
 
+  <div id="result-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:16px;"></div>
   <div id="result-area">
     <div id="result-content"></div>
   </div>
 
   <div id="estimate-form-area" style="display:none;">
+    <div id="estimate-form-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:14px;"></div>
     <div class="input-card">
       <div class="section-label">お客様情報</div>
       <div class="company-info-grid">
@@ -1045,6 +1048,7 @@
       <div class="modal-title" id="detail-modal-title">商品詳細</div>
       <button class="modal-close" onclick="closeDetailModal()">✕</button>
     </div>
+    <div id="detail-modal-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:10px;"></div>
     <div id="detail-modal-body"></div>
   </div>
 </div>
@@ -1172,6 +1176,7 @@
       <input type="file" id="import-file-input" accept="application/json" style="display:none;" onchange="handleImportFile(this)" />
     </div>
     <div style="font-size:12px;color:var(--text2);margin-top:6px;margin-bottom:14px;">「見積もりを保存」で保存したファイルを選んでください</div>
+    <div id="import-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:14px;"></div>
     <div id="new-case-form" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
       <input type="text" id="new-case-customer" class="stacked-input" placeholder="お客様名（例：山田様）" />
       <input type="text" id="new-case-memo" class="stacked-input" placeholder="メモ（任意）" style="margin-bottom:0;" />
@@ -1212,6 +1217,7 @@
       <button class="modal-close" onclick="closeCartModal()">✕</button>
     </div>
     <div id="cart-target-info" style="font-size:13px;color:var(--text2);margin-bottom:14px;"></div>
+    <div id="cart-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:10px;"></div>
     <div id="cart-items-body"></div>
     <div class="total-line" style="margin-top:16px;">
       <span>小計</span>
@@ -1340,7 +1346,7 @@ async function submitEmail() {
 
   const btn = document.getElementById('login-btn');
   const errorEl = document.getElementById('login-error');
-  errorEl.style.display = 'none';
+  hideError(errorEl);
 
   await withButtonGuard(btn, async () => {
     try {
@@ -1352,8 +1358,7 @@ async function submitEmail() {
       const data = await response.json();
 
       if (!response.ok) {
-        errorEl.textContent = data.error || 'ログインに失敗しました';
-        errorEl.style.display = 'block';
+        showError(errorEl, data.error || 'ログインに失敗しました');
         return;
       }
 
@@ -1361,8 +1366,7 @@ async function submitEmail() {
       await checkCompanyAndRoute();
 
     } catch (err) {
-      errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
-      errorEl.style.display = 'block';
+      showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
     }
   }, '確認中...');
 }
@@ -1372,10 +1376,8 @@ function showLoginGate(message) {
   document.getElementById('app-main').style.display = 'none';
   document.getElementById('company-setup-gate').style.display = 'none';
   document.getElementById('login-gate').style.display = 'block';
-  const errorEl = document.getElementById('login-error');
   if (message) {
-    errorEl.textContent = message;
-    errorEl.style.display = 'block';
+    showError(document.getElementById('login-error'), message);
   }
 }
 
@@ -1406,6 +1408,20 @@ async function withButtonGuard(btn, fn, loadingText) {
       btn.textContent = originalText;
     }
   }
+}
+
+// 専用のエラー表示エリアにメッセージを出す/消す共通ヘルパー。
+// alert()の代わりに使い、各所で重複していた
+// errorEl.textContent=...; errorEl.style.display='block'; を集約する。
+function showError(el, message) {
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = 'block';
+}
+
+function hideError(el) {
+  if (!el) return;
+  el.style.display = 'none';
 }
 
 // ===== ヘッダーメニュー（モバイル幅でのハンバーガーメニュー） =====
@@ -1562,11 +1578,10 @@ async function submitContact() {
   const name = document.getElementById('contact-name').value.trim();
   const message = document.getElementById('contact-message').value.trim();
   const errorEl = document.getElementById('contact-error');
-  errorEl.style.display = 'none';
+  hideError(errorEl);
 
   if (!name || !message) {
-    errorEl.textContent = 'お名前とお問い合わせ内容を入力してください';
-    errorEl.style.display = 'block';
+    showError(errorEl, 'お名前とお問い合わせ内容を入力してください');
     return;
   }
 
@@ -1581,8 +1596,7 @@ async function submitContact() {
         if (response.status === 401) {
           handleSessionExpired(closeContactModal);
         } else {
-          errorEl.textContent = data.error || 'お問い合わせフォームの準備に失敗しました。もう一度お試しください。';
-          errorEl.style.display = 'block';
+          showError(errorEl, data.error || 'お問い合わせフォームの準備に失敗しました。もう一度お試しください。');
         }
         return;
       }
@@ -1602,8 +1616,7 @@ async function submitContact() {
       window.location.href = mailtoUrl;
       closeContactModal();
     } catch (err) {
-      errorEl.textContent = '通信エラーが発生しました。もう一度お試しください。';
-      errorEl.style.display = 'block';
+      showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
     }
   }, '準備中...');
 
@@ -1682,19 +1695,14 @@ function renderAnnouncementsList() {
 }
 
 function showLogoError(scope, message) {
-  const errorEl = document.getElementById(`${scope}-error`);
-  if (errorEl) {
-    errorEl.textContent = message;
-    errorEl.style.display = 'block';
-  }
+  showError(document.getElementById(`${scope}-error`), message);
 }
 
 function handleLogoFile(input, scope) {
   const file = (input.files || [])[0];
   if (!file) return;
 
-  const errorEl = document.getElementById(`${scope}-error`);
-  if (errorEl) errorEl.style.display = 'none';
+  hideError(document.getElementById(`${scope}-error`));
 
   if (!LOGO_ALLOWED_TYPES.includes(file.type)) {
     showLogoError(scope, '対応していないファイル形式です（PNG・JPEG・SVGのみ対応しています）');
@@ -1807,11 +1815,10 @@ async function saveCompanyInfo(scope) {
 
   const name = nameEl.value.trim();
   if (!name) {
-    errorEl.textContent = '会社名を入力してください';
-    errorEl.style.display = 'block';
+    showError(errorEl, '会社名を入力してください');
     return;
   }
-  errorEl.style.display = 'none';
+  hideError(errorEl);
 
   await withButtonGuard(saveBtn, async () => {
     try {
@@ -1876,8 +1883,7 @@ async function saveCompanyInfo(scope) {
       renderEstimateCompanyDisplay();
     } catch (err) {
       console.error('自社情報の保存に失敗:', err);
-      errorEl.textContent = err.message || '通信エラーが発生しました';
-      errorEl.style.display = 'block';
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '保存中...');
 }
@@ -1986,7 +1992,7 @@ async function submitNewCase(btn) {
   const errorEl = document.getElementById('new-case-error');
   const name = nameEl.value.trim();
 
-  errorEl.style.display = 'none';
+  hideError(errorEl);
 
   await withButtonGuard(btn, async () => {
     try {
@@ -2008,8 +2014,7 @@ async function submitNewCase(btn) {
       closeNewCaseForm();
       await loadCasesList();
     } catch (err) {
-      errorEl.textContent = err.message || '通信エラーが発生しました';
-      errorEl.style.display = 'block';
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '作成中...');
 }
@@ -2089,6 +2094,7 @@ function renderCaseDetail(c, searches) {
   const cartSubtotal = cartItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
 
   document.getElementById('case-detail-body').innerHTML = `
+    <div id="case-detail-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;"></div>
     <div class="input-card">
       <div class="section-label">案件名</div>
       <div style="display:flex;gap:8px;">
@@ -2136,6 +2142,8 @@ function renderCaseDetail(c, searches) {
 async function saveCaseName(btn, caseId) {
   const input = document.getElementById('case-name-input');
   const newName = input.value.trim();
+  const errorEl = document.getElementById('case-detail-error');
+  hideError(errorEl);
 
   await withButtonGuard(btn, async () => {
     try {
@@ -2158,7 +2166,7 @@ async function saveCaseName(btn, caseId) {
       document.getElementById('case-detail-title').textContent = data.case.customerName || '（無題の案件）';
       if (cartCase && cartCase.id === caseId) cartCase = data.case;
     } catch (err) {
-      alert(err.message || '通信エラーが発生しました');
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '保存中...');
 }
@@ -2166,6 +2174,8 @@ async function saveCaseName(btn, caseId) {
 async function changeCaseStatus(btn, newStatus) {
   if (!currentCaseDetailId) return;
   if (newStatus === '失注・キャンセル' && !confirm('この案件を「失注・キャンセル」にしますか？')) return;
+  const errorEl = document.getElementById('case-detail-error');
+  hideError(errorEl);
 
   await withButtonGuard(btn, async () => {
     try {
@@ -2186,7 +2196,7 @@ async function changeCaseStatus(btn, newStatus) {
 
       await openCaseDetail(currentCaseDetailId);
     } catch (err) {
-      alert(err.message || '通信エラーが発生しました');
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '変更中...');
 }
@@ -2197,6 +2207,8 @@ async function changeCaseStatus(btn, newStatus) {
 async function addHistoryToCart(btn, index) {
   const search = currentCaseDetailSearches[index];
   if (!search || !currentCaseDetailId) return;
+  const errorEl = document.getElementById('case-detail-error');
+  hideError(errorEl);
 
   await withButtonGuard(btn, async () => {
     try {
@@ -2223,7 +2235,7 @@ async function addHistoryToCart(btn, index) {
 
       await openCaseDetail(currentCaseDetailId);
     } catch (err) {
-      alert(err.message || '通信エラーが発生しました');
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '追加中...');
 }
@@ -2261,6 +2273,8 @@ async function deleteCaseHandler(btn, caseId) {
     `「${name}」を完全に削除します。カート内容・見積り設定・検索履歴もすべて削除され、元に戻すことはできません。\n\n本当に削除しますか？`
   );
   if (!confirmed) return;
+  const errorEl = document.getElementById('case-detail-error');
+  hideError(errorEl);
 
   await withButtonGuard(btn, async () => {
     try {
@@ -2282,7 +2296,7 @@ async function deleteCaseHandler(btn, caseId) {
       }
       backToCasesList();
     } catch (err) {
-      alert(err.message || '通信エラーが発生しました');
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '削除中...');
 }
@@ -2554,17 +2568,20 @@ async function handleImportFile(input) {
   input.value = '';
   if (!file) return;
 
+  const errorEl = document.getElementById('import-error');
+  hideError(errorEl);
+
   let data;
   try {
     const text = await file.text();
     data = JSON.parse(text);
   } catch (err) {
-    alert('このファイルは見積もりデータではないようです。「見積もりを保存」で保存したファイルを選んでください。');
+    showError(errorEl, 'このファイルは見積もりデータではないようです。「見積もりを保存」で保存したファイルを選んでください。');
     return;
   }
 
   if (!Array.isArray(data.cartItems)) {
-    alert('このファイルは見積もりデータではないようです。「見積もりを保存」で保存したファイルを選んでください。');
+    showError(errorEl, 'このファイルは見積もりデータではないようです。「見積もりを保存」で保存したファイルを選んでください。');
     return;
   }
 
@@ -2650,7 +2667,7 @@ async function handleImportFile(input) {
     closeCasesModal();
     await openCaseDetail(targetCaseId);
   } catch (err) {
-    alert(err.message || '通信エラーが発生しました');
+    showError(errorEl, err.message || '通信エラーが発生しました');
   }
 }
 
@@ -2706,9 +2723,13 @@ function estimateUnitPriceFromDetail(detail) {
   return 0;
 }
 
-async function addCandidateToCart(btn, index) {
+// errorElId: 呼び出し元によって表示先が異なる('result-error'=検索結果画面から、
+// 'detail-modal-error'=商品詳細モーダルから)ため、呼び出し側から明示的に渡す。
+async function addCandidateToCart(btn, index, errorElId) {
   const candidate = (lastResult && lastResult._candidates || [])[index];
   if (!candidate) return;
+  const errorEl = document.getElementById(errorElId);
+  hideError(errorEl);
 
   const cacheKey = candidate.model + '|' + candidate.manufacturer;
   const rawDetail = detailCache[cacheKey] || null;
@@ -2743,7 +2764,7 @@ async function addCandidateToCart(btn, index) {
       cartCase = data.case;
       updateCartBadge();
     } catch (err) {
-      alert(err.message || '通信エラーが発生しました');
+      showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '追加中...');
 }
@@ -2803,6 +2824,8 @@ async function updateCartItemUI(itemId, field, value) {
   if (!currentCartCaseId) return;
   const payload = { itemId };
   payload[field] = Number(value);
+  const errorEl = document.getElementById('cart-error');
+  hideError(errorEl);
 
   try {
     const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
@@ -2824,12 +2847,14 @@ async function updateCartItemUI(itemId, field, value) {
     renderCartItems();
     updateCartBadge();
   } catch (err) {
-    alert(err.message || '通信エラーが発生しました');
+    showError(errorEl, err.message || '通信エラーが発生しました');
   }
 }
 
 async function removeCartItemUI(itemId) {
   if (!currentCartCaseId) return;
+  const errorEl = document.getElementById('cart-error');
+  hideError(errorEl);
 
   try {
     const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
@@ -2851,7 +2876,7 @@ async function removeCartItemUI(itemId) {
     renderCartItems();
     updateCartBadge();
   } catch (err) {
-    alert(err.message || '通信エラーが発生しました');
+    showError(errorEl, err.message || '通信エラーが発生しました');
   }
 }
 
@@ -2859,9 +2884,10 @@ async function removeCartItemUI(itemId) {
 async function openEstimateFromCart() {
   await refreshCartCase();
   if (!cartCase || !cartCase.cartItems || cartCase.cartItems.length === 0) {
-    alert('カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
+    showError(document.getElementById('cart-error'), 'カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
     return;
   }
+  hideError(document.getElementById('cart-error'));
   closeCartModal();
   showEstimateForm();
 }
@@ -2915,17 +2941,20 @@ function handleFile(input) {
   const files = Array.from(input.files || []);
   if (files.length === 0) return;
 
+  const errorEl = document.getElementById('upload-error');
+  hideError(errorEl);
+
   const MAX_IMAGES = 5;
   const remainingSlots = MAX_IMAGES - uploadedImages.length;
 
   if (remainingSlots <= 0) {
-    alert(`写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
+    showError(errorEl, `写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
     input.value = '';
     return;
   }
 
   if (files.length > remainingSlots) {
-    alert(`写真は最大${MAX_IMAGES}枚までです。先頭${remainingSlots}枚のみ追加します。`);
+    showError(errorEl, `写真は最大${MAX_IMAGES}枚までです。先頭${remainingSlots}枚のみ追加します。`);
   }
 
   files.slice(0, remainingSlots).forEach(file => {
@@ -3008,9 +3037,11 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 async function doSearch() {
   const modelNum = document.getElementById('model-input').value.trim();
   const note = document.getElementById('note-input').value.trim();
+  const errorEl = document.getElementById('result-error');
+  hideError(errorEl);
 
   if (!modelNum && uploadedImages.length === 0) {
-    alert('型番を入力するか、写真をアップロードしてください');
+    showError(errorEl, '型番を入力するか、写真をアップロードしてください');
     return;
   }
 
@@ -3150,7 +3181,7 @@ function renderResult(r) {
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${escapeHtml(s.note)}</div>` : ''}
         <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap;">
           <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
-          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i})">🛒 カートに追加</button>
+          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i}, 'result-error')">🛒 カートに追加</button>
         </div>
       </div>
     </div>
@@ -3378,7 +3409,7 @@ function renderDetailModal(d, fallback) {
     </div>
 
     <div style="margin-top:16px;">
-      <button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(this, currentDetailIndex)">🛒 カートに追加</button>
+      <button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(this, currentDetailIndex, 'detail-modal-error')">🛒 カートに追加</button>
     </div>
   `;
 }
@@ -3433,9 +3464,12 @@ function updateEstimatePreview() {
 }
 
 async function generateEstimateSheet(btn) {
+  const errorEl = document.getElementById('estimate-form-error');
+  hideError(errorEl);
+
   const items = (cartCase && cartCase.cartItems) || [];
   if (items.length === 0) {
-    alert('カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
+    showError(errorEl, 'カートに器具が追加されていません。先に候補を検索してカートに追加してください。');
     return;
   }
 
