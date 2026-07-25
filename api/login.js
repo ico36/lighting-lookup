@@ -8,14 +8,10 @@
 //   stripe, @upstash/redis
 
 import Stripe from 'stripe';
-import { Redis } from '@upstash/redis';
 import crypto from 'crypto';
+import { redis } from '../lib/redis';
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
-});
 
 const RATE_LIMIT_MAX_ATTEMPTS = 5;      // この回数を超えたらブロック
 const RATE_LIMIT_WINDOW_SECONDS = 900;  // 15分間の試行回数でカウント

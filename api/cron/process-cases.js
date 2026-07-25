@@ -17,12 +17,7 @@ import {
   archiveCase,
 } from '../../lib/cases';
 import { CASE_LIMITS, AUTO_LOSE_GRACE_DAYS } from '../../lib/planLimits';
-import { Redis } from '@upstash/redis';
-
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
-});
+import { redis } from '../../lib/redis';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

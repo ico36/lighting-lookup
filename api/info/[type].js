@@ -3,13 +3,8 @@
 // GET /api/info/announcements   … お知らせ一覧の取得
 // GET /api/info/contact-config  … お問い合わせフォーム用の宛先・アカウント情報の取得
 
-import { Redis } from '@upstash/redis';
 import { requireAuth } from '../_auth';
-
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
-});
+import { redis } from '../../lib/redis';
 
 async function getAnnouncements(req, res) {
   const announcements = (await redis.get('announcements')) || [];

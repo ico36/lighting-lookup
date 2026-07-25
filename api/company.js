@@ -2,13 +2,8 @@
 // 自社情報（社名・電話番号・登録番号・ロゴURL）の保存／取得API
 // Redisキー: company:{email} にJSONで保存する
 
-import { Redis } from '@upstash/redis';
 import { requireAuth } from './_auth';
-
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
-});
+import { redis } from '../lib/redis';
 
 function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim().length > 0;
