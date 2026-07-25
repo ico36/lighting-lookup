@@ -10,7 +10,7 @@ function isNonEmptyString(v) {
 }
 
 export default async function handler(req, res) {
-  const email = requireAuth(req, res);
+  const email = await requireAuth(req, res);
   if (!email) return; // requireAuth内で既に401レスポンス済み
 
   const key = `company:${email}`;

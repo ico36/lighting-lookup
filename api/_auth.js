@@ -4,6 +4,8 @@
 // Vercelがこれ自体を独立したAPIエンドポイントとして公開しないため安全です。
 
 import crypto from 'crypto';
+import { isAdminEmail } from '../lib/adminEmails';
+import { hasActiveSubscriptionCached } from '../lib/subscription';
 
 /**
  * トークンを検証し、有効なら email を返す。無効なら null を返す。
@@ -51,19 +53,24 @@ export function verifySessionToken(token) {
  * リクエストからトークンを取り出して検証し、
  * 無効なら401を返して null を返す補助関数。
  *
+ * トークンの署名・有効期限に加えて、Stripeのサブスク状態も(Redisに短いTTLで
+ * キャッシュしつつ)再チェックする。解約済みなのに古いセッショントークンが
+ * 有効期限(30日)まで使えてしまう問題への対応。管理者(ADMIN_EMAILS)はこの
+ * 再チェックをスキップする(login.js時点のバイパスと同じ扱い)。
+ *
  * 使い方（analyze.js や product-detail.js の冒頭に追加）:
  *
  *   import { requireAuth } from './_auth';
  *
  *   export default async function handler(req, res) {
- *     const email = requireAuth(req, res);
- *     if (!email) return; // requireAuth内で既に401レスポンス済みなのでここで終了
+ *     const email = await requireAuth(req, res);
+ *     if (!email) return; // requireAuth内で既に401/500レスポンス済みなのでここで終了
  *
  *     // ここから先は認証済みの処理
  *     ...
  *   }
  */
-export function requireAuth(req, res) {
+export async function requireAuth(req, res) {
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ')
     ? authHeader.slice('Bearer '.length)
@@ -82,6 +89,14 @@ export function requireAuth(req, res) {
 
   if (!email) {
     res.status(401).json({ error: 'ログインが必要です' });
+    return null;
+  }
+
+  if (isAdminEmail(email)) return email;
+
+  const active = await hasActiveSubscriptionCached(email);
+  if (!active) {
+    res.status(401).json({ error: '認証エラーが発生しました' });
     return null;
   }
 

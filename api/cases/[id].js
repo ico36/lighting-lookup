@@ -32,7 +32,7 @@ import {
 const VALID_STATUSES = Object.values(STATUS);
 
 export default async function handler(req, res) {
-  const email = requireAuth(req, res);
+  const email = await requireAuth(req, res);
   if (!email) return;
 
   const { id } = req.query;

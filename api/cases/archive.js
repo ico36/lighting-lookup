@@ -17,7 +17,7 @@ import { canUseFeature, getCampaignStatus } from '../../lib/featureCampaigns';
 const FEATURE_KEY = 'archiveSearch';
 
 export default async function handler(req, res) {
-  const email = requireAuth(req, res);
+  const email = await requireAuth(req, res);
   if (!email) return;
 
   if (req.method !== 'GET') {

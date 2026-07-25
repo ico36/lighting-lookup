@@ -7,25 +7,20 @@
 // 必要なnpmパッケージ（package.jsonに追加済み）:
 //   stripe, @upstash/redis
 
-import Stripe from 'stripe';
 import crypto from 'crypto';
 import { redis } from '../lib/redis';
-
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+import { isAdminEmail } from '../lib/adminEmails';
+import { checkActiveSubscriptionLive } from '../lib/subscription';
 
 const RATE_LIMIT_MAX_ATTEMPTS = 5;      // この回数を超えたらブロック
 const RATE_LIMIT_WINDOW_SECONDS = 900;  // 15分間の試行回数でカウント
 const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // セッション有効期間: 30日
+// トークン自体はこの期間有効なままだが、requireAuth()側でStripeサブスク状態を
+// 定期的に再チェックしているため、解約後は最大1時間程度でアクセスできなくなる
+// (lib/subscription.js の SUBSCRIPTION_CACHE_TTL_SECONDS 参照)。
 
 function isValidEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function getAdminEmails() {
-  return (process.env.ADMIN_EMAILS || '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
 }
 
 // email + 有効期限をSESSION_SECRETで署名した簡易トークンを発行
@@ -54,7 +49,7 @@ export default async function handler(req, res) {
   const normalizedEmail = email.trim().toLowerCase();
 
   // --- 管理者バイパス（レート制限をスキップして即座にログイン） ---
-  if (getAdminEmails().includes(normalizedEmail)) {
+  if (isAdminEmail(normalizedEmail)) {
     const token = createSessionToken(normalizedEmail);
     return res.status(200).json({ success: true, admin: true, token });
   }
@@ -85,30 +80,15 @@ export default async function handler(req, res) {
 
   // --- Stripeサブスク状態の確認 ---
   try {
-    const customers = await stripe.customers.list({
-      email: normalizedEmail,
-      limit: 1,
-    });
+    const { customerFound, active } = await checkActiveSubscriptionLive(normalizedEmail);
 
-    if (customers.data.length === 0) {
+    if (!customerFound) {
       return res.status(403).json({
         error: 'このメールアドレスに対応する契約が見つかりませんでした',
       });
     }
 
-    const customer = customers.data[0];
-
-    const subscriptions = await stripe.subscriptions.list({
-      customer: customer.id,
-      status: 'all',
-      limit: 10,
-    });
-
-    const hasActiveSubscription = subscriptions.data.some((sub) =>
-      ['active', 'trialing'].includes(sub.status)
-    );
-
-    if (!hasActiveSubscription) {
+    if (!active) {
       return res.status(403).json({
         error: '有効なサブスクリプションが見つかりませんでした。お支払い状況をご確認ください',
       });

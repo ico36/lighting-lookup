@@ -12,7 +12,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
   // ログイン済みかどうかを確認（メール＋Stripeサブスク確認済みトークン）
-  const email = requireAuth(req, res);
+  const email = await requireAuth(req, res);
   if (!email) return; // requireAuth内で既に401レスポンス済み
 
   try {

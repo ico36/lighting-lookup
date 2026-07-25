@@ -5,7 +5,7 @@ import { requireAuth } from '../../_auth';
 import { getCase, addSearchToCase } from '../../../lib/cases';
 
 export default async function handler(req, res) {
-  const email = requireAuth(req, res);
+  const email = await requireAuth(req, res);
   if (!email) return;
 
   if (req.method !== 'POST') {
