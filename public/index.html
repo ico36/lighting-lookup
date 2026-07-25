@@ -133,6 +133,45 @@
     .header-menu-actions .btn-icon-mobile {
       display: inline;
     }
+
+    /* フォーム入力のfont-sizeが16px未満だとiOS Safariでフォーカス時に自動ズームが
+       発生し、検索→カート追加→見積書生成→案件保存の主要導線の操作性を損なうため、
+       主要な入力欄はモバイル幅では16px以上にする。 */
+    .stacked-input,
+    .note-input,
+    .num-input,
+    .company-info-grid input {
+      font-size: 16px;
+    }
+
+    /* お客様名・工事場所の2カラム表示は375px幅だと1カラムあたり150px未満まで
+       狭まりプレースホルダーが見切れるため、1カラムに変更する */
+    .company-info-grid {
+      grid-template-columns: 1fr;
+    }
+
+    /* 見積書ヘッダーはタイトルと自社情報を横並びさせているが、374px幅だと
+       双方の幅を確保できずはみ出す/重なる恐れがあるため折り返し可能にし、
+       タイトルの見出しサイズも抑える */
+    #estimate-sheet {
+      padding: 24px 18px;
+    }
+    .sheet-header {
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .sheet-title {
+      font-size: 19px;
+      letter-spacing: 2px;
+    }
+
+    /* モーダルの閉じるボタン・カート内アイテムの削除ボタンはタップ領域が
+       28px前後と小さくタップしづらいため拡大する */
+    .modal-close {
+      width: 40px;
+      height: 40px;
+      font-size: 18px;
+    }
   }
 
   main {
@@ -163,7 +202,7 @@
     gap: 10px;
   }
 
-  input[type="text"] {
+  input[type="text"], input[type="email"] {
     flex: 1;
     background: var(--bg);
     border: 1px solid var(--border);
@@ -175,10 +214,10 @@
     outline: none;
     transition: border-color 0.2s;
   }
-  input[type="text"]:focus {
+  input[type="text"]:focus, input[type="email"]:focus {
     border-color: var(--accent);
   }
-  input[type="text"]::placeholder {
+  input[type="text"]::placeholder, input[type="email"]::placeholder {
     color: var(--text2);
   }
 
@@ -2634,7 +2673,7 @@ function renderCartItems() {
               <div style="font-weight:600;">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}</div>
               <div style="font-size:12px;color:var(--text2);margin-top:2px;">${escapeHtml(item.modelNumber)}</div>
             </div>
-            <button class="modal-close" style="width:24px;height:24px;font-size:13px;" onclick="removeCartItemUI('${item.itemId}')">✕</button>
+            <button class="modal-close" onclick="removeCartItemUI('${item.itemId}')">✕</button>
           </div>
           ${isZeroPrice ? `<div style="font-size:12px;color:var(--error);margin-top:8px;">⚠️ 単価が未設定です。金額を入力してください</div>` : ''}
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
