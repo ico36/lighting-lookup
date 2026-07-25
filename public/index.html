@@ -1251,6 +1251,15 @@ function getSessionToken() {
   return localStorage.getItem('session_token') || '';
 }
 
+// 認証付きAPI呼び出しの共通ヘルパー。Authorizationヘッダーの付与だけをここに集約し、
+// レスポンスの解釈（response.ok/401判定など）は呼び出し側にそのまま残す。
+function authFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: { ...(options.headers || {}), 'Authorization': 'Bearer ' + getSessionToken() }
+  });
+}
+
 // AI(Claude web_search)の調査結果やユーザー入力など、外部由来の値をHTMLとして
 // innerHTMLに差し込む前に必ず通す。XSS(セッショントークン窃取)対策。
 function escapeHtml(value) {
@@ -1335,6 +1344,13 @@ function showLoginGate(message) {
   }
 }
 
+// セッション失効(401)時の共通処理。呼び出し側ごとに異なるモーダルを閉じてから
+// ログイン画面へ戻す必要があるため、cleanupを任意で受け取る。
+function handleSessionExpired(cleanup) {
+  if (typeof cleanup === 'function') cleanup();
+  showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+}
+
 // ===== ヘッダーメニュー（モバイル幅でのハンバーガーメニュー） =====
 
 function toggleHeaderMenu(event) {
@@ -1394,14 +1410,12 @@ async function checkCompanyAndRoute() {
   document.getElementById('login-gate').style.display = 'none';
 
   try {
-    const response = await fetch('/api/company', {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch('/api/company');
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
       } else {
         showLoginGate(data.error || '自社情報の確認に失敗しました。もう一度お試しください。');
       }
@@ -1505,15 +1519,12 @@ async function submitContact() {
   btn.textContent = '準備中...';
 
   try {
-    const response = await fetch('/api/info/contact-config', {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch('/api/info/contact-config');
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeContactModal();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeContactModal);
       } else {
         errorEl.textContent = data.error || 'お問い合わせフォームの準備に失敗しました。もう一度お試しください。';
         errorEl.style.display = 'block';
@@ -1552,9 +1563,7 @@ let announcementsCache = [];
 
 async function refreshAnnouncementsDot() {
   try {
-    const response = await fetch('/api/info/announcements', {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch('/api/info/announcements');
     if (!response.ok) return;
     const data = await response.json();
     announcementsCache = data.announcements || [];
@@ -1576,15 +1585,12 @@ async function openAnnouncementsModal() {
   bodyEl.innerHTML = `<div class="modal-loading"><div class="spinner" style="margin:0 auto 14px;"></div><div class="loading-text">読み込み中...</div></div>`;
 
   try {
-    const response = await fetch('/api/info/announcements', {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch('/api/info/announcements');
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeAnnouncementsModal();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeAnnouncementsModal);
         return;
       }
       bodyEl.innerHTML = `<div style="color:var(--error);font-size:14px;text-align:center;padding:20px 0;">お知らせの読み込みに失敗しました</div>`;
@@ -1760,12 +1766,9 @@ async function saveCompanyInfo(scope) {
     let logoUrl = companyInfo?.logoUrl || '';
 
     if (pendingLogo[scope]) {
-      const uploadRes = await fetch('/api/company-logo', {
+      const uploadRes = await authFetch('/api/company-logo', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + getSessionToken()
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           base64: pendingLogo[scope].base64,
           mimeType: pendingLogo[scope].mimeType
@@ -1788,12 +1791,9 @@ async function saveCompanyInfo(scope) {
       logoUrl = '';
     }
 
-    const response = await fetch('/api/company', {
+    const response = await authFetch('/api/company', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name,
         tel: telEl.value.trim(),
@@ -1805,7 +1805,7 @@ async function saveCompanyInfo(scope) {
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       throw new Error(data.error || '保存に失敗しました');
@@ -1891,15 +1891,12 @@ async function loadCasesList() {
   bodyEl.innerHTML = `<div class="modal-loading"><div class="spinner" style="margin:0 auto 14px;"></div><div class="loading-text">読み込み中...</div></div>`;
 
   try {
-    const response = await fetch('/api/cases', {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch('/api/cases');
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeCasesModal();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeCasesModal);
         return;
       }
       throw new Error(data.error || '案件一覧の取得に失敗しました');
@@ -1939,20 +1936,16 @@ async function submitNewCase() {
   errorEl.style.display = 'none';
 
   try {
-    const response = await fetch('/api/cases', {
+    const response = await authFetch('/api/cases', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ customerName: name, memo: memoEl.value.trim() })
     });
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeCasesModal();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeCasesModal);
         return;
       }
       throw new Error(data.message || data.error || '案件の作成に失敗しました');
@@ -1974,15 +1967,12 @@ async function openCaseDetail(caseId) {
   bodyEl.innerHTML = `<div class="modal-loading"><div class="spinner" style="margin:0 auto 14px;"></div><div class="loading-text">読み込み中...</div></div>`;
 
   try {
-    const response = await fetch(`/api/cases/${caseId}`, {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch(`/api/cases/${caseId}`);
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeCaseDetail();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeCaseDetail);
         return;
       }
       throw new Error(data.error || '案件詳細の取得に失敗しました');
@@ -2084,19 +2074,16 @@ async function saveCaseName(caseId) {
   const newName = input.value.trim();
 
   try {
-    const response = await fetch(`/api/cases/${caseId}`, {
+    const response = await authFetch(`/api/cases/${caseId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ customerName: newName })
     });
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       throw new Error(data.error || '案件名の保存に失敗しました');
@@ -2115,20 +2102,16 @@ async function changeCaseStatus(newStatus) {
   if (newStatus === '失注・キャンセル' && !confirm('この案件を「失注・キャンセル」にしますか？')) return;
 
   try {
-    const response = await fetch(`/api/cases/${currentCaseDetailId}`, {
+    const response = await authFetch(`/api/cases/${currentCaseDetailId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
     });
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeCaseDetail();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeCaseDetail);
         return;
       }
       throw new Error(data.message || data.error || 'ステータスの変更に失敗しました');
@@ -2156,15 +2139,12 @@ async function searchArchivedCasesUI() {
   if (toEl.value) params.set('to', toEl.value);
 
   try {
-    const response = await fetch(`/api/cases/archive?${params.toString()}`, {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch(`/api/cases/archive?${params.toString()}`);
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeCasesModal();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeCasesModal);
         return;
       }
       if (response.status === 403) {
@@ -2208,9 +2188,7 @@ const OPEN_CASE_STATUSES = ['下書き', '承認待ち', '承認済み'];
 
 async function loadOpenCasesForAttach() {
   try {
-    const response = await fetch('/api/cases', {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch('/api/cases');
     if (!response.ok) return;
     const data = await response.json();
     openCasesForAttach = (data.cases || []).filter(c => OPEN_CASE_STATUSES.includes(c.status));
@@ -2257,18 +2235,15 @@ async function attachCurrentSearchToCase() {
         msgEl.style.color = 'var(--error)';
         return;
       }
-      const createRes = await fetch('/api/cases', {
+      const createRes = await authFetch('/api/cases', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + getSessionToken()
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customerName: name })
       });
       const createData = await createRes.json();
       if (!createRes.ok) {
         if (createRes.status === 401) {
-          showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+          handleSessionExpired();
           return;
         }
         throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
@@ -2276,12 +2251,9 @@ async function attachCurrentSearchToCase() {
       caseId = createData.case.id;
     }
 
-    const searchRes = await fetch(`/api/cases/${caseId}/searches`, {
+    const searchRes = await authFetch(`/api/cases/${caseId}/searches`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: lastResult.original_model,
         manufacturer: lastResult.manufacturer,
@@ -2293,7 +2265,7 @@ async function attachCurrentSearchToCase() {
     const searchData = await searchRes.json();
     if (!searchRes.ok) {
       if (searchRes.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       throw new Error(searchData.error || '保存に失敗しました');
@@ -2324,19 +2296,16 @@ let cartCase = null;
 async function ensureCartCase() {
   if (currentCartCaseId) return currentCartCaseId;
 
-  const response = await fetch('/api/cases', {
+  const response = await authFetch('/api/cases', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + getSessionToken()
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ draft: true })
   });
   const data = await response.json();
 
   if (!response.ok) {
     if (response.status === 401) {
-      showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+      handleSessionExpired();
     }
     throw new Error(data.message || data.error || '案件の作成に失敗しました');
   }
@@ -2435,9 +2404,7 @@ async function handleImportFile(input) {
   let matchedCase = null;
   if (data.caseId) {
     try {
-      const response = await fetch('/api/cases', {
-        headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-      });
+      const response = await authFetch('/api/cases');
       if (response.ok) {
         const listData = await response.json();
         matchedCase = (listData.cases || []).find(cc => cc.id === data.caseId) || null;
@@ -2468,47 +2435,38 @@ async function handleImportFile(input) {
 
     if (overwrite && matchedCase) {
       targetCaseId = matchedCase.id;
-      const response = await fetch(`/api/cases/${targetCaseId}`, {
+      const response = await authFetch(`/api/cases/${targetCaseId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + getSessionToken()
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ restoreImport: restorePayload })
       });
       const resData = await response.json();
       if (!response.ok) {
         if (response.status === 401) {
-          showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+          handleSessionExpired();
           return;
         }
         throw new Error(resData.error || '読み込みに失敗しました');
       }
     } else {
-      const createRes = await fetch('/api/cases', {
+      const createRes = await authFetch('/api/cases', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + getSessionToken()
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customerName: data.customerName || '', memo: data.memo || '' })
       });
       const createData = await createRes.json();
       if (!createRes.ok) {
         if (createRes.status === 401) {
-          showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+          handleSessionExpired();
           return;
         }
         throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
       }
       targetCaseId = createData.case.id;
 
-      const restoreRes = await fetch(`/api/cases/${targetCaseId}`, {
+      const restoreRes = await authFetch(`/api/cases/${targetCaseId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + getSessionToken()
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ restoreImport: restorePayload })
       });
       const restoreData = await restoreRes.json();
@@ -2537,14 +2495,12 @@ async function refreshCartCase() {
   }
 
   try {
-    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
-      headers: { 'Authorization': 'Bearer ' + getSessionToken() }
-    });
+    const response = await authFetch(`/api/cases/${currentCartCaseId}`);
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       // 案件が見つからない等の場合はカート対象をリセットする
@@ -2592,12 +2548,9 @@ async function addCandidateToCart(index) {
 
   try {
     const caseId = await ensureCartCase();
-    const response = await fetch(`/api/cases/${caseId}`, {
+    const response = await authFetch(`/api/cases/${caseId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         cartAdd: {
           name: candidate.name || '',
@@ -2612,7 +2565,7 @@ async function addCandidateToCart(index) {
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       throw new Error(data.error || 'カートへの追加に失敗しました');
@@ -2682,19 +2635,16 @@ async function updateCartItemUI(itemId, field, value) {
   payload[field] = Number(value);
 
   try {
-    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+    const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cartUpdate: payload })
     });
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       throw new Error(data.error || '更新に失敗しました');
@@ -2712,19 +2662,16 @@ async function removeCartItemUI(itemId) {
   if (!currentCartCaseId) return;
 
   try {
-    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+    const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cartRemove: { itemId } })
     });
     const data = await response.json();
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         return;
       }
       throw new Error(data.error || '削除に失敗しました');
@@ -2875,7 +2822,7 @@ function removeImage(index) {
 async function fetchWithRetry(url, options, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(url, options);
+      const response = await authFetch(url, options);
       return response;
     } catch (err) {
       if (attempt === maxRetries) throw err;
@@ -2916,10 +2863,7 @@ async function doSearch() {
     const messages = buildMessages(modelNum, note);
     const response = await fetchWithRetry('/api/analyze', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         system: SYSTEM_PROMPT,
         messages
@@ -2930,7 +2874,7 @@ async function doSearch() {
 
     if (!response.ok) {
       if (response.status === 401) {
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired();
         throw new Error('ログインが必要です。再度メールアドレスを入力してください。');
       }
       throw new Error(data.error || 'サーバーエラーが発生しました');
@@ -3162,12 +3106,9 @@ async function openDetailModal(index) {
   `;
 
   try {
-    const response = await fetch('/api/product-detail', {
+    const response = await authFetch('/api/product-detail', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         manufacturer: s.manufacturer,
         model: s.model,
@@ -3179,8 +3120,7 @@ async function openDetailModal(index) {
 
     if (!response.ok) {
       if (response.status === 401) {
-        closeDetailModal();
-        showLoginGate('セッションの有効期限が切れました。再度ログインしてください。');
+        handleSessionExpired(closeDetailModal);
         return;
       }
       throw new Error(data.error || '取得に失敗しました');
@@ -3447,12 +3387,9 @@ ${bizName}${bizTel ? ' / TEL: ' + bizTel : ''}
 async function saveEstimateMeta(meta) {
   if (!currentCartCaseId) return;
   try {
-    const response = await fetch(`/api/cases/${currentCartCaseId}`, {
+    const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + getSessionToken()
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ estimateMeta: meta })
     });
     if (response.ok) {
