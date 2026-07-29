@@ -172,6 +172,12 @@
       height: 40px;
       font-size: 18px;
     }
+
+    /* 「写真を撮る」「ギャラリーから選ぶ」の2ボタンは横並びだと375px幅で
+       窮屈になるため縦積みにする */
+    .upload-btn-row {
+      flex-direction: column;
+    }
   }
 
   main {
@@ -276,6 +282,16 @@
   .upload-icon { font-size: 28px; margin-bottom: 8px; }
   .upload-text { font-size: 14px; color: var(--text2); }
   .upload-text strong { color: var(--accent); }
+
+  .upload-btn-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .upload-btn-row button {
+    flex: 1;
+    min-height: 44px;
+  }
 
   .preview-wrap {
     margin-top: 0;
@@ -962,10 +978,17 @@
 
   <div class="input-card">
     <div class="section-label">写真から読み取る（最大5枚まで）</div>
-    <div class="upload-zone" id="upload-zone">
-      <input type="file" accept="image/*" id="file-input" multiple onchange="handleFile(this)" />
+    <div class="upload-zone" id="upload-zone" style="cursor:default;">
+      <!-- Androidはcapture属性がないとカメラが起動できずギャラリーしか開けないため、
+           「撮る」と「選ぶ」でinputを分けてボタンで明示的に選ばせる -->
+      <input type="file" accept="image/*" capture="environment" id="camera-input" style="display:none;" onchange="handleFile(this)" />
+      <input type="file" accept="image/*" id="file-input" multiple style="display:none;" onchange="handleFile(this)" />
       <div class="upload-icon">📷</div>
-      <div class="upload-text"><strong>タップして写真を選択</strong><br>型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります</div>
+      <div class="upload-text">型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります</div>
+      <div class="upload-btn-row">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('camera-input').click()">📷 写真を撮る</button>
+        <button type="button" class="btn-secondary" onclick="document.getElementById('file-input').click()">🖼️ ギャラリーから選ぶ</button>
+      </div>
     </div>
     <div id="upload-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
     <div id="preview-container" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;"></div>
