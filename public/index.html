@@ -981,7 +981,7 @@
     <div class="upload-zone" id="upload-zone" style="cursor:default;">
       <!-- Androidはcapture属性がないとカメラが起動できずギャラリーしか開けないため、
            「撮る」と「選ぶ」でinputを分けてボタンで明示的に選ばせる -->
-      <input type="file" accept="image/*" capture="environment" id="camera-input" style="display:none;" onchange="handleFile(this)" />
+      <input type="file" accept="image/*,application/pdf" capture="environment" id="camera-input" style="display:none;" onchange="handleFile(this)" />
       <input type="file" accept="image/*" id="file-input" multiple style="display:none;" onchange="handleFile(this)" />
       <div class="upload-icon">📷</div>
       <div class="upload-text">型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります</div>
