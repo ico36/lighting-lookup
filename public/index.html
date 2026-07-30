@@ -2958,6 +2958,21 @@ window.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter') submitEmail();
     });
   }
+
+  // Androidはcapture属性が無いとカメラが起動できずギャラリーしか開けないため2ボタン表示、
+  // iOS/PCは1ボタン（従来のupload-zoneタップ）に戻す
+  const isAndroidUpload = /Android/i.test(navigator.userAgent);
+  if (!isAndroidUpload) {
+    const uploadZone = document.getElementById('upload-zone');
+    const uploadBtnRow = uploadZone.querySelector('.upload-btn-row');
+    const uploadText = uploadZone.querySelector('.upload-text');
+    uploadBtnRow.style.display = 'none';
+    uploadZone.style.cursor = 'pointer';
+    uploadText.innerHTML = '<strong>タップして写真を選択</strong><br>型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります';
+    uploadZone.addEventListener('click', () => {
+      document.getElementById('file-input').click();
+    });
+  }
 });
 
 let uploadedImages = [];
