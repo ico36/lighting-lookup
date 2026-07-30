@@ -986,8 +986,20 @@
       <div class="upload-icon">📷</div>
       <div class="upload-text">型番ラベル＋器具全体など、複数枚アップロードすると精度が上がります</div>
       <div class="upload-btn-row">
-        <button type="button" class="btn-secondary" onclick="document.getElementById('camera-input').click()">📷 写真を撮る</button>
+        <button type="button" class="btn-secondary" id="camera-btn" onclick="document.getElementById('camera-input').click()">📷 写真を撮る</button>
         <button type="button" class="btn-secondary" onclick="document.getElementById('file-input').click()">🖼️ ギャラリーから選ぶ</button>
+      </div>
+      <div id="camera-ui" style="display:none;">
+        <video id="camera-video" autoplay playsinline muted style="width:100%;border-radius:8px;background:#000;display:block;"></video>
+        <img id="camera-still" style="width:100%;border-radius:8px;display:none;" alt="撮影プレビュー" />
+        <div class="upload-btn-row" id="camera-shoot-row">
+          <button type="button" class="btn-primary" style="min-height:44px;" onclick="capturePhoto()">📸 撮影</button>
+          <button type="button" class="btn-secondary" style="min-height:44px;" onclick="closeCamera()">閉じる</button>
+        </div>
+        <div class="upload-btn-row" id="camera-confirm-row" style="display:none;">
+          <button type="button" class="btn-primary" style="min-height:44px;" onclick="useCapturedPhoto()">この写真を使う</button>
+          <button type="button" class="btn-secondary" style="min-height:44px;" onclick="retakePhoto()">撮り直す</button>
+        </div>
       </div>
     </div>
     <div id="upload-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
@@ -2972,24 +2984,29 @@ window.addEventListener('DOMContentLoaded', () => {
     uploadZone.addEventListener('click', () => {
       document.getElementById('file-input').click();
     });
+  } else {
+    // Android: 「撮る」ボタンはinputのcapture属性に頼らず、自前カメラUIを開く
+    document.getElementById('camera-btn').onclick = openCamera;
   }
 });
 
 let uploadedImages = [];
+const MAX_IMAGES = 5;
 
-function handleFile(input) {
-  const files = Array.from(input.files || []);
+// input.files前提のhandleFile()と、カメラ撮影で作ったFile配列の両方から
+// 同じ追加処理を呼べるよう、File配列を受け取る共通関数に切り出したもの。
+// onFileProcessed: 1枚分の圧縮・追加が完了するたび呼ばれる（非同期のため、
+// カメラ連続撮影で「次の1枚を待ってから上限判定する」用途に使う）
+function processFiles(files, onFileProcessed) {
   if (files.length === 0) return;
 
   const errorEl = document.getElementById('upload-error');
   hideError(errorEl);
 
-  const MAX_IMAGES = 5;
   const remainingSlots = MAX_IMAGES - uploadedImages.length;
 
   if (remainingSlots <= 0) {
     showError(errorEl, `写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
-    input.value = '';
     return;
   }
 
@@ -3034,12 +3051,16 @@ function handleFile(input) {
           dataUrl: compressedDataUrl
         });
         renderPreviews();
+        if (onFileProcessed) onFileProcessed();
       };
       img.src = e.target.result;
     };
     reader.readAsDataURL(file);
   });
+}
 
+function handleFile(input) {
+  processFiles(Array.from(input.files || []));
   input.value = '';
 }
 
@@ -3057,6 +3078,133 @@ function removeImage(index) {
   uploadedImages.splice(index, 1);
   renderPreviews();
 }
+
+// --- Android向け自前カメラUI ---
+// Pixel 9aなど一部端末でinputのcapture属性が無視され、
+// 「撮る」ボタンを押してもフォトピッカーが開いてカメラに辿り着けないための対応。
+let cameraStream = null;
+let capturedPhotoBlob = null;
+
+function stopCameraStream() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+}
+
+// 撮影プレビュー用に発行したobjectURLを解放する。
+// 撮り直し・確定・カメラを閉じる、いずれのタイミングでも呼ぶ必要がある。
+function releaseStillObjectUrl() {
+  const still = document.getElementById('camera-still');
+  if (still.dataset.objectUrl) {
+    URL.revokeObjectURL(still.dataset.objectUrl);
+    delete still.dataset.objectUrl;
+  }
+}
+
+async function openCamera() {
+  const errorEl = document.getElementById('upload-error');
+  hideError(errorEl);
+
+  if (uploadedImages.length >= MAX_IMAGES) {
+    showError(errorEl, `写真は最大${MAX_IMAGES}枚までです。先に不要な写真を削除してください。`);
+    return;
+  }
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+  } catch (err) {
+    // await の後でユーザージェスチャーが切れているため、ここで
+    // camera-input.click() を呼んでもブラウザにブロックされ何も起きないことがある。
+    // フォールバックは促すだけにして、実際のクリックはユーザー操作に委ねる。
+    if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
+      showError(errorEl, 'カメラの利用が許可されていません。写真を選択してください。');
+    } else {
+      showError(errorEl, 'カメラを起動できませんでした。『ギャラリーから選ぶ』から写真を選択してください。');
+    }
+    return;
+  }
+
+  const uploadZone = document.getElementById('upload-zone');
+  const video = document.getElementById('camera-video');
+  video.srcObject = cameraStream;
+  video.style.display = 'block';
+  document.getElementById('camera-still').style.display = 'none';
+  document.getElementById('camera-shoot-row').style.display = 'flex';
+  document.getElementById('camera-confirm-row').style.display = 'none';
+
+  uploadZone.querySelector('.upload-icon').style.display = 'none';
+  uploadZone.querySelector('.upload-text').style.display = 'none';
+  uploadZone.querySelector('.upload-btn-row').style.display = 'none';
+  document.getElementById('camera-ui').style.display = 'block';
+}
+
+function closeCamera() {
+  stopCameraStream();
+  capturedPhotoBlob = null;
+  releaseStillObjectUrl();
+
+  const uploadZone = document.getElementById('upload-zone');
+  document.getElementById('camera-ui').style.display = 'none';
+  uploadZone.querySelector('.upload-icon').style.display = '';
+  uploadZone.querySelector('.upload-text').style.display = '';
+  uploadZone.querySelector('.upload-btn-row').style.display = 'flex';
+}
+
+function capturePhoto() {
+  const video = document.getElementById('camera-video');
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  canvas.toBlob(blob => {
+    if (!blob) return;
+    capturedPhotoBlob = blob;
+
+    const still = document.getElementById('camera-still');
+    releaseStillObjectUrl();
+    const objectUrl = URL.createObjectURL(blob);
+    still.src = objectUrl;
+    still.dataset.objectUrl = objectUrl;
+    still.style.display = 'block';
+    video.style.display = 'none';
+
+    document.getElementById('camera-shoot-row').style.display = 'none';
+    document.getElementById('camera-confirm-row').style.display = 'flex';
+  }, 'image/jpeg', 0.9);
+}
+
+function retakePhoto() {
+  capturedPhotoBlob = null;
+  document.getElementById('camera-still').style.display = 'none';
+  document.getElementById('camera-video').style.display = 'block';
+  document.getElementById('camera-shoot-row').style.display = 'flex';
+  document.getElementById('camera-confirm-row').style.display = 'none';
+}
+
+function useCapturedPhoto() {
+  if (!capturedPhotoBlob) return;
+  const file = new File([capturedPhotoBlob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+  capturedPhotoBlob = null;
+  releaseStillObjectUrl();
+
+  processFiles([file], () => {
+    if (uploadedImages.length >= MAX_IMAGES) {
+      closeCamera();
+      return;
+    }
+    document.getElementById('camera-still').style.display = 'none';
+    document.getElementById('camera-video').style.display = 'block';
+    document.getElementById('camera-shoot-row').style.display = 'flex';
+    document.getElementById('camera-confirm-row').style.display = 'none';
+  });
+}
+
+window.addEventListener('pagehide', stopCameraStream);
 
 async function fetchWithRetry(url, options, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
