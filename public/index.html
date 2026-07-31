@@ -282,6 +282,7 @@
   .upload-icon { font-size: 28px; margin-bottom: 8px; }
   .upload-text { font-size: 14px; color: var(--text2); }
   .upload-text strong { color: var(--accent); }
+  .upload-warning { font-size: 13px; color: var(--warning); line-height: 1.6; text-align: left; }
 
   .upload-btn-row {
     display: flex;
@@ -989,6 +990,7 @@
         <button type="button" class="btn-secondary" id="camera-btn" onclick="document.getElementById('camera-input').click()">📷 写真を撮る</button>
         <button type="button" class="btn-secondary" onclick="document.getElementById('file-input').click()">🖼️ ギャラリーから選ぶ</button>
       </div>
+      <div class="upload-warning" id="in-app-browser-warning" style="display:none;margin-top:10px;">⚠️ このページはアプリ内ブラウザで開かれています。カメラで撮影するには、右上のメニューから「ブラウザで開く」を選んでChromeで開き直してください。<br>そのまま使う場合は「ギャラリーから選ぶ」で写真を選択できます。</div>
       <div id="camera-ui" style="display:none;">
         <video id="camera-video" autoplay playsinline muted style="width:100%;border-radius:8px;background:#000;display:block;"></video>
         <img id="camera-still" style="width:100%;border-radius:8px;display:none;" alt="撮影プレビュー" />
@@ -2959,6 +2961,14 @@ function renderEstimateCartItems() {
   if (subtotalEl) subtotalEl.textContent = yen(subtotal);
 }
 
+// GoogleアプリやLINEなどのアプリ内ブラウザはgetUserMediaが使えないことが多いため、
+// 撮影導線とは別に判定できるよう独立した関数にしてある
+function isInAppBrowser() {
+  const noGetUserMedia = !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  const inAppUaPattern = /GSA\/|Line\/|FBAN\/|FBAV\/|Instagram/;
+  return noGetUserMedia || inAppUaPattern.test(navigator.userAgent);
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   if (getSessionToken()) {
     checkCompanyAndRoute();
@@ -2987,6 +2997,9 @@ window.addEventListener('DOMContentLoaded', () => {
   } else {
     // Android: 「撮る」ボタンはinputのcapture属性に頼らず、自前カメラUIを開く
     document.getElementById('camera-btn').onclick = openCamera;
+    if (isInAppBrowser()) {
+      document.getElementById('in-app-browser-warning').style.display = 'block';
+    }
   }
 });
 
@@ -3121,9 +3134,9 @@ async function openCamera() {
     // camera-input.click() を呼んでもブラウザにブロックされ何も起きないことがある。
     // フォールバックは促すだけにして、実際のクリックはユーザー操作に委ねる。
     if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
-      showError(errorEl, 'カメラの利用が許可されていません。写真を選択してください。');
+      showError(errorEl, 'カメラを利用できませんでした。アプリ内ブラウザ（Googleアプリなど）で開いている場合は、右上のメニューから「ブラウザで開く」を選んでChromeで開き直すと使えることがあります。そのまま使う場合は『ギャラリーから選ぶ』から写真を選択してください。');
     } else {
-      showError(errorEl, 'カメラを起動できませんでした。『ギャラリーから選ぶ』から写真を選択してください。');
+      showError(errorEl, 'カメラを起動できませんでした。アプリ内ブラウザで開いている場合は、Chromeなどのブラウザで開き直すと使えることがあります。そのまま使う場合は『ギャラリーから選ぶ』から写真を選択してください。');
     }
     return;
   }
