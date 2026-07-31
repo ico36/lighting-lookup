@@ -990,7 +990,7 @@
         <button type="button" class="btn-secondary" id="camera-btn" onclick="document.getElementById('camera-input').click()">📷 写真を撮る</button>
         <button type="button" class="btn-secondary" onclick="document.getElementById('file-input').click()">🖼️ ギャラリーから選ぶ</button>
       </div>
-      <div class="upload-warning" id="in-app-browser-warning" style="display:none;margin-top:10px;">⚠️ このページはアプリ内ブラウザで開かれています。カメラで撮影するには、右上のメニューから「ブラウザで開く」を選んでChromeで開き直してください。<br>そのまま使う場合は「ギャラリーから選ぶ」で写真を選択できます。</div>
+      <div class="upload-warning" id="in-app-browser-warning" style="display:none;margin-top:10px;">⚠️ このページはアプリ内ブラウザで開かれています。カメラで撮影するには、メニュー（︙）から「ブラウザで開く」または「Chromeで開く」を選んで開き直してください。<br>そのまま使う場合は「ギャラリーから選ぶ」で写真を選択できます。</div>
       <div id="camera-ui" style="display:none;">
         <video id="camera-video" autoplay playsinline muted style="width:100%;border-radius:8px;background:#000;display:block;"></video>
         <img id="camera-still" style="width:100%;border-radius:8px;display:none;" alt="撮影プレビュー" />
@@ -3133,10 +3133,12 @@ async function openCamera() {
     // await の後でユーザージェスチャーが切れているため、ここで
     // camera-input.click() を呼んでもブラウザにブロックされ何も起きないことがある。
     // フォールバックは促すだけにして、実際のクリックはユーザー操作に委ねる。
-    if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
-      showError(errorEl, 'カメラを利用できませんでした。アプリ内ブラウザ（Googleアプリなど）で開いている場合は、右上のメニューから「ブラウザで開く」を選んでChromeで開き直すと使えることがあります。そのまま使う場合は『ギャラリーから選ぶ』から写真を選択してください。');
+    // 黄色のアプリ内ブラウザ警告が表示中なら、同じ案内を赤で重ねて出さない。
+    const warningEl = document.getElementById('in-app-browser-warning');
+    if (warningEl && warningEl.style.display !== 'none') {
+      showError(errorEl, 'カメラを利用できませんでした。上の案内をご確認ください。');
     } else {
-      showError(errorEl, 'カメラを起動できませんでした。アプリ内ブラウザで開いている場合は、Chromeなどのブラウザで開き直すと使えることがあります。そのまま使う場合は『ギャラリーから選ぶ』から写真を選択してください。');
+      showError(errorEl, 'カメラを利用できませんでした。アプリ内ブラウザ（LINEやGoogleアプリなど）で開いている場合は、メニュー（︙）から「ブラウザで開く」を選んで開き直すと使えることがあります。そのまま使う場合は『ギャラリーから選ぶ』から写真を選択してください。');
     }
     return;
   }
