@@ -1151,6 +1151,7 @@
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-5')">5. 案件管理（ステータス・履歴・アーカイブ検索）</a>
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-6')">6. 自社情報の設定（社名・ロゴなど）</a>
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-7')">7. お問い合わせ・お知らせ</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-8')">8. 解約するには</a>
     </div>
     <div class="help-content">
       <div class="help-section" id="help-sec-1">
@@ -1188,6 +1189,13 @@
         <div class="help-section-title">7. お問い合わせ・お知らせ</div>
         <p>操作方法がわからない、不具合を見つけたなどの際は、ヘッダーの「お問い合わせ」ボタンからお名前とお問い合わせ内容を入力してください。送信ボタンを押すと、入力内容が入った状態でメールアプリが起動します。実際にお問い合わせが届くのは、メールアプリ側で送信操作をした後です。</p>
         <p>ヘッダーの🔔アイコンからは運営からのお知らせを確認できます。未読のお知らせがあると右上に赤い印が表示されます。</p>
+      </div>
+      <div class="help-section" id="help-sec-8">
+        <div class="help-section-title">8. 解約するには</div>
+        <p>解約の手続きをしても、すでにお支払い済みの請求期間の終了日までは引き続きご利用いただけます。期間終了と同時に自動的にログインできなくなります（日割りでの返金等は行っておりません）。</p>
+        <p>下のボタンから解約手続き画面（Stripeの契約管理ページ）に進み、案内に従って手続きを行ってください。</p>
+        <button onclick="startCancelSubscription()" style="background: none; border: 1px solid var(--border); color: var(--text2); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">解約手続きへ進む</button>
+        <p id="cancel-subscription-error" style="display: none; color: #c0392b; margin-top: 8px;"></p>
       </div>
     </div>
   </div>
@@ -1591,6 +1599,29 @@ function closeHelpModal() {
 function scrollToHelpSection(id) {
   const el = document.getElementById(id);
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function startCancelSubscription() {
+  const errorEl = document.getElementById('cancel-subscription-error');
+  errorEl.style.display = 'none';
+
+  try {
+    const response = await authFetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create-portal-session' }),
+    });
+    const data = await response.json();
+
+    if (!response.ok || !data.url) {
+      throw new Error(data.error || '解約ページの生成に失敗しました');
+    }
+
+    window.location.href = data.url;
+  } catch (err) {
+    errorEl.textContent = err.message || '解約ページの生成に失敗しました';
+    errorEl.style.display = 'block';
+  }
 }
 
 // ===== お問い合わせ =====
@@ -2972,6 +3003,18 @@ function isInAppBrowser() {
 window.addEventListener('DOMContentLoaded', () => {
   if (getSessionToken()) {
     checkCompanyAndRoute();
+  }
+
+  // Stripeポータルでの解約操作後、return_urlの?help=cancelを見て
+  // ヘルプの「解約するには」セクションへ自動的に戻す
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('help') === 'cancel') {
+    openHelpModal();
+    scrollToHelpSection('help-sec-8');
+    urlParams.delete('help');
+    const remaining = urlParams.toString();
+    const cleanUrl = window.location.pathname + (remaining ? `?${remaining}` : '');
+    window.history.replaceState({}, '', cleanUrl);
   }
 
   const loginEmailInput = document.getElementById('login-email-input');
