@@ -8,6 +8,17 @@
 // `vercel env pull .env.local` で取得したファイルの中身を環境変数として渡して実行してもよい。
 //
 // 新しいお知らせは一覧の先頭に追加される。
+//
+// 【キーの接頭辞について】
+// api/ と lib/ のRedisキーは lib/redis.js の redisKey() 経由で組み立てており、
+// Preview環境では `preview:` が前置される。このスクリプトだけは接頭辞なしの
+// `announcements`（＝Production側）を直接見る。理由は2つ:
+//   1. 手動運用の管理用スクリプトで、本番のお知らせを追加するのが目的のため
+//   2. このファイルはCommonJS(require)、lib/ 配下はESM構文で書かれており、
+//      package.jsonに "type": "module" が無いため素のnodeからlib/redis.jsを
+//      読み込めない（共有するには .mjs へのリネームが必要）
+// Preview環境のお知らせを触りたくなった場合は、キーを 'preview:announcements'
+// に読み替えて実行すること。
 
 const { Redis } = require('@upstash/redis');
 const crypto = require('crypto');

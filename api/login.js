@@ -8,7 +8,7 @@
 //   stripe, @upstash/redis
 
 import crypto from 'crypto';
-import { redis } from '../lib/redis';
+import { redis, redisKey } from '../lib/redis';
 import { isAdminEmail } from '../lib/adminEmails';
 import { checkActiveSubscriptionLive } from '../lib/subscription';
 
@@ -72,8 +72,8 @@ export default async function handler(req, res) {
   const ip = getClientIp(req);
 
   const rateLimitKeys = [
-    `ratelimit:login:email:${normalizedEmail}`,
-    `ratelimit:login:ip:${ip}`,
+    redisKey('ratelimit', 'login', 'email', normalizedEmail),
+    redisKey('ratelimit', 'login', 'ip', ip),
   ];
 
   for (const key of rateLimitKeys) {

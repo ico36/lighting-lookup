@@ -4,10 +4,10 @@
 // GET /api/info/contact-config  … お問い合わせフォーム用の宛先・アカウント情報の取得
 
 import { requireAuth } from '../_auth';
-import { redis } from '../../lib/redis';
+import { redis, redisKey } from '../../lib/redis';
 
 async function getAnnouncements(req, res) {
-  const announcements = (await redis.get('announcements')) || [];
+  const announcements = (await redis.get(redisKey('announcements'))) || [];
   return res.status(200).json({ announcements });
 }
 

@@ -1,9 +1,9 @@
 // api/company.js
 // 自社情報（社名・電話番号・登録番号・ロゴURL）の保存／取得API
-// Redisキー: company:{email} にJSONで保存する
+// Redisキー: company:{email} にJSONで保存する（Preview環境では preview: 接頭辞付き）
 
 import { requireAuth } from './_auth';
-import { redis } from '../lib/redis';
+import { redis, redisKey } from '../lib/redis';
 
 function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim().length > 0;
@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   const email = await requireAuth(req, res);
   if (!email) return; // requireAuth内で既に401レスポンス済み
 
-  const key = `company:${email}`;
+  const key = redisKey('company', email);
 
   if (req.method === 'GET') {
     const company = await redis.get(key);
