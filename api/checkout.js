@@ -5,18 +5,39 @@ import { getStripeCustomerIdByEmail } from '../lib/subscription';
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
+// action ごとのハンドラ。新しいアクションを足すときはここに1行追加する。
+//
+// 【以前はフォールスルーだった】action が未指定でも不明な値でも
+// handleCreateCheckoutSession に落ちる形になっていた。タイプミスした action が
+// 黙って新規登録フローに落ちるのを避けるため、全アクションを明示し、
+// 未知のものは400で弾く。新規登録用のCheckout作成も
+// 'create-checkout-session' という名前を付けた。
+//
+// フロント(public/index.html)から /api/checkout を叩いているのは
+// 'create-portal-session' の1箇所だけで、action 無しで呼ぶ経路は存在しないため、
+// この変更による既存導線への影響はない（新規申し込み導線を実装するときに
+// 'create-checkout-session' を指定すること）。
+const ACTIONS = {
+  'create-portal-session': handleCreatePortalSession,
+  'create-checkout-session': handleCreateCheckoutSession,
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { action } = req.body || {};
+  const handle = ACTIONS[action];
 
-  if (action === 'create-portal-session') {
-    return handleCreatePortalSession(req, res);
+  if (!handle) {
+    return res.status(400).json({
+      error: 'unknown_action',
+      message: `action は ${Object.keys(ACTIONS).join(' / ')} のいずれかを指定してください`,
+    });
   }
 
-  return handleCreateCheckoutSession(req, res);
+  return handle(req, res);
 }
 
 // 既存契約者の解約導線。ログイン済みセッション(Authorization: Bearer)の

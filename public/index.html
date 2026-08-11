@@ -1806,9 +1806,14 @@ function scrollToHelpSection(id) {
   if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-async function startCancelSubscription() {
-  const errorEl = document.getElementById('cancel-subscription-error');
-  errorEl.style.display = 'none';
+// エラー表示先を引数で受け取る。既定はヘルプモーダル内の解約セクション
+// (#cancel-subscription-error)なので、既存の呼び出し元「解約手続きへ進む」ボタンは
+// 無変更で動く。工程Eで、アップグレードの決済が失敗(402)したときにモーダルから
+// この関数を呼び、その画面のエラー表示先を渡せるようにするための引数化。
+// 表示は他と同じ showError/hideError に揃えた（要素が無い場合のガードも入る）。
+async function startCancelSubscription(errorElId = 'cancel-subscription-error') {
+  const errorEl = document.getElementById(errorElId);
+  hideError(errorEl);
 
   try {
     const response = await authFetch('/api/checkout', {
@@ -1824,8 +1829,7 @@ async function startCancelSubscription() {
 
     window.location.href = data.url;
   } catch (err) {
-    errorEl.textContent = err.message || '解約ページの生成に失敗しました';
-    errorEl.style.display = 'block';
+    showError(errorEl, err.message || '解約ページの生成に失敗しました');
   }
 }
 
