@@ -1,4 +1,5 @@
-import { requireAuth } from './_auth';
+import { requireAuthWithPlan } from './_auth';
+import { reserveSearch, releaseSearch, quotaFromReservation } from '../lib/quota';
 
 // 型番テキスト・写真から後継器／互換品をWeb検索付きで調査するAPI
 //
@@ -130,9 +131,11 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  // ログイン済みかどうかを確認（メール＋Stripeサブスク確認済みトークン）
-  const email = await requireAuth(req, res);
-  if (!email) return; // requireAuth内で既に401レスポンス済み
+  // ログイン済みかどうかを確認（メール＋Stripeサブスク確認済みトークン）。
+  // 検索回数の上限判定にプラン上限と請求期間が要るため requireAuthWithPlan() を使う。
+  const auth = await requireAuthWithPlan(req, res);
+  if (!auth) return; // requireAuthWithPlan内で既に401レスポンス済み
+  const { email, limits, period } = auth;
 
   try {
     const { modelNum, note, images } = req.body || {};
@@ -183,32 +186,59 @@ export default async function handler(req, res) {
 
     const messages = buildMessages(trimmedModelNum, trimmedNote, imageList);
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1500,
-        system: SYSTEM_PROMPT,
-        messages: messages,
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search'
-          }
-        ]
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      console.error('Anthropic API error:', data);
-      return res.status(response.status).json({ error: data.error?.message || 'API error' });
+    // --- 検索回数の枠を確保 ---
+    // 入力検証をすべて通過した後、実際にAnthropicを呼ぶ直前に確保する。
+    // 400で弾かれる入力（型番も写真も無い、画像が大きすぎる等）で回数を消費させないため。
+    const reservation = await reserveSearch({ email, limits, period });
+    if (!reservation.allowed) {
+      return res.status(429).json({
+        error: 'quota_exceeded',
+        message: '検索回数が上限に達しました。',
+        // resetAtはミリ秒エポックのまま返す（日付の整形はフロント側で行う）
+        quota: {
+          plan: limits.plan,
+          used: reservation.used,
+          limit: reservation.limit,
+          resetAt: reservation.resetAt,
+        },
+      });
     }
-    return res.status(200).json(data);
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 1500,
+          system: SYSTEM_PROMPT,
+          messages: messages,
+          tools: [
+            {
+              type: 'web_search_20250305',
+              name: 'web_search'
+            }
+          ]
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('Anthropic API error:', data);
+        // 調査結果を返せていないので回数は戻す（利用者から見れば検索は失敗している）。
+        await releaseSearch({ email, period, counted: reservation.counted });
+        return res.status(response.status).json({ error: data.error?.message || 'API error' });
+      }
+      return res.status(200).json({ ...data, quota: quotaFromReservation(reservation, limits) });
+    } catch (err) {
+      // Anthropicへの接続失敗・レスポンスのJSON解析失敗など。確保した枠を戻してから
+      // 外側のcatchに投げ直す（500レスポンスの生成はそちらに任せる）。
+      await releaseSearch({ email, period, counted: reservation.counted });
+      throw err;
+    }
   } catch (err) {
     console.error('Server error:', err);
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });

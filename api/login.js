@@ -10,7 +10,8 @@
 import crypto from 'crypto';
 import { redis, redisKey } from '../lib/redis';
 import { isAdminEmail } from '../lib/adminEmails';
-import { checkActiveSubscriptionLive } from '../lib/subscription';
+import { checkActiveSubscriptionLive, ADMIN_PLAN_LIMITS } from '../lib/subscription';
+import { readQuota } from '../lib/quota';
 
 const RATE_LIMIT_MAX_ATTEMPTS = 5;      // この回数を超えたらブロック
 const RATE_LIMIT_WINDOW_SECONDS = 900;  // 15分間の試行回数でカウント
@@ -65,7 +66,14 @@ export default async function handler(req, res) {
   // --- 管理者バイパス（レート制限をスキップして即座にログイン） ---
   if (isAdminEmail(normalizedEmail)) {
     const token = createSessionToken(normalizedEmail);
-    return res.status(200).json({ success: true, admin: true, token });
+    // 管理者は全部無制限・請求期間なしなので readQuota() は unlimited を返す
+    // （Redisにも触らない）。フロントの分岐を一本化するため形だけそろえて返す。
+    const quota = await readQuota({
+      email: normalizedEmail,
+      limits: ADMIN_PLAN_LIMITS,
+      period: null,
+    });
+    return res.status(200).json({ success: true, admin: true, token, quota });
   }
 
   // --- レート制限チェック（ここから下は一般ユーザーのみ進む） ---
@@ -90,7 +98,7 @@ export default async function handler(req, res) {
 
   // --- Stripeサブスク状態の確認 ---
   try {
-    const { customerFound, active } = await checkActiveSubscriptionLive(normalizedEmail);
+    const { customerFound, active, limits, period } = await checkActiveSubscriptionLive(normalizedEmail);
 
     if (!customerFound) {
       return res.status(403).json({
@@ -105,7 +113,13 @@ export default async function handler(req, res) {
     }
 
     const token = createSessionToken(normalizedEmail);
-    return res.status(200).json({ success: true, admin: false, token });
+
+    // 残り検索回数の初期表示用。ここで返さないと、ログイン直後は検索を1回するまで
+    // 「残り○回」を出せない。専用エンドポイントは作らない方針（api配下は12ファイル上限）。
+    // 読み取りだけでカウントは増やさない。
+    const quota = await readQuota({ email: normalizedEmail, limits, period });
+
+    return res.status(200).json({ success: true, admin: false, token, quota });
   } catch (err) {
     console.error('Stripe確認エラー:', err);
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });

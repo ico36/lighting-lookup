@@ -442,6 +442,39 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .loading-text { color: var(--text2); font-size: 14px; }
 
+  /* 残り検索回数の常時表示。通常はグレー、残り5回以下で警告色にする */
+  .quota-status {
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: 10px;
+  }
+  .quota-status.is-low {
+    color: var(--warning);
+    font-weight: 700;
+  }
+  .quota-status.is-empty {
+    color: var(--error);
+    font-weight: 700;
+  }
+
+  /* 上限到達時の専用メッセージ領域（アップグレード導線を後から入れられるよう箱にしてある） */
+  .quota-limit-notice {
+    background: rgba(239,68,68,0.1);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 20px;
+    color: #fca5a5;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .quota-limit-actions:empty {
+    display: none;
+  }
+  .quota-limit-actions {
+    margin-top: 12px;
+  }
+
   .error-box {
     background: rgba(239,68,68,0.1);
     border: 1px solid rgba(239,68,68,0.3);
@@ -975,6 +1008,15 @@
       <input type="text" id="model-input" placeholder="例：LGB51671LE1、LSEB7040LE1" />
       <button class="btn-primary" id="search-btn" onclick="doSearch()">調べる</button>
     </div>
+    <!-- 残り検索回数。無制限プラン・取得できなかった場合は非表示 -->
+    <div id="quota-status" class="quota-status" style="display:none;"></div>
+  </div>
+
+  <!-- 検索回数の上限に達したときの専用表示（showError()とは別枠）。
+       後工程でアップグレード導線のボタンを quota-limit-actions に差し込む -->
+  <div id="quota-limit-notice" class="quota-limit-notice" style="display:none;">
+    <div id="quota-limit-message"></div>
+    <div id="quota-limit-actions" class="quota-limit-actions"></div>
   </div>
 
   <div class="input-card">
@@ -1350,6 +1392,7 @@ async function submitEmail() {
       }
 
       localStorage.setItem('session_token', data.token);
+      updateQuota(data.quota);
       await checkCompanyAndRoute();
 
     } catch (err) {
@@ -1447,12 +1490,111 @@ document.getElementById('header-menu-actions').addEventListener('click', functio
     closeHeaderMenu();
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
     companyInfo = null;
+    clearQuota(); // 別アカウントでログインし直したときに前の残り回数を出さない
     pendingLogo = { setup: null, settings: null };
     logoRemoved = { setup: false, settings: false };
     currentCartCaseId = null;
     localStorage.removeItem('cart_case_id');
     cartCase = null;
   }
+}
+
+// ===== 検索回数（プラン上限）の表示 =====
+//
+// サーバー(api/analyze.js)から返る quota を保持して表示するだけで、
+// 上限の判定そのものはサーバー側が正。ボタンのdisableは操作ミスを減らすためのUXで、
+// この値が古くても最終的にはサーバーが429で弾く。
+//
+// quota の形（lib/quota.js）:
+//   { plan, unlimited: true }                                  ... 無制限・取得不可
+//   { plan, unlimited: false, used, limit, remaining, resetAt } ... 有限プラン
+let quota = null;
+
+// 残りがこの回数以下になったら表示色を強める
+const QUOTA_LOW_THRESHOLD = 5;
+
+// resetAtはサーバーからミリ秒エポックで届く。整形はここだけで行う。
+// 利用者もサーバーも日本のため、端末のタイムゾーン設定に関わらずJSTで表示する。
+function formatQuotaResetDate(ms) {
+  return new Date(ms).toLocaleDateString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+// APIレスポンスに quota が含まれていたときだけ更新する
+// （含まれないエンドポイントの応答で表示を消してしまわないため）。
+function updateQuota(next) {
+  if (!next || typeof next !== 'object') return;
+  quota = next;
+  renderQuota();
+}
+
+function clearQuota() {
+  quota = null;
+  renderQuota();
+}
+
+// 有限プランで回数が読めているときだけ表示対象。それ以外は非表示にする。
+// 429のボディに載る quota には unlimited が無い（{ plan, used, limit, resetAt } のみ）ため、
+// 「unlimitedがtrueでない」かつ「上限が数値」で判定する。
+function hasCountableQuota() {
+  return !!quota && quota.unlimited !== true && Number.isFinite(quota.limit);
+}
+
+function quotaRemaining() {
+  if (!hasCountableQuota()) return null;
+  const remaining = Number.isFinite(quota.remaining)
+    ? quota.remaining
+    : quota.limit - quota.used;
+  return Math.max(0, remaining);
+}
+
+function renderQuota() {
+  const statusEl = document.getElementById('quota-status');
+  const noticeEl = document.getElementById('quota-limit-notice');
+  const messageEl = document.getElementById('quota-limit-message');
+  if (!statusEl || !noticeEl) return;
+
+  const remaining = quotaRemaining();
+
+  if (remaining === null) {
+    statusEl.style.display = 'none';
+    noticeEl.style.display = 'none';
+    applyQuotaToSearchButton();
+    return;
+  }
+
+  const resetLabel = Number.isFinite(quota.resetAt)
+    ? `（${formatQuotaResetDate(quota.resetAt)}リセット）`
+    : '';
+  statusEl.textContent = `残り${remaining}回${resetLabel}`;
+  statusEl.classList.toggle('is-low', remaining > 0 && remaining <= QUOTA_LOW_THRESHOLD);
+  statusEl.classList.toggle('is-empty', remaining === 0);
+  statusEl.style.display = 'block';
+
+  if (remaining === 0) {
+    const resetSentence = Number.isFinite(quota.resetAt)
+      ? `次回のリセットは${formatQuotaResetDate(quota.resetAt)}です。`
+      : '';
+    messageEl.textContent =
+      `検索回数が上限に達しました（${quota.used}/${quota.limit}回）。${resetSentence}`;
+    noticeEl.style.display = 'block';
+  } else {
+    noticeEl.style.display = 'none';
+  }
+
+  applyQuotaToSearchButton();
+}
+
+// 残り0のときは検索ボタンを押せなくする。
+// withButtonGuard()は処理の最後に必ず disabled=false に戻すため、
+// 検索完了後はその外側からこれを呼び直す必要がある。
+function applyQuotaToSearchButton() {
+  const btn = document.getElementById('search-btn');
+  if (!btn) return;
+  btn.disabled = quotaRemaining() === 0;
 }
 
 // ===== 自社情報（社名・電話番号・登録番号・ロゴ）の保存・再利用 =====
@@ -1483,6 +1625,8 @@ async function checkCompanyAndRoute() {
     }
 
     companyInfo = data.company;
+    // ログイン済みのまま画面を開き直した場合はここが「残り○回」の初期表示になる
+    updateQuota(data.quota);
     document.getElementById('logout-btn').style.display = 'block';
     document.getElementById('settings-btn').style.display = 'block';
     document.getElementById('contact-btn').style.display = 'block';
@@ -3264,8 +3408,19 @@ async function doSearch() {
           handleSessionExpired();
           throw new Error('ログインが必要です。再度メールアドレスを入力してください。');
         }
+        // 検索回数の上限到達。エラー表示ではなく専用のメッセージ領域に出す
+        // （原因が「失敗」ではなく「枠切れ」なので導線が違う）。
+        if (response.status === 429 && data.error === 'quota_exceeded') {
+          updateQuota(data.quota);
+          resultArea.style.display = 'none';
+          resultContent.innerHTML = '';
+          document.getElementById('quota-limit-notice').scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
         throw new Error(data.error || 'サーバーエラーが発生しました');
       }
+
+      updateQuota(data.quota);
 
       const raw = data.content.map(i => i.text || '').join('');
       let result;
@@ -3286,6 +3441,10 @@ async function doSearch() {
       `;
     }
   });
+
+  // withButtonGuard()は終了時に必ず disabled=false へ戻すので、
+  // 残り0になった場合のボタン無効化はガードを抜けた後にやり直す。
+  applyQuotaToSearchButton();
 }
 
 let lastResult = null;
