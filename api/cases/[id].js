@@ -15,7 +15,7 @@
 // 発注ボタンなど承認済み以降でしか出せない操作は、フロント側で
 // case.status === '承認済み' を見て判定する。
 
-import { requireAuth } from '../_auth';
+import { requireAuthWithPlan } from '../_auth';
 import {
   STATUS,
   getCase,
@@ -34,8 +34,11 @@ import {
 const VALID_STATUSES = Object.values(STATUS);
 
 export default async function handler(req, res) {
-  const email = await requireAuth(req, res);
-  if (!email) return;
+  // 完了/失注へのステータス変更時に、そのときのプランの保持期間(limits.retentionDays)を
+  // 案件へ焼き込むため requireAuthWithPlan() を使う
+  const auth = await requireAuthWithPlan(req, res);
+  if (!auth) return;
+  const { email, limits } = auth;
 
   const { id } = req.query;
   const record = await getCase(id);
@@ -62,7 +65,12 @@ export default async function handler(req, res) {
             message: `status は ${VALID_STATUSES.join(' / ')} のいずれかである必要があります`,
           });
         }
-        const updated = await updateCaseStatus(id, status, 'user');
+        // 完了/失注へ確定する場合、updateCaseStatus() が retentionDays を焼き込む。
+        // 差し戻し(それ以外のステータス)のときは焼き込み済みの値がクリアされ、
+        // 再確定時にそのときのプランで書き直される。
+        const updated = await updateCaseStatus(id, status, 'user', {
+          retentionDays: limits.retentionDays,
+        });
         return res.status(200).json({ case: updated });
       }
 

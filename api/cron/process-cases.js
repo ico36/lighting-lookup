@@ -14,6 +14,11 @@
 // vercel.json の crons 設定で毎日1回叩く。Vercel Cron以外からの
 // 呼び出しは CRON_SECRET で拒否する（Vercel環境変数への追加が必要）。
 
+// 【Stripeへの依存について】lib/cases.js が UNLIMITED / isUnlimited() のために
+// lib/subscription.js を読むため、このcronもStripeクライアントの生成を巻き込む
+// （subscription.js はトップレベルで Stripe() を生成し、キーが無いと構築時点で落ちる）。
+// D-2ではステップ1で所有者のプランを実際に引くので、この依存は意図的なものになった。
+// ステップ2(自動アーカイブ)はプランを引かない。理由は下のコメント参照。
 import {
   STATUS,
   GLOBAL_OPEN_KEY,
@@ -22,11 +27,9 @@ import {
   updateCaseStatus,
   archiveCase,
 } from '../../lib/cases';
-import { AUTO_LOSE_GRACE_DAYS } from '../../lib/planLimits';
-import { isUnlimited } from '../../lib/subscription';
+import { AUTO_LOSE_GRACE_DAYS, DAY_MS } from '../../lib/planLimits';
+import { isUnlimited, getSubscriptionStateCached } from '../../lib/subscription';
 import { redis } from '../../lib/redis';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export default async function handler(req, res) {
   if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -34,31 +37,102 @@ export default async function handler(req, res) {
   }
 
   const now = Date.now();
-  const results = { autoLost: [], archived: [], skipped: 0, errors: [] };
+  const results = {
+    autoLost: [],
+    deferred: [],   // プランを引けず、自動失注を次回に見送った案件
+    archived: [],
+    pruned: [],     // 実体が無いのにZSETに残っていた残骸（掃除した）
+    // 「保持期間が不明」と「無期限で期限が来ない」は意味が違うので分けて数える。
+    // noRetention は焼き込み(D-2)導入前に確定した案件の残数＝移行状況の指標で、
+    // 時間とともに減っていくはずのもの。unlimited は無制限プランの正常な状態で、
+    // ずっと残り続けるのが正しい。同じ数字に混ぜると前者の異常を後者が覆い隠す。
+    skipped: { noRetention: 0, unlimited: 0 },
+    errors: [],
+  };
 
   // --- 1. 自動失注化 -------------------------------------------------
+  // 失注・キャンセルは終了ステータスなので、ここでも retentionDays の焼き込みが要る。
+  // 焼き込む値は所有者のプラン由来だが、対象は「30日動きがない案件」で日次では数件
+  // （多くの日は0件）。所有者ごとにまとめて1回だけ引けば、Stripeへの往復はほぼ発生
+  // しない(getSubscriptionStateCached はRedisに1時間キャッシュする)。
+  // ステップ2でプランを引かない理由とは条件が違う（詳細はステップ2のコメント参照）。
   const loseThreshold = now - AUTO_LOSE_GRACE_DAYS * DAY_MS;
   const openCandidates = await redis.zrange(GLOBAL_OPEN_KEY, 0, loseThreshold, {
     byScore: true,
   });
 
+  // 所有者ごとにグルーピング（同じ所有者で複数件あってもプラン取得は1回）
+  const byOwner = new Map();
   for (const caseId of openCandidates) {
     try {
-      await updateCaseStatus(caseId, STATUS.LOST, 'auto');
-      results.autoLost.push(caseId);
+      const record = await getCase(caseId);
+      if (!record) {
+        // 案件の実体が無いのにZSETに残っている＝不整合の残骸。deleteCase()は
+        // 両方消すので通常は発生しないが、途中で失敗した場合などに残りうる。
+        // 放置すると毎回getCaseされ続けるので、ここで掃除する。
+        await redis.zrem(GLOBAL_OPEN_KEY, caseId);
+        results.pruned.push(caseId);
+        continue;
+      }
+      if (!byOwner.has(record.email)) byOwner.set(record.email, []);
+      byOwner.get(record.email).push(caseId);
     } catch (err) {
-      console.error('[cron/process-cases] auto-lose failed', caseId, err);
+      console.error('[cron/process-cases] auto-lose lookup failed', caseId, err);
       results.errors.push({ caseId, step: 'auto-lose', message: err.message });
     }
   }
 
+  for (const [email, caseIds] of byOwner) {
+    let retentionDays;
+    try {
+      const { limits, degraded } = await getSubscriptionStateCached(email);
+      if (degraded) {
+        // Stripeに聞けなかっただけで、本当に無制限とは限らない。ここで既定値(-1)を
+        // 焼き込むと「二度とアーカイブされない案件」が恒久的に残るため、ステータス
+        // 変更ごと見送って次回のcronに回す（案件は開いたままなので実害はない）。
+        console.warn(
+          `[cron/process-cases] ${email} のプランを取得できなかったため、` +
+            `自動失注を見送りました（対象 ${caseIds.length} 件）。次回のcronで再試行します。`
+        );
+        results.deferred.push(...caseIds);
+        continue;
+      }
+      retentionDays = limits.retentionDays;
+    } catch (err) {
+      console.error('[cron/process-cases] plan lookup failed', email, err);
+      results.errors.push({ email, step: 'plan-lookup', message: err.message });
+      results.deferred.push(...caseIds);
+      continue;
+    }
+
+    for (const caseId of caseIds) {
+      try {
+        await updateCaseStatus(caseId, STATUS.LOST, 'auto', { retentionDays });
+        results.autoLost.push(caseId);
+      } catch (err) {
+        console.error('[cron/process-cases] auto-lose failed', caseId, err);
+        results.errors.push({ caseId, step: 'auto-lose', message: err.message });
+      }
+    }
+  }
+
   // --- 2. 自動アーカイブ化 -------------------------------------------
-  // 保持期間は案件ごとに異なる（完了/失注にした時点のプランの retention_days を
-  // 焼き込んである）ため、ZSETのスコアで一律に絞り込むことができない。完了/失注の
-  // 案件を全件走査し、1件ずつ自分の retentionDays と突き合わせる。
-  // 利用者が数名規模で完了案件も多くないため全件走査で足りる。件数が増えて重く
-  // なった場合は、焼き込み時に「アーカイブ予定時刻」をスコアにした別のZSETを
-  // 持たせる方が素直（保持期間ごとにキーを分ける必要がなくなる）。
+  // 【ここでは絶対にプランを引かない】ステップ1と扱いが違う理由:
+  //   ステップ1の対象は「30日動きがない案件」で日次では数件（多くの日は0件）。
+  //   ステップ2の対象は全アカウントにまたがり、しかも保持期間が切れた案件が同じ日に
+  //   まとまって期限を迎えることがある（同じ日に完了した案件は同じ日に期限が来る）。
+  //   ここで所有者を引くと、その日の対象件数に比例して問い合わせが増える。
+  //   加えて「完了にした時点のプランの保持期間」で判定したいので、後からプランを
+  //   変更しても確定済み案件の期限は動かさない。判定材料は案件へ焼き込んだ
+  //   retentionDays だけにする。
+  //
+  // cases:terminal のスコアはアーカイブ予定時刻(statusUpdatedAt + retentionDays日)
+  // なので、zrange(0, now) で期限が来たものだけが返る。無期限の案件と保持期間が
+  // 不明な案件はそもそも登録されない。
+  //
+  // ただしD-2より前に確定した案件は、スコアが statusUpdatedAt（旧仕様）のまま
+  // 入っている。新しい意味では「とっくに期限到来」と解釈されて毎回候補に挙がるが、
+  // retentionDays を持たないので下の noRetention で弾かれる。ここが唯一の防壁。
   const terminalCandidates = await redis.zrange(GLOBAL_TERMINAL_KEY, 0, now, {
     byScore: true,
   });
@@ -66,8 +140,12 @@ export default async function handler(req, res) {
   for (const caseId of terminalCandidates) {
     try {
       const record = await getCase(caseId);
-      // 実体が消えている（物理削除済みなど）ものはZSETの残骸なので触らない
-      if (!record) continue;
+      // 実体が消えている（物理削除済みなど）ZSETの残骸。ステップ1と同じく掃除する
+      if (!record) {
+        await redis.zrem(GLOBAL_TERMINAL_KEY, caseId);
+        results.pruned.push(caseId);
+        continue;
+      }
 
       const { retentionDays } = record;
 
@@ -77,17 +155,22 @@ export default async function handler(req, res) {
       // 焼き込みを入れる前のデプロイで確定した案件はすべて undefined になる。
       // フォールバック値は入れず、明示的にスキップする。
       if (!Number.isInteger(retentionDays)) {
-        results.skipped++;
+        results.skipped.noRetention++;
         continue;
       }
 
       // -1 は無制限。期限が来ないので何もしない。
+      // （スコアの計算対象外なので通常はZSETに入っていないが、旧スコアのまま残って
+      //   いる案件が無期限で再確定された場合などに備えてここでも弾く）
       if (isUnlimited(retentionDays)) {
-        results.skipped++;
+        results.skipped.unlimited++;
         continue;
       }
 
-      // statusUpdatedAt は完了/失注に確定した時刻（GLOBAL_TERMINAL_KEY のスコアと同じ）
+      // 安全網。スコアは書き込み時点の予定時刻なので、焼き込んだ retentionDays を
+      // あとから変えた場合や、旧スコアのまま残っている案件では実際の期限とズレうる。
+      // レコード側を正としてもう一度判定する（スコアはあくまで走査を絞るための索引）。
+      // statusUpdatedAt は完了/失注に確定した時刻。
       if (record.statusUpdatedAt > now - retentionDays * DAY_MS) continue;
 
       await archiveCase(caseId);
