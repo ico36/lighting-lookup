@@ -1,5 +1,6 @@
 import { requireAuthWithPlan } from './_auth';
 import { reserveSearch, releaseSearch, quotaFromReservation } from '../lib/quota';
+import { quotaExceededBody } from '../lib/responses';
 
 // 型番テキスト・写真から後継器／互換品をWeb検索付きで調査するAPI
 //
@@ -191,17 +192,9 @@ export default async function handler(req, res) {
     // 400で弾かれる入力（型番も写真も無い、画像が大きすぎる等）で回数を消費させないため。
     const reservation = await reserveSearch({ email, limits, period });
     if (!reservation.allowed) {
-      return res.status(429).json({
-        error: 'quota_exceeded',
-        message: '検索回数が上限に達しました。',
-        // resetAtはミリ秒エポックのまま返す（日付の整形はフロント側で行う）
-        quota: {
-          plan: limits.plan,
-          used: reservation.used,
-          limit: reservation.limit,
-          resetAt: reservation.resetAt,
-        },
-      });
+      // ボディの組み立ては lib/responses.js に集約（成功時の quota と同じ
+      // buildQuota() を通るため、429だけ形が食い違うことがない）
+      return res.status(429).json(quotaExceededBody(reservation, limits));
     }
 
     try {

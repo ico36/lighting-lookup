@@ -1537,18 +1537,20 @@ function clearQuota() {
 }
 
 // 有限プランで回数が読めているときだけ表示対象。それ以外は非表示にする。
-// 429のボディに載る quota には unlimited が無い（{ plan, used, limit, resetAt } のみ）ため、
-// 「unlimitedがtrueでない」かつ「上限が数値」で判定する。
+// サーバー側は quota を lib/quota.js の buildQuota() 1箇所だけで組み立てており、
+// ログイン/画面復帰・検索成功・429 のどの経路でも
+// { plan, unlimited, used, limit, remaining, resetAt }（無制限なら { plan, unlimited }）
+// で揃っている。unlimited の欠落を疑う防御は不要。
 function hasCountableQuota() {
-  return !!quota && quota.unlimited !== true && Number.isFinite(quota.limit);
+  return !!quota && quota.unlimited === false;
 }
 
+// 残り回数はサーバーが計算した remaining をそのまま使う（0未満にならないことも
+// buildQuota() 側で担保済み）。ここで limit - used を再計算すると、上限の数え方が
+// サーバーとフロントの2箇所に散る。
 function quotaRemaining() {
   if (!hasCountableQuota()) return null;
-  const remaining = Number.isFinite(quota.remaining)
-    ? quota.remaining
-    : quota.limit - quota.used;
-  return Math.max(0, remaining);
+  return quota.remaining;
 }
 
 function renderQuota() {
