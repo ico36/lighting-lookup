@@ -4,12 +4,15 @@
 //   body.draft === true の場合、customerName未設定の下書き案件を作成する
 //   （カート機能で「対象の案件がまだ無い」ときの自動作成用）
 
-import { requireAuth } from '../_auth';
+import { requireAuthWithPlan } from '../_auth';
 import { createCase, createDraftCase, listVisibleCases } from '../../lib/cases';
+import { caseLimitExceededBody } from '../../lib/responses';
 
 export default async function handler(req, res) {
-  const email = await requireAuth(req, res);
-  if (!email) return;
+  // 案件の保存件数上限(limits.caseLimit)が要るため requireAuthWithPlan() を使う
+  const auth = await requireAuthWithPlan(req, res);
+  if (!auth) return;
+  const { email, limits } = auth;
 
   if (req.method === 'GET') {
     const cases = await listVisibleCases(email);
@@ -18,16 +21,19 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
+      // 下書き(カートからの自動作成)も保存件数のカウント対象なので、
+      // caseLimit は両方の経路に必ず渡す（片方だけだと上限がすり抜ける）。
       const record = req.body?.draft
-        ? await createDraftCase(email)
-        : await createCase(email, req.body || {});
+        ? await createDraftCase(email, { caseLimit: limits.caseLimit })
+        : await createCase(email, req.body || {}, { caseLimit: limits.caseLimit });
       return res.status(201).json({ case: record });
     } catch (err) {
       if (err.code === 'CASE_LIMIT_REACHED') {
-        return res.status(403).json({
-          error: 'CASE_LIMIT_REACHED',
-          message: `保存できる案件数の上限(${err.limit}件)に達しています。不要な案件を失注・キャンセルにするか、上位プランをご検討ください。`,
-        });
+        // 時間で回復しないので429ではなく403。ボディの組み立ては lib/responses.js に
+        // 集約してあり、ここでは手組みしない。文言はフロント側が limits から作る。
+        return res
+          .status(403)
+          .json(caseLimitExceededBody({ plan: limits.plan, used: err.used, limit: err.limit }));
       }
       console.error('[cases] 作成エラー:', err);
       return res.status(500).json({ error: 'INTERNAL_ERROR' });

@@ -475,6 +475,61 @@
     margin-top: 12px;
   }
 
+  /* 案件の保存件数が上限に達したときの通知。
+     検索回数側(.quota-limit-notice)とは別クラスにする。あちらは本文中に流し込む
+     ブロックだが、こちらは画面下部への固定配置で、片方のmargin/positionを変えると
+     もう片方が崩れるため。見た目の宣言が重複するのは承知の上。
+
+     【z-index】既存の段は header=10 / ハンバーガーメニュー=20 / モーダル=100
+     （モーダルは全て .modal-overlay を共有）。案件作成の4経路のうち3経路は
+     案件一覧モーダルの外や別モーダルで起きるので、すべてより前面の200に置く。
+     100と200の間は、将来モーダル内部で要素を重ねたくなったときのために空けてある。
+
+     【背景を不透明にしている理由】任意のコンテンツの上に重なるため、検索回数側と
+     同じ半透明の赤(rgba(239,68,68,0.1))だと下の文字が透けて読めなくなる。
+     背景は --surface で塗り、赤は枠線と文字色で表す。 */
+  .case-limit-notice {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 200;
+    max-width: 600px;
+    margin: 0 auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid rgba(239,68,68,0.5);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    padding: 16px;
+    color: #fca5a5;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .case-limit-notice-body {
+    flex: 1;
+  }
+  .case-limit-actions:empty {
+    display: none;
+  }
+  .case-limit-actions {
+    margin-top: 12px;
+  }
+  /* 閉じるボタン。指で押せるよう44px近い当たり判定を確保する */
+  .case-limit-close {
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 18px;
+    line-height: 1;
+    padding: 6px;
+    min-width: 32px;
+    min-height: 32px;
+    cursor: pointer;
+  }
+
   .error-box {
     background: rgba(239,68,68,0.1);
     border: 1px solid rgba(239,68,68,0.3);
@@ -1320,6 +1375,20 @@
 
 <footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
+<!-- 案件の保存件数が上限に達したときの通知。案件の作成は4経路(新規案件フォーム・
+     検索結果の紐付け・カートの下書き自動作成・見積もりファイルの取り込み)あり、
+     うち3経路は案件一覧モーダルの外で起きる。表示先を1箇所にまとめるため、
+     どのモーダルにも属さないトップレベルに置いて固定配置で出す。
+     閉じるのは×を押したときと、案件の作成に成功したときの2つだけ(モーダルを
+     閉じても消さない)。アップグレード導線は工程Eで #case-limit-actions に入れる。 -->
+<div id="case-limit-notice" class="case-limit-notice" style="display:none;">
+  <div class="case-limit-notice-body">
+    <div id="case-limit-message"></div>
+    <div id="case-limit-actions" class="case-limit-actions"></div>
+  </div>
+  <button type="button" class="case-limit-close" onclick="closeCaseLimitNotice()" aria-label="閉じる">✕</button>
+</div>
+
 <script>
 function getSessionToken() {
   return localStorage.getItem('session_token') || '';
@@ -1597,6 +1666,56 @@ function applyQuotaToSearchButton() {
   const btn = document.getElementById('search-btn');
   if (!btn) return;
   btn.disabled = quotaRemaining() === 0;
+}
+
+// ===== 案件の保存件数（プラン上限） =====
+//
+// サーバー(api/cases/index.js)は上限に達すると403 + { error: 'case_limit_exceeded',
+// limits: { plan, used, limit } } を返す。判定は必ず error コードで行うこと。
+// 403は「サービス準備中(api/checkout.js)」「上位プラン限定機能(api/cases/archive.js)」
+// でも返るステータスなので、ステータスで分岐すると別の理由の403に上限メッセージが
+// 出てしまう。
+//
+// 検索回数と違い、案件数は時間で回復しない（失注・キャンセルにするか上位プランへ
+// 変更するまで空かない）ため、リセット日の表示は無い。
+
+// 最後に受け取った上限情報 { plan, used, limit }。表示中の文言はDOMにあるが、
+// 工程Eでアップグレードボタンを押されたときに「どのプランから上げるのか」を
+// 決めるには plan の値そのものが要る。文字列に潰さずここに残しておく。
+// 通知を閉じても消さない（閉じたあとにボタンを再描画する場合に備える）。
+let caseLimitState = null;
+
+function isCaseLimitError(data) {
+  return !!data && data.error === 'case_limit_exceeded' && !!data.limits;
+}
+
+// サーバーは値だけを返し、文言はここで組み立てる（検索回数側と同じ役割分担）
+function caseLimitMessage(limits) {
+  return `保存できる案件数の上限（${limits.limit}件）に達しています（現在${limits.used}件）。` +
+    '不要な案件を失注・キャンセルにするか、上位プランをご検討ください。';
+}
+
+// 上限に達したことが分かる4経路すべてがこれを呼ぶ。表示先はモーダルの外にある
+// 固定配置の1箇所だけなので、どの画面から起きても同じ場所に出る。
+function showCaseLimitNotice(limits) {
+  caseLimitState = limits;
+  document.getElementById('case-limit-message').textContent = caseLimitMessage(limits);
+  // display:flex（本文と×ボタンの横並び）。CSSの .case-limit-notice に合わせる
+  document.getElementById('case-limit-notice').style.display = 'flex';
+}
+
+// 消すのはここ経由の2つだけ:
+//   1. ×ボタン（closeCaseLimitNotice）
+//   2. 案件の作成に成功したとき
+// モーダルを閉じただけでは消さない（モーダルの外に出した以上、モーダルの開閉に
+// 連動させると「カートから出した通知が案件一覧を閉じた拍子に消える」ことになる）。
+function hideCaseLimitNotice() {
+  const el = document.getElementById('case-limit-notice');
+  if (el) el.style.display = 'none';
+}
+
+function closeCaseLimitNotice() {
+  hideCaseLimitNotice();
 }
 
 // ===== 自社情報（社名・電話番号・登録番号・ロゴ）の保存・再利用 =====
@@ -2164,10 +2283,18 @@ async function submitNewCase(btn) {
           handleSessionExpired(closeCasesModal);
           return;
         }
+        // 保存件数の上限。フォーム内の赤文字ではなく、モーダル上部の専用領域に出す
+        // （後でアップグレード導線のボタンを併置するため）
+        if (isCaseLimitError(data)) {
+          closeNewCaseForm();
+          showCaseLimitNotice(data.limits);
+          return;
+        }
         throw new Error(data.message || data.error || '案件の作成に失敗しました');
       }
 
       closeNewCaseForm();
+      hideCaseLimitNotice();
       await loadCasesList();
     } catch (err) {
       showError(errorEl, err.message || '通信エラーが発生しました');
@@ -2583,6 +2710,14 @@ async function attachCurrentSearchToCase(btn) {
             handleSessionExpired();
             return;
           }
+          // 上限到達は画面下部固定の専用通知に集約する。ここで throw すると
+          // limits が文字列に潰れ、工程Eでアップグレード導線を出せなくなる。
+          // 早期returnしてもボタンの状態は withButtonGuard の finally が元に戻す
+          // （すぐ上の401やお客様名未入力の分岐と同じ抜け方）。
+          if (isCaseLimitError(createData)) {
+            showCaseLimitNotice(createData.limits);
+            return;
+          }
           throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
         }
         caseId = createData.case.id;
@@ -2644,6 +2779,17 @@ async function ensureCartCase() {
   if (!response.ok) {
     if (response.status === 401) {
       handleSessionExpired();
+    }
+    // 下書き(カートからの自動作成)も保存件数にカウントされるため、ここでも上限に当たる。
+    // この関数は caseId を返すヘルパーで、呼び出し元は戻り値を使って処理を続けるため、
+    // return では中断できない（undefined の caseId で先へ進んでしまう）。
+    // 通知は自分で出したうえで、エラーの正体が分かる code を付けて投げる。
+    // 呼び出し元は err.code を見て、汎用のエラー表示だけをスキップする。
+    if (isCaseLimitError(data)) {
+      showCaseLimitNotice(data.limits);
+      const err = new Error(caseLimitMessage(data.limits));
+      err.code = 'case_limit_exceeded';
+      throw err;
     }
     throw new Error(data.message || data.error || '案件の作成に失敗しました');
   }
@@ -2801,6 +2947,12 @@ async function handleImportFile(input) {
           handleSessionExpired();
           return;
         }
+        // 取り込み先の案件を新規作成する経路。上限到達は専用通知に集約する
+        // （すぐ上の401と同じく、早期returnで取り込み処理へ進ませない）
+        if (isCaseLimitError(createData)) {
+          showCaseLimitNotice(createData.limits);
+          return;
+        }
         throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
       }
       targetCaseId = createData.case.id;
@@ -2920,6 +3072,9 @@ async function addCandidateToCart(btn, index, errorElId) {
       cartCase = data.case;
       updateCartBadge();
     } catch (err) {
+      // 案件数の上限は ensureCartCase() が専用通知に出し済み。ここで汎用の
+      // エラー表示も出すと同じ内容が二重に見える。
+      if (err.code === 'case_limit_exceeded') return;
       showError(errorEl, err.message || '通信エラーが発生しました');
     }
   }, '追加中...');
