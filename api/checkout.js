@@ -131,6 +131,32 @@ function couponDiscounts() {
   return process.env.STRIPE_COUPON_ID ? [{ coupon: process.env.STRIPE_COUPON_ID }] : null;
 }
 
+/**
+ * 利用者に見せるプラン名。StripeのProduct名をそのまま使う。
+ *
+ * プラン識別子(light/standard/pro)は内部用で、画面に出すと意味が通らない。かといって
+ * 識別子→日本語名の対応表をコードに持つと、上限値のハードコードを潰した方針
+ * （数値も名称もStripeを唯一の出所にする）の逆行になる。Price を expand:['product']
+ * で引けば往復を増やさずに名前が取れるので、そちらを使う。
+ *
+ * 取れない場合（Productが削除済み＝DeletedProductにはnameが無い、名前が空、
+ * expandし忘れでIDの文字列のまま）は識別子へフォールバックする。表示が消えるより
+ * 名前が不格好でも選べる方が実害が小さい。フォールバックしたことはwarnで残す。
+ */
+function planDisplayName(price, fallbackPlan) {
+  const product = price?.product;
+  const name = product && typeof product === 'object' ? product.name : null;
+
+  if (typeof name === 'string' && name.trim() !== '') return name.trim();
+
+  console.warn(
+    `[checkout] Price ${price?.id || '(unknown)'} から表示名を取得できませんでした` +
+      `（product=${typeof product}）。プラン識別子「${fallbackPlan}」を表示に使います。` +
+      'StripeのProduct名が設定されているか確認してください。'
+  );
+  return fallbackPlan || null;
+}
+
 // 移行先の候補ごとに、Priceの内容と日割り額をまとめて返す。
 // モーダルを開いたときに1回だけ叩かれる想定。
 async function handleGetUpgradeOptions(req, res) {
@@ -138,19 +164,37 @@ async function handleGetUpgradeOptions(req, res) {
   if (!auth) return;
   const { email, limits } = auth;
 
-  const targets = UPGRADE_PATHS[limits.plan] || [];
-  if (targets.length === 0) {
-    // pro（最上位）/ unknown（metadata未設定で現在のプランが判定できない）/
-    // admin。移行先を機械的に決められないので、フロントはお問い合わせ導線を出す。
-    return res.status(200).json({ currentPlan: limits.plan, options: [], contactOnly: true });
-  }
-
   try {
     const { subscription, item } = await getActiveSubscriptionWithItem(email);
     if (!subscription || !item) {
       return res.status(404).json({
         error: 'subscription_not_found',
         message: '契約情報が見つかりませんでした',
+      });
+    }
+
+    // 現在のプランの表示名も同じ波で取る。subscriptions.list が返す price は
+    // product がID文字列のままなので、名前を得るには expand した取得が要る。
+    // 共有ヘルパー getActiveSubscriptionWithItem() 側にexpandを足す手もあるが、
+    // あちらは認証のたびに通る経路(checkActiveSubscriptionLive)なので触らない。
+    const currentPricePromise = item.price?.id
+      ? stripe.prices.retrieve(item.price.id, { expand: ['product'] })
+      : Promise.resolve(null);
+
+    const targets = UPGRADE_PATHS[limits.plan] || [];
+
+    // pro（最上位）/ unknown（metadata未設定で現在のプランが判定できない）/ admin。
+    // 移行先を機械的に決められないので、フロントはお問い合わせ導線を出す。
+    // この分岐でも表示名を返す。候補カードが出ないぶん、ここが利用者に見える
+    // 唯一のプラン名になるため（特にunknownでは識別子を見せても意味が通らない）。
+    if (targets.length === 0) {
+      const currentPrice = await currentPricePromise;
+      return res.status(200).json({
+        currentPlan: limits.plan,
+        currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
+        currentLimits: limits,
+        options: [],
+        contactOnly: true,
       });
     }
 
@@ -174,7 +218,7 @@ async function handleGetUpgradeOptions(req, res) {
       }
 
       const [price, upcoming] = await Promise.all([
-        stripe.prices.retrieve(priceId),
+        stripe.prices.retrieve(priceId, { expand: ['product'] }),
         // プレビューにも同じ discounts を渡す。渡さないと割引前の額が出て、
         // 実際の請求（割引後）と食い違う。
         stripe.invoices.retrieveUpcoming({
@@ -193,6 +237,8 @@ async function handleGetUpgradeOptions(req, res) {
 
       return {
         plan,
+        // 画面に出す名前。プラン識別子ではなくStripeのProduct名
+        displayName: planDisplayName(price, plan),
         priceLabel: { unitAmount: price.unit_amount, currency: price.currency },
         // 上限値はPrice metadataから作る。フロントに数値を持たせないため
         // （工程DでCASE_LIMITSのハードコードを潰したのと同じ理由）。
@@ -217,9 +263,14 @@ async function handleGetUpgradeOptions(req, res) {
     }));
 
     const options = settled.filter(Boolean);
+    const currentPrice = await currentPricePromise;
 
     return res.status(200).json({
       currentPlan: limits.plan,
+      // 現在のプランの表示名。候補カードだけ日本語名で「現在のプラン」が識別子のまま、
+      // という不揃いを避ける。metadata未設定(plan='unknown')の契約者にとっては、
+      // ここが唯一意味の通るプラン名になる（Product名は metadata と無関係に付いている）。
+      currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
       currentLimits: limits,
       options,
       contactOnly: false,

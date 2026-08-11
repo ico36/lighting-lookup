@@ -480,9 +480,13 @@
      ブロックだが、こちらは画面下部への固定配置で、片方のmargin/positionを変えると
      もう片方が崩れるため。見た目の宣言が重複するのは承知の上。
 
-     【z-index】既存の段は header=10 / ハンバーガーメニュー=20 / モーダル=100
-     （モーダルは全て .modal-overlay を共有）。案件作成の4経路のうち3経路は
-     案件一覧モーダルの外や別モーダルで起きるので、すべてより前面の200に置く。
+     【z-index】段は header=10 / ハンバーガーメニュー=20 / モーダル=100
+     （モーダルは全て .modal-overlay を共有）/ この通知=200 /
+     アップグレードモーダル=300。案件作成の4経路のうち3経路は案件一覧モーダルの外や
+     別モーダルで起きるので、この通知は通常のモーダルより前面の200に置く。
+     ただしこの通知からアップグレードモーダルを開くと通知が上に浮いてしまうため、
+     そのモーダルだけは通知より前面の300にしてある（通知は暗転した背景の下に沈む。
+     「×か案件作成成功でしか消えない」という通知の消滅条件は変えない）。
      100と200の間は、将来モーダル内部で要素を重ねたくなったときのために空けてある。
 
      【背景を不透明にしている理由】任意のコンテンツの上に重なるため、検索回数側と
@@ -529,6 +533,89 @@
     min-height: 32px;
     cursor: pointer;
   }
+
+  /* ===== プランのアップグレード ===== */
+
+  /* 案件数の上限通知(#case-limit-notice, z-index:200)は「×か案件作成成功」でしか
+     消えない。その通知の中のボタンからこのモーダルを開くので、通知より前面に
+     置かないと通知がモーダルの上に浮いたままになる。段は
+     header=10 / ハンバーガーメニュー=20 / 通常のモーダル=100 / 上限通知=200 / ここ=300。 */
+  #upgrade-overlay { z-index: 300; }
+
+  /* 上限通知の中に置くボタン。通知の赤い枠の中で埋もれないよう塗りにする */
+  .upgrade-cta {
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  .upgrade-cta:disabled { opacity: 0.6; cursor: default; }
+
+  /* 移行先の候補カード。選択中は枠と背景で示す（色だけに頼らない） */
+  .plan-card {
+    width: 100%;
+    text-align: left;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 10px;
+    color: var(--text);
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .plan-card.is-selected {
+    border-color: var(--accent);
+    background: var(--surface2);
+  }
+  .plan-card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .plan-card-name { font-size: 15px; font-weight: 700; }
+  .plan-card-price { font-size: 14px; color: var(--text2); }
+  /* 上限の一覧。数値はすべてサーバーのレスポンス由来で、CSS側にも文言を持たせない */
+  .plan-card-limits {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.7;
+  }
+  .plan-card-today {
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .plan-card-coupon {
+    display: inline-block;
+    margin-left: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent2);
+  }
+
+  /* 確認ステップ。金額を最も目立たせる */
+  .upgrade-confirm-amount {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 6px 0 2px;
+  }
+  .upgrade-note {
+    font-size: 12px;
+    color: var(--text2);
+    line-height: 1.7;
+    margin-top: 10px;
+  }
+  .upgrade-done-icon { font-size: 32px; }
 
   .error-box {
     background: rgba(239,68,68,0.1);
@@ -1373,6 +1460,36 @@
   </div>
 </div>
 
+<!-- プランのアップグレード。検索回数・案件数どちらの上限から開いても中身は同じなので
+     モーダルは1つだけ用意し、#quota-limit-actions と #case-limit-actions の両方から
+     同じ関数で開く。中の3領域(候補選択→確認→完了)を切り替えて使う。
+     金額・プラン名・上限値はすべて get-upgrade-options のレスポンスから描画するため、
+     ここには一切書かない(工程DでCASE_LIMITSのハードコードを潰したのと同じ理由)。 -->
+<div class="modal-overlay" id="upgrade-overlay" onclick="if(event.target===this) closeUpgradeModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title" id="upgrade-title">プランのアップグレード</div>
+      <button class="modal-close" onclick="closeUpgradeModal()">✕</button>
+    </div>
+
+    <div id="upgrade-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;"></div>
+
+    <!-- 1. 候補の選択。読み込み中とお問い合わせ導線もここに出す -->
+    <div id="upgrade-step-select">
+      <div id="upgrade-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
+      <div id="upgrade-current" style="display:none;font-size:12px;color:var(--text2);margin-bottom:12px;"></div>
+      <div id="upgrade-options"></div>
+      <div id="upgrade-contact" style="display:none;"></div>
+    </div>
+
+    <!-- 2. 確認。実際に課金する前に必ずここを通す -->
+    <div id="upgrade-step-confirm" style="display:none;"></div>
+
+    <!-- 3. 完了。提示額ではなく実際に請求された額を出す -->
+    <div id="upgrade-step-done" style="display:none;"></div>
+  </div>
+</div>
+
 <footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
 <!-- 案件の保存件数が上限に達したときの通知。案件の作成は4経路(新規案件フォーム・
@@ -1651,6 +1768,7 @@ function renderQuota() {
       : '';
     messageEl.textContent =
       `検索回数が上限に達しました（${quota.used}/${quota.limit}回）。${resetSentence}`;
+    renderUpgradeCta('quota-limit-actions');
     noticeEl.style.display = 'block';
   } else {
     noticeEl.style.display = 'none';
@@ -1666,6 +1784,23 @@ function applyQuotaToSearchButton() {
   const btn = document.getElementById('search-btn');
   if (!btn) return;
   btn.disabled = quotaRemaining() === 0;
+}
+
+// ===== プランのアップグレード導線 =====
+//
+// 検索回数(#quota-limit-actions)と案件数(#case-limit-actions)のどちらの上限通知にも
+// 同じボタンを出す。モーダルの中身は上限の種類によらず同じ（get-upgrade-options は
+// プラン全体の情報を返す）なので、開く関数も1つ。
+//
+// ボタンは contactOnly のプラン(pro / unknown)でも出す。候補があるかどうかは
+// get-upgrade-options を叩くまで分からず、それを先読みすると上限に達しただけで
+// 毎回APIを呼ぶことになるため。開いてから「お問い合わせください」に分岐する。
+
+function renderUpgradeCta(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML =
+    '<button type="button" class="upgrade-cta" onclick="openUpgradeModal()">プランをアップグレード</button>';
 }
 
 // ===== 案件の保存件数（プラン上限） =====
@@ -1700,6 +1835,7 @@ function caseLimitMessage(limits) {
 function showCaseLimitNotice(limits) {
   caseLimitState = limits;
   document.getElementById('case-limit-message').textContent = caseLimitMessage(limits);
+  renderUpgradeCta('case-limit-actions');
   // display:flex（本文と×ボタンの横並び）。CSSの .case-limit-notice に合わせる
   document.getElementById('case-limit-notice').style.display = 'flex';
 }
@@ -1715,6 +1851,323 @@ function hideCaseLimitNotice() {
 }
 
 function closeCaseLimitNotice() {
+  hideCaseLimitNotice();
+}
+
+// アップグレードモーダルの状態。upgradeOptions は get-upgrade-options のレスポンス
+// そのままで、選択中の候補もこの配列の要素を指す。quote は候補ごとに入っているので、
+// 「選んだプラン」と「その日割り基準時刻」を別々に持つ必要がない。
+let upgradeOptions = null;
+let selectedUpgrade = null;
+// update-plan の実行中はモーダルを閉じさせない。閉じられると、課金は進んでいるのに
+// 利用者には結果が見えない（完了表示も残り回数の更新も走らない）状態になる。
+let upgradeInFlight = false;
+
+function openUpgradeModal() {
+  resetUpgradeModal();
+  document.getElementById('upgrade-overlay').classList.add('open');
+  loadUpgradeOptions();
+}
+
+// 背景クリックと×の両方がこの関数を通るので、抑止はここ1箇所で足りる
+function closeUpgradeModal() {
+  if (upgradeInFlight) return;
+  document.getElementById('upgrade-overlay').classList.remove('open');
+}
+
+// 開くたびに初期状態へ戻す。前回の選択や完了表示が残っていると、
+// 2回目に開いたときに古い金額が見えてしまう。
+function resetUpgradeModal() {
+  upgradeOptions = null;
+  selectedUpgrade = null;
+  upgradeInFlight = false;
+
+  document.getElementById('upgrade-title').textContent = 'プランのアップグレード';
+  hideError(document.getElementById('upgrade-error'));
+
+  document.getElementById('upgrade-step-select').style.display = 'block';
+  document.getElementById('upgrade-step-confirm').style.display = 'none';
+  document.getElementById('upgrade-step-confirm').innerHTML = '';
+  document.getElementById('upgrade-step-done').style.display = 'none';
+  document.getElementById('upgrade-step-done').innerHTML = '';
+
+  document.getElementById('upgrade-loading').style.display = 'block';
+  document.getElementById('upgrade-current').style.display = 'none';
+  document.getElementById('upgrade-options').innerHTML = '';
+  document.getElementById('upgrade-contact').style.display = 'none';
+  document.getElementById('upgrade-contact').innerHTML = '';
+}
+
+// 金額の表示。Stripeは最小通貨単位で返すが、日本円は最小単位＝円なのでそのまま出す。
+// 他通貨を扱う予定は無いが、jpy以外が来たら小数2桁に落とす（0.01単位の通貨が大半）。
+function formatMoney(amount, currency) {
+  if (!Number.isFinite(amount)) return '—';
+  const code = (currency || 'jpy').toLowerCase();
+  if (code === 'jpy') return `${amount.toLocaleString('ja-JP')}円`;
+  return `${(amount / 100).toLocaleString('ja-JP', { minimumFractionDigits: 2 })} ${code.toUpperCase()}`;
+}
+
+// 上限値の表示。-1(無制限)はサーバーと同じ番兵なので、ここで数値を持たずに文言へ変える
+function formatLimit(value, unit) {
+  if (value === -1) return '無制限';
+  if (!Number.isFinite(value)) return '—';
+  return `${value.toLocaleString('ja-JP')}${unit}`;
+}
+
+async function loadUpgradeOptions() {
+  const errorEl = document.getElementById('upgrade-error');
+  const loadingEl = document.getElementById('upgrade-loading');
+
+  try {
+    const response = await authFetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get-upgrade-options' }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleSessionExpired(closeUpgradeModal);
+        return;
+      }
+      loadingEl.style.display = 'none';
+      showError(errorEl, data.message || data.error || 'プラン情報の取得に失敗しました');
+      return;
+    }
+
+    loadingEl.style.display = 'none';
+    upgradeOptions = data;
+    renderUpgradeOptions(data);
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+  }
+}
+
+function renderUpgradeOptions(data) {
+  // 表示名はStripeのProduct名（サーバーが返す）。プラン識別子(light/standard/unknown)は
+  // 内部用なので画面には出さない。取得できなかった場合はサーバーが識別子を返すが、
+  // それすら無い(null)ときは識別子を露出させずにこの文言にする。
+  const currentEl = document.getElementById('upgrade-current');
+  currentEl.textContent = data.currentPlanName
+    ? `現在のプラン: ${data.currentPlanName}`
+    : '現在のプラン情報を確認できませんでした';
+  currentEl.style.display = 'block';
+
+  // pro（最上位）と unknown（Price metadata未設定でプランを判定できない）は
+  // 移行先を機械的に決められないので、お問い合わせへ誘導する
+  if (data.contactOnly || !data.options.length) {
+    const contactEl = document.getElementById('upgrade-contact');
+    contactEl.innerHTML = `
+      <div class="upgrade-note" style="margin-top:0;">
+        プラン変更については お問い合わせください。<br>
+        現在のご契約内容を確認のうえ、ご案内します。
+      </div>
+      <div style="margin-top:14px;">
+        <button type="button" class="btn-primary" style="width:100%;"
+          onclick="openContactFromUpgrade()">お問い合わせフォームを開く</button>
+      </div>
+    `;
+    contactEl.style.display = 'block';
+    return;
+  }
+
+  // 候補カード。数値はすべて data 由来で、ここには一切書かない
+  document.getElementById('upgrade-options').innerHTML = data.options.map((option, index) => `
+    <button type="button" class="plan-card" id="plan-card-${index}" onclick="selectUpgradeOption(${index})">
+      <div class="plan-card-head">
+        <span class="plan-card-name">${escapeHtml(option.displayName || option.plan)}</span>
+        <span class="plan-card-price">${escapeHtml(formatMoney(option.priceLabel.unitAmount, option.priceLabel.currency))} / 月</span>
+      </div>
+      <div class="plan-card-limits">
+        検索回数 ${escapeHtml(formatLimit(option.limits.searchLimit, '回/月'))}<br>
+        保存できる案件 ${escapeHtml(formatLimit(option.limits.caseLimit, '件'))}<br>
+        完了案件の保存期間 ${escapeHtml(formatLimit(option.limits.retentionDays, '日'))}
+      </div>
+      <div class="plan-card-today">
+        本日のお支払い ${escapeHtml(formatMoney(option.amountDueNow, option.currency))}（日割り）
+        ${option.couponApplied ? '<span class="plan-card-coupon">割引適用</span>' : ''}
+      </div>
+    </button>
+  `).join('');
+}
+
+function selectUpgradeOption(index) {
+  if (!upgradeOptions || !upgradeOptions.options[index]) return;
+  selectedUpgrade = upgradeOptions.options[index];
+
+  upgradeOptions.options.forEach((_, i) => {
+    document.getElementById(`plan-card-${i}`).classList.toggle('is-selected', i === index);
+  });
+
+  showUpgradeConfirm();
+}
+
+// 確認ステップ。ここを通さずに課金しない。
+function showUpgradeConfirm() {
+  const option = selectedUpgrade;
+  if (!option) return;
+
+  const name = escapeHtml(option.displayName || option.plan);
+  const amount = escapeHtml(formatMoney(option.amountDueNow, option.currency));
+  const monthly = escapeHtml(formatMoney(option.priceLabel.unitAmount, option.priceLabel.currency));
+
+  document.getElementById('upgrade-step-select').style.display = 'none';
+  document.getElementById('upgrade-title').textContent = 'お支払いの確認';
+  document.getElementById('upgrade-step-confirm').innerHTML = `
+    <div style="font-size:14px;">${name} へ変更します。</div>
+    <div class="upgrade-confirm-amount">本日のお支払い ${amount}</div>
+    <div style="font-size:12px;color:var(--text2);">日割り計算による金額です${option.couponApplied ? '（割引適用後）' : ''}</div>
+    <div class="upgrade-note">
+      次回以降は ${monthly} / 月です。<br>
+      「変更する」を押すと、ご登録のお支払い方法に即時請求されます。
+    </div>
+    <div style="margin-top:16px;display:flex;gap:8px;">
+      <button type="button" class="btn-primary" id="upgrade-confirm-btn" style="flex:1;"
+        onclick="submitUpgrade(this)">変更する</button>
+      <button type="button" class="btn-secondary" style="flex:1;"
+        onclick="backToUpgradeSelect()">戻る</button>
+    </div>
+  `;
+  document.getElementById('upgrade-step-confirm').style.display = 'block';
+}
+
+function backToUpgradeSelect() {
+  if (upgradeInFlight) return;
+  hideError(document.getElementById('upgrade-error'));
+  document.getElementById('upgrade-step-confirm').style.display = 'none';
+  document.getElementById('upgrade-title').textContent = 'プランのアップグレード';
+  document.getElementById('upgrade-step-select').style.display = 'block';
+}
+
+// 402/409 のあとは quote を必ず捨てて取り直す。
+// 402: 冪等キーを quote の署名から導出しているため、同じ quote で再試行すると
+//      Stripeが前回の失敗レスポンスを返し続け、カードを差し替えても通らない。
+// 409: 期限切れ・別経路でのプラン変更・クーポンの適用状態の変化。いずれも
+//      提示していた内容が既に古いので、作り直した見積を見てもらう必要がある。
+function restartUpgradeFlow(message) {
+  upgradeOptions = null;
+  selectedUpgrade = null;
+
+  document.getElementById('upgrade-step-confirm').style.display = 'none';
+  document.getElementById('upgrade-step-confirm').innerHTML = '';
+  document.getElementById('upgrade-title').textContent = 'プランのアップグレード';
+  document.getElementById('upgrade-step-select').style.display = 'block';
+  document.getElementById('upgrade-loading').style.display = 'block';
+  document.getElementById('upgrade-options').innerHTML = '';
+  document.getElementById('upgrade-contact').style.display = 'none';
+  document.getElementById('upgrade-contact').innerHTML = '';
+
+  showError(document.getElementById('upgrade-error'), message);
+  loadUpgradeOptions();
+}
+
+async function submitUpgrade(btn) {
+  const option = selectedUpgrade;
+  if (!option) return;
+  const errorEl = document.getElementById('upgrade-error');
+  hideError(errorEl);
+
+  upgradeInFlight = true;
+  try {
+    await withButtonGuard(btn, async () => {
+      const response = await authFetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update-plan', quote: option.quote }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          upgradeInFlight = false;
+          handleSessionExpired(closeUpgradeModal);
+          return;
+        }
+
+        // 決済失敗。error_if_incomplete なのでプランは変わっていない。
+        // 支払い方法の更新へ誘導し、戻ってきたら取り直した見積で再試行してもらう。
+        if (response.status === 402) {
+          upgradeInFlight = false;
+          showUpgradePaymentFailed(data.message);
+          return;
+        }
+
+        if (response.status === 409) {
+          upgradeInFlight = false;
+          restartUpgradeFlow(data.message || 'プランの状態が変わりました。もう一度お選びください。');
+          return;
+        }
+
+        throw new Error(data.message || data.error || 'プラン変更に失敗しました');
+      }
+
+      showUpgradeDone(data);
+    }, '変更中...');
+  } catch (err) {
+    showError(errorEl, err.message || '通信エラーが発生しました');
+  } finally {
+    upgradeInFlight = false;
+  }
+}
+
+// 決済失敗時。error_if_incomplete では未払いの請求書が作られないので、
+// 「自動リトライを待つ」導線は成立しない。支払い方法を更新してもらってから再試行する。
+function showUpgradePaymentFailed(message) {
+  document.getElementById('upgrade-step-confirm').innerHTML = `
+    <div class="error-box">⚠️ ${escapeHtml(message || 'お支払いを完了できませんでした。')}</div>
+    <div class="upgrade-note">
+      プランは変更されていません。請求も発生していません。<br>
+      お支払い方法を更新してから、もう一度お試しください。
+    </div>
+    <div id="upgrade-portal-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
+    <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="btn-primary" style="flex:1;min-width:180px;"
+        onclick="startCancelSubscription('upgrade-portal-error')">お支払い方法を更新する</button>
+      <button type="button" class="btn-secondary" style="flex:1;min-width:140px;"
+        onclick="restartUpgradeFlow('')">もう一度試す</button>
+    </div>
+    <div class="upgrade-note">
+      お支払い方法を変更しても解決しない場合は、お問い合わせください。
+    </div>
+    <div style="margin-top:10px;">
+      <button type="button" class="btn-secondary" style="width:100%;"
+        onclick="openContactFromUpgrade()">お問い合わせフォームを開く</button>
+    </div>
+  `;
+}
+
+// 完了。提示額ではなくサーバーが確認した実請求額(amountCharged)を出す。
+function showUpgradeDone(data) {
+  document.getElementById('upgrade-step-confirm').style.display = 'none';
+  document.getElementById('upgrade-title').textContent = 'プランを変更しました';
+
+  const charged = Number.isFinite(data.amountCharged)
+    ? `本日のお支払い ${escapeHtml(formatMoney(data.amountCharged, data.currency))}`
+    : '請求内容はStripeからのメールをご確認ください';
+
+  document.getElementById('upgrade-step-done').innerHTML = `
+    <div style="text-align:center;padding:8px 0 4px;">
+      <div class="upgrade-done-icon">✅</div>
+      <div style="font-size:15px;font-weight:700;margin-top:8px;">プランを変更しました</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:6px;">${charged}</div>
+    </div>
+    <div class="upgrade-note">
+      新しい上限がすぐに反映されます。<br>
+      検索回数 ${escapeHtml(formatLimit(data.limits.searchLimit, '回/月'))} ／
+      保存できる案件 ${escapeHtml(formatLimit(data.limits.caseLimit, '件'))}
+    </div>
+    <div style="margin-top:16px;">
+      <button type="button" class="btn-primary" style="width:100%;"
+        onclick="closeUpgradeModal()">閉じる</button>
+    </div>
+  `;
+  document.getElementById('upgrade-step-done').style.display = 'block';
+
+  // 新しい上限を画面へ反映する。上限に達していた通知はこれで消える
+  // （remaining が増えるため renderQuota() が非表示にする）。
+  updateQuota(data.quota);
   hideCaseLimitNotice();
 }
 
@@ -1835,12 +2288,22 @@ async function startCancelSubscription(errorElId = 'cancel-subscription-error') 
 
 // ===== お問い合わせ =====
 
-function openContactModal() {
+// prefillMessage を渡すと本文の初期値が入る。プラン変更の相談から開いたときに、
+// 受け取った側が用件を判別できるようにするため（既定は空でヘッダーの
+// 「お問い合わせ」ボタンからの呼び出しは無変更）。
+function openContactModal(prefillMessage = '') {
   document.getElementById('contact-name').value = '';
-  document.getElementById('contact-message').value = '';
+  document.getElementById('contact-message').value = prefillMessage;
   document.getElementById('contact-error').style.display = 'none';
   updateContactSubmitState();
   document.getElementById('contact-overlay').classList.add('open');
+}
+
+// アップグレードモーダルからお問い合わせへ。新しい導線は作らず、既存の
+// mailtoベースの仕組み（api/info/contact-config でアカウントとプランを差し込む）に繋ぐ。
+function openContactFromUpgrade() {
+  closeUpgradeModal();
+  openContactModal('プラン変更について相談したいです。\n\n');
 }
 
 function closeContactModal() {
