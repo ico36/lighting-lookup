@@ -861,6 +861,9 @@
     font-size: 11px;
     color: #888;
     line-height: 1.6;
+    /* 明細が多く印刷が複数ページに分かれたとき、免責文の途中で改ページさせない */
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
   .sheet-actions {
     margin-top: 16px;
@@ -869,11 +872,36 @@
   }
   .sheet-actions button { flex: 1; }
 
+  /* ===== 免責表記（工事士向け・常時表示） =====
+     利用規約の免責条項を実質的に機能させるのが目的なので、×ボタン・トグル・
+     折りたたみは付けない。閉じられる時点で「常時表示していた」と言えなくなる。
+     使用箇所は2つ:
+       - 検索結果の先頭 (renderResult() が毎回描き直す)
+       - 見積書プレビューの先頭 (#estimate-disclaimer)
+     どちらも工事士だけが見るダーク画面用。施主が読む見積書本体側の免責は
+     白背景の .sheet-footer-note を使う（文言も別。あちらはAIに言及しない）。 */
+  .disclaimer-note {
+    background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    color: var(--warning);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
   @media print {
     /* 見積書(#estimate-sheet)以外はすべて非表示にする。検索結果・商品詳細・
        案件一覧などのモーダルが開いていても印刷対象に含めないための対策。 */
     body * { visibility: hidden; }
     #estimate-sheet, #estimate-sheet * { visibility: visible; }
+
+    /* 工事士向けの免責は施主に渡るPDFに混入させない。上の visibility: hidden で
+       描画自体は消えるが、visibility はレイアウト領域を残すため紙面に空白が
+       残る。display: none でレイアウトごと消す。 */
+    #estimate-disclaimer { display: none !important; }
     #estimate-sheet {
       position: absolute;
       top: 0;
@@ -1254,6 +1282,10 @@
   </div>
 
   <div id="estimate-sheet-area" style="display:none;">
+    <!-- 工事士向けの免責。#estimate-sheet の外に置くこと。印刷対象は
+         @media print で #estimate-sheet の内側だけに絞ってあるため、
+         ここに置く限り施主に渡るPDFには載らない。 -->
+    <div class="disclaimer-note" id="estimate-disclaimer">見積書に記載する器具はAIによる推定です。お客様に提出する前に型番・数量をご確認ください。</div>
     <div id="estimate-sheet"></div>
     <div class="sheet-actions">
       <button class="btn-secondary" onclick="window.print()">🖨️ PDF保存／印刷</button>
@@ -4164,6 +4196,8 @@ function renderResult(r) {
   const orderText = r.order_text || '発注情報を生成できませんでした';
 
   document.getElementById('result-content').innerHTML = `
+    <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。</div>
+
     <div class="result-card">
       <div class="result-header">
         <span class="result-title">調査結果</span>
@@ -4532,7 +4566,7 @@ async function generateEstimateSheet(btn) {
     <div class="sheet-total-row grand"><span>合計</span><span>${yen(total)}</span></div>
 
     ${bizNote ? `<div class="sheet-footer-note">${escapeHtml(bizNote)}</div>` : ''}
-    <div class="sheet-footer-note">※本見積りはAIによる後継器調査結果を含みます。実際の機種・価格は現物・メーカー情報にて最終確認のうえご了承ください。</div>
+    <div class="sheet-footer-note">記載の器具型番・金額は現時点の参考情報です。正式な発注前に最終確認のうえ確定いたしますので、あらかじめご了承ください。</div>
   `;
 
   document.getElementById('estimate-form-area').style.display = 'none';
