@@ -2028,23 +2028,28 @@ function showUpgradeConfirm() {
     : '';
   const searchLimit = escapeHtml(formatLimit(option.limits.searchLimit, '回'));
 
-  // クーポンが実際に適用された場合だけ割引の内容を出す。percentOff /
-  // durationInMonths はStripeのクーポンから取った値
+  // クーポンが実際に適用された場合だけ割引の内容を1行で出す。percentOff /
+  // durationInMonths はStripeのクーポンから取った値で、ここには数値を書かない。
+  //
+  // duration が forever / once のクーポンだと durationInMonths が null になり
+  // 「◯ヶ月間」と書けない。その場合は期間と「以降は」を落として割引率だけ伝える
+  // （書けない条件を勝手に補わない）。percentOff が無い（amount_off の）クーポンは
+  // 説明を出さない。割引自体は金額に反映されているので、誤った説明を出すより黙る。
   const coupon = upgradeOptions?.coupon || null;
-  const discountSuffix = option.couponApplied && coupon?.percentOff
-    ? `（早期割引${escapeHtml(String(coupon.percentOff))}%オフ適用・税込）`
-    : '（税込）';
-  const discountNote = option.couponApplied && coupon?.durationInMonths
-    ? `早期割引は${escapeHtml(String(coupon.durationInMonths))}ヶ月間、以降は ${monthly}（税込）<br>`
-    : '';
+  const percentOff = option.couponApplied && coupon?.percentOff ? coupon.percentOff : null;
+  let discountNote = '';
+  if (percentOff && coupon.durationInMonths) {
+    discountNote = `早期割引${escapeHtml(String(percentOff))}%オフを${escapeHtml(String(coupon.durationInMonths))}ヶ月間適用。以降は ${monthly}（税込）<br>`;
+  } else if (percentOff) {
+    discountNote = `早期割引${escapeHtml(String(percentOff))}%オフ適用<br>`;
+  }
 
   document.getElementById('upgrade-step-select').style.display = 'none';
   document.getElementById('upgrade-title').textContent = 'お支払いの確認';
   document.getElementById('upgrade-step-confirm').innerHTML = `
     <div style="font-size:14px;">本日から ${name} に切り替わります${renewal}</div>
     <div style="font-size:13px;color:var(--text2);margin-top:6px;">検索回数は残り${searchLimit}になります</div>
-    <div class="upgrade-confirm-amount">本日のお支払い ${amount}</div>
-    <div style="font-size:12px;color:var(--text2);">${discountSuffix}</div>
+    <div class="upgrade-confirm-amount">本日のお支払い ${amount}（税込）</div>
     <div class="upgrade-note">
       ${discountNote}
       現在のプランの残り日数分の返金はありません。<br>
