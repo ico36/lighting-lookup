@@ -1127,6 +1127,13 @@
     line-height: 1.8;
   }
   .help-section p + p { margin-top: 8px; }
+  /* ヘルプ本文は var(--text2) の淡色なので、太字だけでは強調が沈む。
+     誤解されやすい箇所（保存期間がステータス確定時のプランで決まる等）を
+     本文色まで上げて目立たせる。 */
+  .help-section strong {
+    color: var(--text);
+    font-weight: 700;
+  }
 </style>
 </head>
 <body>
@@ -1392,9 +1399,14 @@
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-3')">3. カートに入れて見積書を作る</a>
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-4')">4. 見積書をPDFで保存する</a>
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-5')">5. 案件管理（ステータス・履歴・アーカイブ検索）</a>
-      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-6')">6. 自社情報の設定（社名・ロゴなど）</a>
-      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-7')">7. お問い合わせ・お知らせ</a>
-      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-8')">8. 解約するには</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-6')">6. 検索回数について</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-7')">7. プランのアップグレードについて</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-8')">8. 案件の保存件数について</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-9')">9. 案件の保存期間について</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-10')">10. 表示される注意書きについて</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-11')">11. 自社情報の設定（社名・ロゴなど）</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-12')">12. お問い合わせ・お知らせ</a>
+      <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-13')">13. 解約するには</a>
     </div>
     <div class="help-content">
       <div class="help-section" id="help-sec-1">
@@ -1424,17 +1436,48 @@
         <p>案件が不要になった場合は、案件詳細画面下部の「🗑 この案件を完全に削除」から削除できます。案件・カート内容・見積り設定・検索履歴もすべて削除され、元に戻すことはできません。実行前に確認画面が表示されますが、誤って削除しないよう注意してください。</p>
       </div>
       <div class="help-section" id="help-sec-6">
-        <div class="help-section-title">6. 自社情報の設定（社名・ロゴなど）</div>
+        <div class="help-section-title">6. 検索回数について</div>
+        <p>型番検索・写真検索には、プランごとに1か月あたりの回数の上限があります。写真を複数枚アップロードして調べた場合も、「調べる」1回につき1回分としてカウントされます。枚数によって消費が増えることはありません。</p>
+        <p>回数のリセットは暦の月替わりではなく、ご契約の請求サイクルが基準です。そのため、月初にリセットされるとは限りません。次回のリセット日は、残り回数の表示に日付として出ていますので、そちらでご確認ください。</p>
+        <p>残りの回数は検索画面に常に表示されており、残りが少なくなると色が変わります。上限に達すると「調べる」ボタンが押せなくなります。リセット日を過ぎるか、上位プランに変更すると再び検索できるようになります。</p>
+      </div>
+      <div class="help-section" id="help-sec-7">
+        <div class="help-section-title">7. プランのアップグレードについて</div>
+        <p>検索回数や案件の保存件数が上限に達すると、その場に上位プランへの変更ボタンが表示されます。押すとプランごとの上限と料金を比較でき、内容を確認してから変更できます。</p>
+        <p>変更すると、その日から新しいプランに切り替わります。同時に、新しいプランの1か月ぶんの料金がその時点で発生し、請求サイクルもその日から数え直しになります。日数に応じた日割りの計算は行いません。</p>
+        <p>このとき、それまでのプランの残り日数分の返金はありません。「13. 解約するには」でご案内しているとおり、解約の際もお支払い済みの期間について返金は行っておらず、考え方は同じです。</p>
+        <p>検索回数は新しいプランの回数で数え直しになります。変更前に残っていた回数が新しいプランの回数に上乗せされることはありません。</p>
+      </div>
+      <div class="help-section" id="help-sec-8">
+        <div class="help-section-title">8. 案件の保存件数について</div>
+        <p>保存できる案件の数には、プランごとに上限があります。数えているのは、下書き・承認待ち・承認済み・完了の案件です。カートへの追加で自動的に作られた下書きも1件として数えます。</p>
+        <p>ご注意いただきたいのは、<strong>「完了」にしただけでは件数は減らない</strong>ことです。完了した案件は、保存期間が過ぎて自動的にアーカイブされた時点で件数から外れます。すぐに空きを作りたい場合は、ステータスを「失注・キャンセル」にするか、案件を完全に削除してください。失注・キャンセルにした案件はその場で件数から外れますが、案件そのものは一覧に残り、内容も見られます。</p>
+        <p>上限に達すると、新しい案件を作れなくなります。カートに追加しようとしたときに案件が自動作成される場合も同じで、上限に達していると追加できません。上限に達したことは画面下部の通知でお知らせし、その通知からそのまま上位プランへ変更できます。</p>
+      </div>
+      <div class="help-section" id="help-sec-9">
+        <div class="help-section-title">9. 案件の保存期間について</div>
+        <p>「完了」または「失注・キャンセル」にした案件は、一定期間が過ぎると自動的にアーカイブされます。この保存期間はプランごとに決まっています。アーカイブされた案件は一覧からは消えますが、削除されるわけではなく、アーカイブ検索から日付範囲を指定して探せます。</p>
+        <p><strong>保存期間は、ステータスを「完了」または「失注・キャンセル」にしたその時点のプランで決まり、その案件に記録されます。</strong>ここが最も間違えやすい点です。</p>
+        <p>そのため、あとから上位プランに変更しても、<strong>すでに完了・失注／キャンセルにした案件の保存期間は伸びません</strong>。プランを変更したあとに新しく完了・失注／キャンセルにした案件から、新しいプランの保存期間が適用されます。長く残しておきたい案件がある場合は、完了にする前にプランをご確認ください。</p>
+        <p>すでに完了・失注／キャンセルにした案件をいったん下書きなどのステータスに戻し、あらためて完了・失注／キャンセルにし直した場合は、そのやり直した時点のプランで保存期間が決まり直します。</p>
+      </div>
+      <div class="help-section" id="help-sec-10">
+        <div class="help-section-title">10. 表示される注意書きについて</div>
+        <p>検索結果の先頭と、見積書のプレビュー画面には「AIによる推定です」という注意書きが常に表示されます。後継器・互換品の判定はAIがWeb検索した結果にもとづく推定であり、メーカーの公式な保証ではありません。発注やお客様への提出の前に、必ずご自身で型番・仕様をお確かめいただくためのものですので、この注意書きは消せない仕様にしています。</p>
+        <p>これらは工事士の方に向けた表示です。そのため、お客様にお渡しする見積書と、そこから出力するPDF・「📋 テキストをコピー」の文面には表示されません。代わりに、記載の型番・金額が現時点の参考情報であり、正式な発注前に最終確認のうえ確定する旨の一文が入ります。</p>
+      </div>
+      <div class="help-section" id="help-sec-11">
+        <div class="help-section-title">11. 自社情報の設定（社名・ロゴなど）</div>
         <p>初めてログインした際は、見積書に表示する自社情報（屋号・会社名、電話番号、登録番号、ロゴ画像）の入力が必要です。ロゴ以外の項目は後からいつでも変更できます。</p>
         <p>登録後、型番検索や見積書作成の画面では自社情報は表示のみとなり編集できません。変更したい場合は、ヘッダーの「設定」ボタンから設定画面を開いてください。</p>
       </div>
-      <div class="help-section" id="help-sec-7">
-        <div class="help-section-title">7. お問い合わせ・お知らせ</div>
+      <div class="help-section" id="help-sec-12">
+        <div class="help-section-title">12. お問い合わせ・お知らせ</div>
         <p>操作方法がわからない、不具合を見つけたなどの際は、ヘッダーの「お問い合わせ」ボタンからお名前とお問い合わせ内容を入力してください。送信ボタンを押すと、入力内容が入った状態でメールアプリが起動します。実際にお問い合わせが届くのは、メールアプリ側で送信操作をした後です。</p>
         <p>ヘッダーの🔔アイコンからは運営からのお知らせを確認できます。未読のお知らせがあると右上に赤い印が表示されます。</p>
       </div>
-      <div class="help-section" id="help-sec-8">
-        <div class="help-section-title">8. 解約するには</div>
+      <div class="help-section" id="help-sec-13">
+        <div class="help-section-title">13. 解約するには</div>
         <p>解約の手続きをしても、すでにお支払い済みの請求期間の終了日までは引き続きご利用いただけます。期間終了と同時に自動的にログインできなくなります（日割りでの返金等は行っておりません）。</p>
         <p>下のボタンから解約手続き画面（Stripeの契約管理ページ）に進み、案内に従って手続きを行ってください。</p>
         <button onclick="startCancelSubscription()" style="background: none; border: 1px solid var(--border); color: var(--text2); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">解約手続きへ進む</button>
@@ -3805,11 +3848,14 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   // Stripeポータルでの解約操作後、return_urlの?help=cancelを見て
-  // ヘルプの「解約するには」セクションへ自動的に戻す
+  // ヘルプの「解約するには」セクションへ自動的に戻す。
+  // 送り元は api/checkout.js の return_url（?help=cancel）。あちらは 'cancel' という
+  // 意味名で送ってくるので、番号との対応付けはここだけにある。ヘルプの節を増減して
+  // 番号を振り直すときは、この行の追従を忘れないこと（無言でスクロール先がずれる）。
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('help') === 'cancel') {
     openHelpModal();
-    scrollToHelpSection('help-sec-8');
+    scrollToHelpSection('help-sec-13');
     urlParams.delete('help');
     const remaining = urlParams.toString();
     const cleanUrl = window.location.pathname + (remaining ? `?${remaining}` : '');
