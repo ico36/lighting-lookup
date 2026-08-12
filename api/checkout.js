@@ -149,6 +149,68 @@ function couponDiscounts() {
  * expandし忘れでIDの文字列のまま）は識別子へフォールバックする。表示が消えるより
  * 名前が不格好でも選べる方が実害が小さい。フォールバックしたことはwarnで残す。
  */
+/**
+ * クーポンを適用したプレビュー。失敗したら割引なしで1回だけ再試行する。
+ *
+ * クーポンIDが解決できない（モード違い・削除済み・期限切れ）と createPreview 自体が
+ * 例外になり、アップグレードのモーダル全体が500で開けなくなる。割引が出ないことより
+ * 「アップグレードできない」ほうが実害が大きいので、割引なしで続行させる。
+ *
+ * 再試行も失敗した場合は元のエラーを投げる。クーポンと無関係な障害（サブスクの状態が
+ * おかしい等）を「割引なし」で覆い隠さないため。
+ *
+ * @returns {Promise<{preview: object, couponSent: boolean}>}
+ */
+async function previewWithCouponFallback(params, discounts, context) {
+  if (!discounts) {
+    return { preview: await stripe.invoices.createPreview(params), couponSent: false };
+  }
+
+  try {
+    return {
+      preview: await stripe.invoices.createPreview({ ...params, discounts }),
+      couponSent: true,
+    };
+  } catch (couponError) {
+    let preview;
+    try {
+      preview = await stripe.invoices.createPreview(params);
+    } catch (retryError) {
+      // 割引なしでも失敗＝クーポンが原因ではない。元のエラーをそのまま上げる
+      throw couponError;
+    }
+
+    console.error(
+      `[checkout] クーポンを適用したプレビューが失敗したため、割引なしで続行します（${context}）: ` +
+        `code=${couponError?.code || 'なし'} type=${couponError?.type || 'なし'} ` +
+        `message=${couponError?.message || 'なし'}。STRIPE_COUPON_ID がこの環境の` +
+        'Stripeモード（テスト/本番）に存在するIDか確認してください。'
+    );
+    return { preview, couponSent: false };
+  }
+}
+
+/**
+ * 確認ステップに出す割引の内容（何%オフが何ヶ月か）。取得できなければ null。
+ * 文言に数値をハードコードしないため、Stripeのクーポンから取る。
+ */
+async function fetchCouponInfo() {
+  if (!process.env.STRIPE_COUPON_ID) return null;
+
+  try {
+    const coupon = await stripe.coupons.retrieve(process.env.STRIPE_COUPON_ID);
+    return {
+      percentOff: coupon.percent_off ?? null,
+      durationInMonths: coupon.duration_in_months ?? null,
+    };
+  } catch (err) {
+    console.error(
+      `[checkout] クーポンの取得に失敗しました: code=${err?.code || 'なし'} ${err?.message || ''}`
+    );
+    return null;
+  }
+}
+
 function planDisplayName(price, fallbackPlan) {
   const product = price?.product;
   const name = product && typeof product === 'object' ? product.name : null;
@@ -204,11 +266,8 @@ async function handleGetUpgradeOptions(req, res) {
       });
     }
 
-    // 日割りの基準時刻は候補ごとに変えず、この呼び出し全体で1つに固定する。
-    // 候補ごとに別の時刻を使うと、フロントが「選んだプラン」と「その時刻」を取り違える
-    // 余地が生まれる（quoteで対にしているので事故にはならないが、揃える理由もない）。
-    const prorationDate = Math.floor(Date.now() / 1000); // 秒エポック（Stripeの単位）
     const discounts = couponDiscounts();
+    const couponInfoPromise = fetchCouponInfo();
 
     // 候補どうしは独立で、1候補の中の prices.retrieve と createPreview も
     // 互いに依存しない（前者はPriceの内容、後者は日割り計算）。全部まとめて1波で投げる。
@@ -223,25 +282,36 @@ async function handleGetUpgradeOptions(req, res) {
         return null;
       }
 
-      const [price, preview] = await Promise.all([
+      const [price, previewResult] = await Promise.all([
         stripe.prices.retrieve(priceId, { expand: ['product'] }),
-        // プレビューにも同じ discounts を渡す。渡さないと割引前の額が出て、
-        // 実際の請求（割引後）と食い違う。
+        // プレビューにも update と同じ条件を渡す。片方だけだと提示額と請求額がズレる。
+        //   billing_cycle_anchor: 'now' ... 請求サイクルを本日から引き直す
+        //   proration_behavior: 'none'  ... 日割りの調整行を作らない（満額1行だけになる）
         // preview_mode は既定（'next'＝いま発行される請求のプレビュー）のまま渡さない。
-        // 'recurring' は次回以降の定期請求のプレビューで、日割りではなく月額が出る。
-        stripe.invoices.createPreview({
-          customer: subscription.customer,
-          subscription: subscription.id,
-          subscription_details: {
-            items: [{ id: item.id, price: priceId }],
-            proration_behavior: 'always_invoice',
-            proration_date: prorationDate,
+        // 'recurring' は次回以降の定期請求のプレビューになる。
+        previewWithCouponFallback(
+          {
+            customer: subscription.customer,
+            subscription: subscription.id,
+            subscription_details: {
+              items: [{ id: item.id, price: priceId }],
+              proration_behavior: 'none',
+              billing_cycle_anchor: 'now',
+            },
           },
-          ...(discounts ? { discounts } : {}),
-        }),
+          discounts,
+          `移行先: ${plan}`
+        ),
       ]);
 
+      const { preview, couponSent } = previewResult;
       const couponApplied = (preview.total_discount_amounts || []).some((d) => d.amount > 0);
+
+      // 次回更新日。サイクルを引き直すので、プレビューの明細の期間終了が
+      // そのまま次回の請求日になる。Stripeは秒で返すが、このリポジトリの時刻表現
+      // （quota.resetAt など）に合わせてミリ秒へ直してから返す。
+      const linePeriodEnd = preview.lines?.data?.[0]?.period?.end;
+      const nextRenewalAt = Number.isFinite(linePeriodEnd) ? linePeriodEnd * 1000 : null;
 
       return {
         plan,
@@ -254,26 +324,32 @@ async function handleGetUpgradeOptions(req, res) {
         amountDueNow: preview.amount_due,
         currency: preview.currency,
         couponApplied,
-        // 移行先とprorationDateの対、および変更前のPrice（二重アップグレード検出用）を
-        // まとめて署名したもの。update-plan はこれだけを受け取る。
+        nextRenewalAt,
+        // 移行先と、変更前のPrice（二重アップグレード検出用）、提示額をまとめて
+        // 署名したもの。update-plan はこれだけを受け取る。
+        // 日割りをやめた（proration_behavior: 'none'）ので prorationDate は持たない。
         quote: createUpgradeQuote({
           email,
           fromPriceId: item.price?.id || null,
           toPriceId: priceId,
           toPlan: plan,
-          prorationDate,
           amountDue: preview.amount_due,
           currency: preview.currency,
-          couponSent: !!discounts,
+          // プレビューで実際に割引を渡せたかどうか。クーポンが解決できずフォールバック
+          // した場合は false になり、update 側も割引なしで実行される（提示額と一致する）
+          couponSent,
           couponApplied,
         }),
       };
     }));
 
     const options = settled.filter(Boolean);
-    const currentPrice = await currentPricePromise;
+    const [currentPrice, coupon] = await Promise.all([currentPricePromise, couponInfoPromise]);
 
     return res.status(200).json({
+      // 割引の内容（percentOff / durationInMonths）。確認ステップの文言に使う。
+      // 数値をフロントに持たせないため、Stripeのクーポンから取った値をそのまま返す。
+      coupon,
       currentPlan: limits.plan,
       // 現在のプランの表示名。候補カードだけ日本語名で「現在のプラン」が識別子のまま、
       // という不揃いを避ける。metadata未設定(plan='unknown')の契約者にとっては、
@@ -351,9 +427,15 @@ async function handleUpdatePlan(req, res) {
       subscription.id,
       {
         items: [{ id: item.id, price: quote.toPriceId }],
-        proration_behavior: 'always_invoice',
-        // プレビューと同じ基準時刻。これを渡さないと提示額と請求額がズレる
-        proration_date: quote.prorationDate,
+        // プレビューと同じ条件。片方だけだと提示額と請求額がズレる。
+        //   billing_cycle_anchor: 'now' ... 請求サイクルを本日から引き直して満額請求する
+        //   proration_behavior: 'none'  ... 日割りの調整行を作らない
+        // 日割りにしない理由: 支払いは日数で按分されるのに検索回数は按分されないため、
+        // 上げるタイミングで「同じ回数」の値段が何倍も変わる歪みが出る。満額なら
+        // 常に1ヶ月ぶん払って1ヶ月ぶんの回数になり、タイミングに依存しない。
+        // ヘルプの解約説明「期間終了まで利用可・日割り返金なし」とも一貫する。
+        billing_cycle_anchor: 'now',
+        proration_behavior: 'none',
         // 支払いが完了しない場合はプラン変更自体を行わせない。既定(allow_incomplete)
         // だと「プランは上がったが未払い」という中途半端な状態になる。
         payment_behavior: 'error_if_incomplete',

@@ -1699,9 +1699,10 @@ let quota = null;
 // 残りがこの回数以下になったら表示色を強める
 const QUOTA_LOW_THRESHOLD = 5;
 
-// resetAtはサーバーからミリ秒エポックで届く。整形はここだけで行う。
-// 利用者もサーバーも日本のため、端末のタイムゾーン設定に関わらずJSTで表示する。
-function formatQuotaResetDate(ms) {
+// 日付はサーバーからミリ秒エポックで届く（quotaのresetAt、アップグレードの次回更新日）。
+// 整形はここだけで行う。利用者もサーバーも日本のため、端末のタイムゾーン設定に
+// 関わらずJSTで表示する。
+function formatDateJa(ms) {
   return new Date(ms).toLocaleDateString('ja-JP', {
     timeZone: 'Asia/Tokyo',
     month: 'long',
@@ -1755,7 +1756,7 @@ function renderQuota() {
   }
 
   const resetLabel = Number.isFinite(quota.resetAt)
-    ? `（${formatQuotaResetDate(quota.resetAt)}リセット）`
+    ? `（${formatDateJa(quota.resetAt)}リセット）`
     : '';
   statusEl.textContent = `残り${remaining}回${resetLabel}`;
   statusEl.classList.toggle('is-low', remaining > 0 && remaining <= QUOTA_LOW_THRESHOLD);
@@ -1764,7 +1765,7 @@ function renderQuota() {
 
   if (remaining === 0) {
     const resetSentence = Number.isFinite(quota.resetAt)
-      ? `次回のリセットは${formatQuotaResetDate(quota.resetAt)}です。`
+      ? `次回のリセットは${formatDateJa(quota.resetAt)}です。`
       : '';
     messageEl.textContent =
       `検索回数が上限に達しました（${quota.used}/${quota.limit}回）。${resetSentence}`;
@@ -1855,8 +1856,8 @@ function closeCaseLimitNotice() {
 }
 
 // アップグレードモーダルの状態。upgradeOptions は get-upgrade-options のレスポンス
-// そのままで、選択中の候補もこの配列の要素を指す。quote は候補ごとに入っているので、
-// 「選んだプラン」と「その日割り基準時刻」を別々に持つ必要がない。
+// そのままで、選択中の候補もこの配列の要素を指す。移行先と提示額は候補ごとの quote に
+// 署名付きで入っているので、フロントが両者を対で持ち回る必要はない。
 let upgradeOptions = null;
 let selectedUpgrade = null;
 // update-plan の実行中はモーダルを閉じさせない。閉じられると、課金は進んでいるのに
@@ -1986,7 +1987,7 @@ function renderUpgradeOptions(data) {
         完了案件の保存期間 ${escapeHtml(formatLimit(option.limits.retentionDays, '日'))}
       </div>
       <div class="plan-card-today">
-        本日のお支払い ${escapeHtml(formatMoney(option.amountDueNow, option.currency))}（日割り）
+        本日のお支払い ${escapeHtml(formatMoney(option.amountDueNow, option.currency))}
         ${option.couponApplied ? '<span class="plan-card-coupon">割引適用</span>' : ''}
       </div>
     </button>
@@ -2005,6 +2006,16 @@ function selectUpgradeOption(index) {
 }
 
 // 確認ステップ。ここを通さずに課金しない。
+//
+// 表示する数値はすべて get-upgrade-options のレスポンス由来で、この関数には
+// 金額も割引率も期間もハードコードしない。
+//
+// 【「0 / 100回にリセット」と書かない】上限に達した利用者は直前まで「残り0回」を
+// 見ているため、0を出すと「払っても0のまま」と誤読される。「残り◯回になります」と
+// 増える側だけを書く。
+//
+// 【税込】Stripeに登録されている額が税込で、amount_due もその値。実際に請求される
+// 額を出す場所なので「税込」と明記する（価格表・訴求面の税抜表示とは別の話）。
 function showUpgradeConfirm() {
   const option = selectedUpgrade;
   if (!option) return;
@@ -2012,15 +2023,31 @@ function showUpgradeConfirm() {
   const name = escapeHtml(option.displayName || option.plan);
   const amount = escapeHtml(formatMoney(option.amountDueNow, option.currency));
   const monthly = escapeHtml(formatMoney(option.priceLabel.unitAmount, option.priceLabel.currency));
+  const renewal = Number.isFinite(option.nextRenewalAt)
+    ? `（次回更新日 ${escapeHtml(formatDateJa(option.nextRenewalAt))}）`
+    : '';
+  const searchLimit = escapeHtml(formatLimit(option.limits.searchLimit, '回'));
+
+  // クーポンが実際に適用された場合だけ割引の内容を出す。percentOff /
+  // durationInMonths はStripeのクーポンから取った値
+  const coupon = upgradeOptions?.coupon || null;
+  const discountSuffix = option.couponApplied && coupon?.percentOff
+    ? `（早期割引${escapeHtml(String(coupon.percentOff))}%オフ適用・税込）`
+    : '（税込）';
+  const discountNote = option.couponApplied && coupon?.durationInMonths
+    ? `早期割引は${escapeHtml(String(coupon.durationInMonths))}ヶ月間、以降は ${monthly}（税込）<br>`
+    : '';
 
   document.getElementById('upgrade-step-select').style.display = 'none';
   document.getElementById('upgrade-title').textContent = 'お支払いの確認';
   document.getElementById('upgrade-step-confirm').innerHTML = `
-    <div style="font-size:14px;">${name} へ変更します。</div>
+    <div style="font-size:14px;">本日から ${name} に切り替わります${renewal}</div>
+    <div style="font-size:13px;color:var(--text2);margin-top:6px;">検索回数は残り${searchLimit}になります</div>
     <div class="upgrade-confirm-amount">本日のお支払い ${amount}</div>
-    <div style="font-size:12px;color:var(--text2);">日割り計算による金額です${option.couponApplied ? '（割引適用後）' : ''}</div>
+    <div style="font-size:12px;color:var(--text2);">${discountSuffix}</div>
     <div class="upgrade-note">
-      次回以降は ${monthly} / 月です。<br>
+      ${discountNote}
+      現在のプランの残り日数分の返金はありません。<br>
       「変更する」を押すと、ご登録のお支払い方法に即時請求されます。
     </div>
     <div style="margin-top:16px;display:flex;gap:8px;">
