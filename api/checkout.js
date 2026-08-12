@@ -6,16 +6,22 @@
 // '2025-02-24.acacia'（node_modules/stripe/cjs/apiVersion.js）。
 //
 //   1. 日割り基準時刻のパラメータ名がプレビューと更新で非対称
-//        プレビュー(invoices.retrieveUpcoming) ... subscription_details.proration_date
-//        更新(subscriptions.update)            ... proration_date（フラット）
+//        プレビュー(invoices.createPreview) ... subscription_details.proration_date
+//        更新(subscriptions.update)         ... proration_date（フラット）
 //      揃えて書き間違えると、片方に効かず提示額と請求額がズレる。
-//   2. invoices.retrieveUpcoming は '2025-03-31.basil' で廃止され
-//      invoices.createPreview (POST /v1/invoices/create_preview) に置き換わる。
-//      17.7.0 には両方あるが、acacia固定なので retrieveUpcoming を使っている。
+//   2. プレビューは invoices.createPreview (POST /v1/invoices/create_preview) を使う。
+//      invoices.retrieveUpcoming (GET /v1/invoices/upcoming) は
+//      billing_mode = flexible のサブスクリプションでは使えず400になる
+//      （Stripeのエラーメッセージが createPreview を使えと明示する）。実際に
+//      テストモードの契約が flexible で、実機確認まで気づけなかった。
+//      createPreview は classic でも動くので、billing_mode を問わずこちらに寄せる。
+//      なお 17.7.0 の型定義には billing_mode という語自体が存在しない（SDKが概念より古い）。
+//      戻り値の型も違う（retrieveUpcoming は UpcomingInvoice、createPreview は Invoice）が、
+//      こちらが読む amount_due / currency / total_discount_amounts / total は同じキー。
 //   3. 差し替えるアイテムのidの取り方(items.data)。取得は
 //      lib/subscription.js の getActiveSubscriptionWithItem() に集約してある。
 //
-// クーポン(STRIPE_COUPON_ID)は subscriptions.update / retrieveUpcoming の両方に
+// クーポン(STRIPE_COUPON_ID)は subscriptions.update / createPreview の両方に
 // 同じ discounts で渡す。片方だけだと「提示は定価・請求は割引後」またはその逆になる。
 // なお update の coupon パラメータは型定義上deprecated（discountsを使えと明記）。
 
@@ -204,7 +210,7 @@ async function handleGetUpgradeOptions(req, res) {
     const prorationDate = Math.floor(Date.now() / 1000); // 秒エポック（Stripeの単位）
     const discounts = couponDiscounts();
 
-    // 候補どうしは独立で、1候補の中の prices.retrieve と retrieveUpcoming も
+    // 候補どうしは独立で、1候補の中の prices.retrieve と createPreview も
     // 互いに依存しない（前者はPriceの内容、後者は日割り計算）。全部まとめて1波で投げる。
     // 直列だと候補2つで4往復ぶん待つことになる。Promise.all は順序を保つので、
     // UPGRADE_PATHS の並び（standard → pro）はそのまま維持される。
@@ -217,11 +223,13 @@ async function handleGetUpgradeOptions(req, res) {
         return null;
       }
 
-      const [price, upcoming] = await Promise.all([
+      const [price, preview] = await Promise.all([
         stripe.prices.retrieve(priceId, { expand: ['product'] }),
         // プレビューにも同じ discounts を渡す。渡さないと割引前の額が出て、
         // 実際の請求（割引後）と食い違う。
-        stripe.invoices.retrieveUpcoming({
+        // preview_mode は既定（'next'＝いま発行される請求のプレビュー）のまま渡さない。
+        // 'recurring' は次回以降の定期請求のプレビューで、日割りではなく月額が出る。
+        stripe.invoices.createPreview({
           customer: subscription.customer,
           subscription: subscription.id,
           subscription_details: {
@@ -233,7 +241,7 @@ async function handleGetUpgradeOptions(req, res) {
         }),
       ]);
 
-      const couponApplied = (upcoming.total_discount_amounts || []).some((d) => d.amount > 0);
+      const couponApplied = (preview.total_discount_amounts || []).some((d) => d.amount > 0);
 
       return {
         plan,
@@ -243,8 +251,8 @@ async function handleGetUpgradeOptions(req, res) {
         // 上限値はPrice metadataから作る。フロントに数値を持たせないため
         // （工程DでCASE_LIMITSのハードコードを潰したのと同じ理由）。
         limits: planLimitsFromPrice(price),
-        amountDueNow: upcoming.amount_due,
-        currency: upcoming.currency,
+        amountDueNow: preview.amount_due,
+        currency: preview.currency,
         couponApplied,
         // 移行先とprorationDateの対、および変更前のPrice（二重アップグレード検出用）を
         // まとめて署名したもの。update-plan はこれだけを受け取る。
@@ -254,8 +262,8 @@ async function handleGetUpgradeOptions(req, res) {
           toPriceId: priceId,
           toPlan: plan,
           prorationDate,
-          amountDue: upcoming.amount_due,
-          currency: upcoming.currency,
+          amountDue: preview.amount_due,
+          currency: preview.currency,
           couponSent: !!discounts,
           couponApplied,
         }),
