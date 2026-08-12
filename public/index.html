@@ -893,19 +893,46 @@
   }
 
   @media print {
-    /* 見積書(#estimate-sheet)以外はすべて非表示にする。検索結果・商品詳細・
-       案件一覧などのモーダルが開いていても印刷対象に含めないための対策。 */
-    body * { visibility: hidden; }
-    #estimate-sheet, #estimate-sheet * { visibility: visible; }
+    /* 見積書(#estimate-sheet)以外はすべて印刷対象から外す。検索結果・商品詳細・
+       案件一覧などのモーダルが開いていても印刷に含めないための対策。
 
-    /* 工事士向けの免責は施主に渡るPDFに混入させない。上の visibility: hidden で
-       描画自体は消えるが、visibility はレイアウト領域を残すため紙面に空白が
-       残る。display: none でレイアウトごと消す。 */
+       【visibility ではなく display で消す理由】以前は body * { visibility: hidden }
+       で隠していたが、visibility は描画を消すだけで要素をレイアウトに残す。隠れた
+       検索結果・入力フォーム・footer の高さがそのまま body の高さになり、明細が
+       1ページに収まる案件でも後ろに白紙ページが付いていた。
+
+       そこで #estimate-sheet から body までの祖先チェーン
+       （#estimate-sheet ← #estimate-sheet-area ← #app-main ← body）だけを残し、
+       各段の兄弟を display: none でレイアウトごと落とす。
+
+       【チェーン上の要素に display を指定しないこと】#estimate-sheet-area は
+       JSが style="display:none" を出し入れしている。ここで display: block を
+       当てると inline style を上書きしてしまい、見積書を作っていない状態で
+       印刷したとき空のシートが刷られる。:not() で兄弟だけを狙えば inline style は
+       そのまま効き、未生成なら何も刷られない。 */
+    body > *:not(#app-main),
+    #app-main > *:not(#estimate-sheet-area),
+    #estimate-sheet-area > *:not(#estimate-sheet) { display: none !important; }
+
+    /* 工事士向けの免責は施主に渡るPDFに混入させない。上の兄弟指定でも消えるが、
+       IDで名指しする指定も残す。「PDFに混入させない」は構造の副作用ではなく
+       それ自体が要件なので、上の指定を将来触ったときに巻き添えで復活しないよう
+       二重にしておく。 */
     #estimate-disclaimer { display: none !important; }
+
+    /* body の min-height: 100vh は印刷では1ページぶんの高さの下限として効き、
+       内容が少なくても次ページを作る材料になる。height: auto だけでは
+       min-height を打ち消せないため min-height も併せて解除する。 */
+    html, body {
+      height: auto;
+      min-height: 0;
+    }
+
+    /* position: absolute は使わない。兄弟を display: none で落とした結果、通常フローの
+       要素が他に無くなるため、絶対配置のままだと body の高さがほぼゼロになり、
+       1ページと判定されて2ページ目以降が切れる恐れがある。通常フローに置いて
+       body の高さを見積書自身が作るようにする。 */
     #estimate-sheet {
-      position: absolute;
-      top: 0;
-      left: 0;
       width: 100%;
       box-shadow: none;
     }
