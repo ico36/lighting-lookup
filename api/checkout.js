@@ -33,6 +33,7 @@ import {
   getSubscriptionStateCached,
   invalidateSubscriptionCache,
   planLimitsFromPrice,
+  isEarlyBirdCouponAvailable,
 } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
 import {
@@ -131,9 +132,17 @@ async function handleCreatePortalSession(req, res) {
 
 /**
  * アップグレード用のクーポン。プレビューと実際の変更の両方に同じものを渡す
- * （片方だけだと提示額と請求額がズレる）。未設定なら割引なしで動く。
+ * （片方だけだと提示額と請求額がズレる）。未設定・不使用なら割引なしで動く。
+ *
+ * @param {boolean} available
+ *   早期割引を適用してよいか。暗黙の既定値は持たない（呼び出し側に明示させる）。
+ *     - handleGetUpgradeOptions ... fetchCouponState().available（枠切れ判定の結果）
+ *     - handleUpdatePlan        ... 常に true。quote.couponSent による既存の
+ *       409(coupon_unavailable)分岐がこの関数より前に効くため、この関数自体の
+ *       挙動は工程E-5より前と変えない（環境変数の有無だけを見る）。
  */
-function couponDiscounts() {
+function couponDiscounts(available) {
+  if (!available) return null;
   return process.env.STRIPE_COUPON_ID ? [{ coupon: process.env.STRIPE_COUPON_ID }] : null;
 }
 
@@ -191,15 +200,32 @@ async function previewWithCouponFallback(params, discounts, context) {
 }
 
 /**
- * 確認ステップに出す割引の内容（何%オフが何ヶ月か）。取得できなければ null。
- * 文言に数値をハードコードしないため、Stripeのクーポンから取る。
+ * クーポンの現在の状態をまとめて取得する。確認ステップの表示文言
+ * （percentOff / durationInMonths）と、早期割引の適用可否（available、工程E-5）を
+ * 同じ1回の coupons.retrieve() で賄う。
+ *
+ * 【以前はここが2系統に分かれていた】表示用の本関数（旧 fetchCouponInfo）と、
+ * discounts の生成（couponDiscounts()）が完全に独立していて、後者は環境変数の
+ * 有無だけを見て無条件に割引を適用していた。枠が尽きても定価に落とせなかったのは
+ * これが原因（工程E-5で直す対象そのもの）。ここで合流させ、discountsの生成も
+ * この関数の結果（available）を経由させる。
+ *
+ * @returns {Promise<{available: boolean, percentOff: number|null, durationInMonths: number|null}>}
+ *   available:
+ *     - STRIPE_COUPON_ID 未設定    ... false（retrieveせず即return）
+ *     - retrieve成功               ... isEarlyBirdCouponAvailable() の結果
+ *     - retrieve失敗（Stripe障害） ... true（フェイルオープン。理由は
+ *       lib/subscription.js の isEarlyBirdCouponAvailable() のコメント参照）
  */
-async function fetchCouponInfo() {
-  if (!process.env.STRIPE_COUPON_ID) return null;
+async function fetchCouponState() {
+  if (!process.env.STRIPE_COUPON_ID) {
+    return { available: false, percentOff: null, durationInMonths: null };
+  }
 
   try {
     const coupon = await stripe.coupons.retrieve(process.env.STRIPE_COUPON_ID);
     return {
+      available: isEarlyBirdCouponAvailable(coupon),
       percentOff: coupon.percent_off ?? null,
       durationInMonths: coupon.duration_in_months ?? null,
     };
@@ -207,7 +233,7 @@ async function fetchCouponInfo() {
     console.error(
       `[checkout] クーポンの取得に失敗しました: code=${err?.code || 'なし'} ${err?.message || ''}`
     );
-    return null;
+    return { available: true, percentOff: null, durationInMonths: null };
   }
 }
 
@@ -266,8 +292,12 @@ async function handleGetUpgradeOptions(req, res) {
       });
     }
 
-    const discounts = couponDiscounts();
-    const couponInfoPromise = fetchCouponInfo();
+    // 早期割引の枠切れ判定（工程E-5）。discounts の生成に使うので、対象プランの
+    // Promise.all より前に確定させる必要がある（直列に1本増える。表示用のcoupon
+    // 取得と適用可否の判定を同じ1回のretrieveに合流させたため）。currentPricePromise
+    // は既に発火済みで、このawaitの間も並行して進む。
+    const couponState = await fetchCouponState();
+    const discounts = couponDiscounts(couponState.available);
 
     // 候補どうしは独立で、1候補の中の prices.retrieve と createPreview も
     // 互いに依存しない（前者はPriceの内容、後者は日割り計算）。全部まとめて1波で投げる。
@@ -344,12 +374,17 @@ async function handleGetUpgradeOptions(req, res) {
     }));
 
     const options = settled.filter(Boolean);
-    const [currentPrice, coupon] = await Promise.all([currentPricePromise, couponInfoPromise]);
+    // couponState は上で既に await 済み（discounts の算出に使ったため）。
+    // 残っているのは currentPricePromise だけなので、Promise.all は不要。
+    const currentPrice = await currentPricePromise;
 
     return res.status(200).json({
       // 割引の内容（percentOff / durationInMonths）。確認ステップの文言に使う。
       // 数値をフロントに持たせないため、Stripeのクーポンから取った値をそのまま返す。
-      coupon,
+      // available: false（枠切れ・未設定）でも percentOff/durationInMonths が null な
+      // オブジェクトを返すだけで、フロントは option.couponApplied で既にゲートされて
+      // いるため無改修で安全（public/index.html:2140-2146で確認済み）。
+      coupon: { percentOff: couponState.percentOff, durationInMonths: couponState.durationInMonths },
       currentPlan: limits.plan,
       // 現在のプランの表示名。候補カードだけ日本語名で「現在のプラン」が識別子のまま、
       // という不揃いを避ける。metadata未設定(plan='unknown')の契約者にとっては、
@@ -393,7 +428,12 @@ async function handleUpdatePlan(req, res) {
   // （環境変数が消えた・変わった）場合は中断する。ここを素通しすると、利用者には
   // 割引後の額を見せたまま定価で課金することになる。フロントは402と同じく
   // quoteを捨てて get-upgrade-options を叩き直す（取り直せば割引なしの正しい額が出る）。
-  const discounts = couponDiscounts();
+  //
+  // couponDiscounts(true): 工程E-5の枠切れ判定（isEarlyBirdCouponAvailable）は
+  // ここでは呼ばない。quote.couponSent の時点で「見積り時には適用できていた」ことが
+  // 保証されており、Stripeへの再照会を1本増やさずとも下の(quote.couponSent && !discounts)
+  // チェックが「環境変数が消えた」ケースを既に捕捉する。工程E-5より前と同じ挙動。
+  const discounts = couponDiscounts(true);
   if (quote.couponSent && !discounts) {
     console.error(
       '[checkout] 見積時にクーポンを適用したのに STRIPE_COUPON_ID が解決できません。' +

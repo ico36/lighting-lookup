@@ -41,7 +41,7 @@ function defaultHandlers() {
       retrieve: async (id) => defaultPrice(id),
     },
     invoices: {
-      createPreview: async () => defaultPreview(),
+      createPreview: async (params) => defaultPreview(params),
     },
   };
 }
@@ -102,20 +102,19 @@ function defaultPrice(id) {
   };
 }
 
-function defaultPreview() {
+function defaultPreview(params) {
   const nowSec = Math.floor(Date.now() / 1000);
+  // params.discounts の有無で割引あり/なしを出し分ける。実際のStripeも
+  // discountsを渡さなければ割引無しの請求になる。ここを固定値のままにすると、
+  // 「未設定/枠切れでdiscountsを渡さなかった」ケースでも割引ありのレスポンスを
+  // 返してしまい、couponApplied の判定テストが実装のバグを検出できなくなる
+  // （偽陰性）。amount_due と total_discount_amounts は必ず同じ条件で揃える。
+  const hasDiscount = Array.isArray(params?.discounts) && params.discounts.length > 0;
   return {
-    // 既定は「早期割引が適用された状態」で自己矛盾なく揃える。
     // スタンダード定価8,800円の50%オフ→4,400円、割引額4,400円。
-    // total_discount_amounts を空のままにすると、api/checkout.js の
-    // couponApplied 判定（total_discount_amounts.some(d => d.amount > 0)）が
-    // 既定値のままでも false になり、「枠切れ時に couponApplied が false になる」
-    // テストが実装のバグでも通ってしまう（偽陰性）。枠切れのシナリオは
-    // __setHandler('invoices.createPreview', ...) で discounts なし相当の
-    // レスポンス（total_discount_amounts: []、amount_due: 8800）に差し替える。
-    amount_due: 4400,
+    amount_due: hasDiscount ? 4400 : 8800,
     currency: 'jpy',
-    total_discount_amounts: [{ amount: 4400 }],
+    total_discount_amounts: hasDiscount ? [{ amount: 4400 }] : [],
     lines: { data: [{ period: { end: nowSec + 30 * 24 * 60 * 60 } }] },
   };
 }
