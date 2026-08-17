@@ -885,6 +885,13 @@
   }
   .sheet-actions button { flex: 1; }
 
+  /* 「🛒 カートを編集」のように日本語ラベルが変な位置（「編集」の「編」の前など）
+     で折り返さないよう、意味のまとまり単位でspanに分けて折り返し禁止にする。
+     日本語はデフォルトでほぼどの文字間でも改行できてしまうため、単語や熟語の
+     途中で割れることがある。spanの境目にだけ改行の機会が残るので、幅が足りない
+     ときはspan単位でしか折り返さない。 */
+  .label-unit { white-space: nowrap; }
+
   /* ===== 免責表記（工事士向け・常時表示） =====
      利用規約の免責条項を実質的に機能させるのが目的なので、×ボタン・トグル・
      折りたたみは付けない。閉じられる時点で「常時表示していた」と言えなくなる。
@@ -1342,7 +1349,7 @@
     <div class="sheet-actions">
       <button class="btn-secondary sheet-action-btn" onclick="window.print()">🖨️ PDF保存／印刷</button>
       <button class="btn-secondary sheet-action-btn" onclick="copyEstimateText()">📋 テキストをコピー</button>
-      <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet(); openCartModal();">🛒 カートを編集</button>
+      <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet(); openCartModal();"><span class="label-unit">🛒 カートを</span><span class="label-unit">編集</span></button>
       <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet()">✕ 閉じる</button>
     </div>
   </div>
