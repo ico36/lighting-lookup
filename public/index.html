@@ -165,14 +165,17 @@
       letter-spacing: 2px;
     }
 
-    /* 見積書の操作ボタン（印刷／コピー／閉じる）は3つとも均等幅で横並びだと
-       375px幅ではラベルが折り返して窮屈になる。閉じるボタンだけ独立行に落とし、
-       印刷・コピーの2つはそのまま横並びを維持する。 */
+    /* 見積書の操作ボタンは4つ（印刷／コピー／カート編集／閉じる）。375px幅で
+       4つ均等幅の1行に並べるとラベルが折り返して窮屈になるため、2列×2行に組む。
+       .sheet-actions button { flex:1 }（878-883行目あたり）と同じセレクタで
+       書くと、詳細度が同じ場合はソース順（ファイル上で後に出てくる878-883行目側）
+       が勝ってこのメディアクエリのflex-basisが無視されてしまうため、専用クラス
+       (.sheet-action-btn) を全ボタンに付与して詳細度を上げ、確実に上書きする。 */
     .sheet-actions {
       flex-wrap: wrap;
     }
-    .sheet-actions .sheet-close-btn {
-      flex-basis: 100%;
+    .sheet-actions .sheet-action-btn {
+      flex-basis: calc(50% - 5px);
     }
 
     /* モーダルの閉じるボタン・カート内アイテムの削除ボタンはタップ領域が
@@ -1167,7 +1170,12 @@
       <button id="help-btn" onclick="openHelpModal()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">❓ ヘルプ</button>
       <button id="logout-btn" onclick="doLogout()" style="display: none; background: none; border: 1px solid var(--border); color: var(--text2); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;"><span class="btn-icon-mobile">🚪</span>ログアウト</button>
     </div>
-    <button id="hamburger-btn" class="hamburger-btn" onclick="toggleHeaderMenu(event)" aria-label="メニュー" aria-expanded="false" style="display: none;">☰</button>
+    <button id="hamburger-btn" class="hamburger-btn" onclick="toggleHeaderMenu(event)" aria-label="メニュー" aria-expanded="false" style="display: none; position: relative;">
+      ☰
+      <!-- #announcements-dot と同じ方式（親position:relative・子position:absolute、z-index指定なし）。
+           ドットではなく件数を出すため、幅は固定せずmin-widthにして2桁でも潰れないようにする。 -->
+      <span id="hamburger-cart-badge" style="display: none; position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; background: var(--error); color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;"></span>
+    </button>
   </div>
 </header>
 
@@ -1332,9 +1340,10 @@
     <div class="disclaimer-note" id="estimate-disclaimer">見積書に記載する器具はAIによる推定です。お客様に提出する前に型番・数量をご確認ください。</div>
     <div id="estimate-sheet"></div>
     <div class="sheet-actions">
-      <button class="btn-secondary" onclick="window.print()">🖨️ PDF保存／印刷</button>
-      <button class="btn-secondary" onclick="copyEstimateText()">📋 テキストをコピー</button>
-      <button class="btn-secondary sheet-close-btn" onclick="closeEstimateSheet()">✕ 閉じる</button>
+      <button class="btn-secondary sheet-action-btn" onclick="window.print()">🖨️ PDF保存／印刷</button>
+      <button class="btn-secondary sheet-action-btn" onclick="copyEstimateText()">📋 テキストをコピー</button>
+      <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet(); openCartModal();">🛒 カートを編集</button>
+      <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet()">✕ 閉じる</button>
     </div>
   </div>
 
@@ -3583,6 +3592,11 @@ async function handleImportFile(input) {
     // 読み込んだ案件をカートの対象にし、続けて検索→カート追加が同じ案件に積まれるようにする
     currentCartCaseId = targetCaseId;
     localStorage.setItem('cart_case_id', targetCaseId);
+    // この関数はここまで cartCase 自体を更新していない（案件詳細表示は openCaseDetail() が
+    // 別変数 currentCaseDetailData に取得するだけで、カートバッジが参照する cartCase とは
+    // 無関係）。updateCartBadge() 単体では復元前の古い cartCase を読んでしまうため、
+    // refreshCartCase() で cartCase 自体を復元後の案件に最新化してからバッジを更新する。
+    await refreshCartCase();
 
     closeCasesModal();
     await openCaseDetail(targetCaseId);
@@ -3626,10 +3640,19 @@ async function refreshCartCase() {
 }
 
 function updateCartBadge() {
-  const btn = document.getElementById('cart-btn');
-  if (!btn) return;
   const count = (cartCase && cartCase.cartItems) ? cartCase.cartItems.length : 0;
-  btn.textContent = count > 0 ? `🛒 カート (${count})` : '🛒 カート';
+
+  const btn = document.getElementById('cart-btn');
+  if (btn) {
+    btn.textContent = count > 0 ? `🛒 カート (${count})` : '🛒 カート';
+  }
+
+  // ハンバーガーメニューを開かなくても件数が分かるよう、☰アイコン自体にも件数を出す
+  const hamburgerBadge = document.getElementById('hamburger-cart-badge');
+  if (hamburgerBadge) {
+    hamburgerBadge.textContent = String(count);
+    hamburgerBadge.style.display = count > 0 ? 'block' : 'none';
+  }
 }
 
 // 検索結果の候補（カード or 詳細モーダル）から、対象の案件のカートに1点追加する
