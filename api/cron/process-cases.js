@@ -32,7 +32,16 @@ import { isUnlimited, getSubscriptionStateCached } from '../../lib/subscription'
 import { redis } from '../../lib/redis';
 
 export default async function handler(req, res) {
-  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`) {
+  // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
+  // "Bearer undefined" に固定され、その文字列を送れば誰でも通ってしまう。
+  // 環境変数が消えたときに「認証なし」側へ倒れるのを避けるため、
+  // secret が無ければ比較する前に必ず401にする。
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    console.error('[cron/process-cases] CRON_SECRET が未設定のため、リクエストを拒否しました');
+    return res.status(401).json({ error: 'UNAUTHORIZED' });
+  }
+  if (req.headers.authorization !== `Bearer ${secret}`) {
     return res.status(401).json({ error: 'UNAUTHORIZED' });
   }
 
