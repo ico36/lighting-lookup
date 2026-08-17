@@ -165,6 +165,16 @@
       letter-spacing: 2px;
     }
 
+    /* 見積書の操作ボタン（印刷／コピー／閉じる）は3つとも均等幅で横並びだと
+       375px幅ではラベルが折り返して窮屈になる。閉じるボタンだけ独立行に落とし、
+       印刷・コピーの2つはそのまま横並びを維持する。 */
+    .sheet-actions {
+      flex-wrap: wrap;
+    }
+    .sheet-actions .sheet-close-btn {
+      flex-basis: 100%;
+    }
+
     /* モーダルの閉じるボタン・カート内アイテムの削除ボタンはタップ領域が
        28px前後と小さくタップしづらいため拡大する */
     .modal-close {
@@ -1324,6 +1334,7 @@
     <div class="sheet-actions">
       <button class="btn-secondary" onclick="window.print()">🖨️ PDF保存／印刷</button>
       <button class="btn-secondary" onclick="copyEstimateText()">📋 テキストをコピー</button>
+      <button class="btn-secondary sheet-close-btn" onclick="closeEstimateSheet()">✕ 閉じる</button>
     </div>
   </div>
 
@@ -4520,6 +4531,15 @@ function showEstimateForm() {
   updateEstimatePreview();
   document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').style.display = 'none';
+  document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 見積書を閉じてフォームに戻る。generateEstimateSheet() 末尾の表示切り替えの鏡写し。
+// フォーム側の入力値・カートの中身・window._lastEstimateText はどれも表示を
+// hidden にしていただけで消していないため、ここでも触らない。
+function closeEstimateSheet() {
+  document.getElementById('estimate-sheet-area').style.display = 'none';
+  document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
