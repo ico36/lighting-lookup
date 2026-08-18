@@ -4595,6 +4595,94 @@ function updateEstimatePreview() {
   if (el) el.textContent = yen(total);
 }
 
+// 見積書(#estimate-sheet)のHTMLを組み立てる純粋関数。document/window/getElementByIdは
+// 一切参照しない。値を「DOMから読むか、案件レコードから読むか」は呼び出し側の責務、
+// 「読み取った値が空だったときにどう表示するか（例: お客様名が空なら『お客様』にする）」は
+// こちらの責務、という切り分け。引数には生の値（空文字を含む）をそのまま渡してよい。
+// generateEstimateSheet()（DOM入力から生成）と、閲覧専用プレビュー（案件レコードから
+// 生成、F2で実装予定）の両方から呼ぶことで、同じ入力なら常に同じ出力になることを
+// 構造的に保証する。todayStrは呼び出し側で計算して渡す（ここでは new Date() を呼ばない）。
+function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, bizNote, companyInfo, todayStr }) {
+  // laborPrice/visitPriceが空文字・undefinedだと以降の加算がNaNに化けるため、
+  // clientNameと同じ理屈で数値も冒頭で正規化する。itemsが配列でない場合も空配列に倒す。
+  // 以降はこの正規化後の値(labor/visit/list)だけを参照し、生の引数は直接使わない。
+  const labor = Number(laborPrice) || 0;
+  const visit = Number(visitPrice) || 0;
+  const list = Array.isArray(items) ? items : [];
+
+  const displayClientName = String(clientName || '').trim() || 'お客様';
+  const displayClientSite = String(clientSite || '').trim();
+  const displayBizNote = String(bizNote || '').trim();
+
+  const bizName = companyInfo?.name || '（屋号未設定）';
+  const bizTel = companyInfo?.tel || '';
+  const bizLicense = companyInfo?.license || '';
+  const logoHTML = companyInfo?.logoUrl
+    ? `<img src="${companyInfo.logoUrl}" alt="ロゴ" style="max-height:40px;max-width:180px;object-fit:contain;margin-bottom:6px;" />`
+    : '';
+
+  const materialSubtotal = list.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  const subtotal = materialSubtotal + labor + visit;
+  const tax = Math.round(subtotal * 0.1);
+  const total = subtotal + tax;
+
+  // 見積書には器具名・型番・メーカー・金額のみを出力する（rawDetailなどの検索詳細情報は含めない）
+  const itemRowsHTML = list.map(item => `
+    <tr>
+      <td>
+        <div class="sheet-item-name">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}${item.modelNumber ? '（' + escapeHtml(item.modelNumber) + '）' : ''}</div>
+      </td>
+      <td class="num-cell">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="sheet-header">
+      <div>
+        <div class="sheet-title">御 見 積 書</div>
+        <div class="sheet-date">${todayStr}</div>
+      </div>
+      <div class="sheet-company">
+        ${logoHTML}
+        <div class="name">${escapeHtml(bizName)}</div>
+        ${bizTel ? `<div>TEL: ${escapeHtml(bizTel)}</div>` : ''}
+        ${bizLicense ? `<div>${escapeHtml(bizLicense)}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="sheet-client">${escapeHtml(displayClientName)} 様</div>
+    ${displayClientSite ? `<div class="sheet-client-sub">工事場所：${escapeHtml(displayClientSite)}</div>` : ''}
+
+    <table class="sheet-table">
+      <thead>
+        <tr>
+          <th style="width:60%">品名・内容</th>
+          <th style="width:40%">金額</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRowsHTML}
+        <tr>
+          <td><div class="sheet-item-name">施工費</div></td>
+          <td class="num-cell">${yen(labor)}</td>
+        </tr>
+        ${visit > 0 ? `
+        <tr>
+          <td><div class="sheet-item-name">出張費</div></td>
+          <td class="num-cell">${yen(visit)}</td>
+        </tr>` : ''}
+      </tbody>
+    </table>
+
+    <div class="sheet-total-row"><span>小計</span><span>${yen(subtotal)}</span></div>
+    <div class="sheet-total-row"><span>消費税（10%）</span><span>${yen(tax)}</span></div>
+    <div class="sheet-total-row grand"><span>合計</span><span>${yen(total)}</span></div>
+
+    ${displayBizNote ? `<div class="sheet-footer-note">${escapeHtml(displayBizNote)}</div>` : ''}
+    <div class="sheet-footer-note">記載の器具型番・金額は現時点の参考情報です。正式な発注前に最終確認のうえ確定いたしますので、あらかじめご了承ください。</div>
+  `;
+}
+
 async function generateEstimateSheet(btn) {
   const errorEl = document.getElementById('estimate-form-error');
   hideError(errorEl);
@@ -4622,7 +4710,6 @@ async function generateEstimateSheet(btn) {
   const clientSite = document.getElementById('client-site').value.trim();
   const bizName = companyInfo?.name || '（屋号未設定）';
   const bizTel = companyInfo?.tel || '';
-  const bizLicense = companyInfo?.license || '';
   const bizNote = document.getElementById('biz-note').value.trim();
 
   const materialSubtotal = cartMaterialSubtotal();
@@ -4633,65 +4720,21 @@ async function generateEstimateSheet(btn) {
   const total = subtotal + tax;
 
   const todayStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
-  const logoHTML = companyInfo?.logoUrl
-    ? `<img src="${companyInfo.logoUrl}" alt="ロゴ" style="max-height:40px;max-width:180px;object-fit:contain;margin-bottom:6px;" />`
-    : '';
 
-  // 見積書には器具名・型番・メーカー・金額のみを出力する（rawDetailなどの検索詳細情報は含めない）
-  const itemRowsHTML = items.map(item => `
-    <tr>
-      <td>
-        <div class="sheet-item-name">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}${item.modelNumber ? '（' + escapeHtml(item.modelNumber) + '）' : ''}</div>
-      </td>
-      <td class="num-cell">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</td>
-    </tr>
-  `).join('');
-
-  document.getElementById('estimate-sheet').innerHTML = `
-    <div class="sheet-header">
-      <div>
-        <div class="sheet-title">御 見 積 書</div>
-        <div class="sheet-date">${todayStr}</div>
-      </div>
-      <div class="sheet-company">
-        ${logoHTML}
-        <div class="name">${escapeHtml(bizName)}</div>
-        ${bizTel ? `<div>TEL: ${escapeHtml(bizTel)}</div>` : ''}
-        ${bizLicense ? `<div>${escapeHtml(bizLicense)}</div>` : ''}
-      </div>
-    </div>
-
-    <div class="sheet-client">${escapeHtml(clientName)} 様</div>
-    ${clientSite ? `<div class="sheet-client-sub">工事場所：${escapeHtml(clientSite)}</div>` : ''}
-
-    <table class="sheet-table">
-      <thead>
-        <tr>
-          <th style="width:60%">品名・内容</th>
-          <th style="width:40%">金額</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${itemRowsHTML}
-        <tr>
-          <td><div class="sheet-item-name">施工費</div></td>
-          <td class="num-cell">${yen(laborPrice)}</td>
-        </tr>
-        ${visitPrice > 0 ? `
-        <tr>
-          <td><div class="sheet-item-name">出張費</div></td>
-          <td class="num-cell">${yen(visitPrice)}</td>
-        </tr>` : ''}
-      </tbody>
-    </table>
-
-    <div class="sheet-total-row"><span>小計</span><span>${yen(subtotal)}</span></div>
-    <div class="sheet-total-row"><span>消費税（10%）</span><span>${yen(tax)}</span></div>
-    <div class="sheet-total-row grand"><span>合計</span><span>${yen(total)}</span></div>
-
-    ${bizNote ? `<div class="sheet-footer-note">${escapeHtml(bizNote)}</div>` : ''}
-    <div class="sheet-footer-note">記載の器具型番・金額は現時点の参考情報です。正式な発注前に最終確認のうえ確定いたしますので、あらかじめご了承ください。</div>
-  `;
+  // clientName/clientSite/bizNoteは上で既に.trim()||'お客様'等が解決済みの変数
+  // （saveEstimateMeta()・テキストコピー用に必要）なので、buildEstimateSheetHTML()には
+  // フォールバック未適用の生の値を別途読み直して渡す。呼び出し側でフォールバックを
+  // 二重に持たないため。
+  document.getElementById('estimate-sheet').innerHTML = buildEstimateSheetHTML({
+    items,
+    clientName: document.getElementById('client-name').value,
+    clientSite: document.getElementById('client-site').value,
+    laborPrice,
+    visitPrice,
+    bizNote: document.getElementById('biz-note').value,
+    companyInfo,
+    todayStr,
+  });
 
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'block';
