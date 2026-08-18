@@ -1348,9 +1348,9 @@
     <div id="estimate-sheet"></div>
     <div class="sheet-actions">
       <button class="btn-secondary sheet-action-btn" onclick="window.print()">🖨️ PDF保存／印刷</button>
-      <button class="btn-secondary sheet-action-btn" onclick="copyEstimateText()">📋 テキストをコピー</button>
-      <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet(); openCartModal();"><span class="label-unit">🛒 カートを</span><span class="label-unit">編集</span></button>
-      <button class="btn-secondary sheet-action-btn" onclick="closeEstimateSheet()">✕ 閉じる</button>
+      <button class="btn-secondary sheet-action-btn" id="sheet-copy-btn" onclick="copyEstimateText()">📋 テキストをコピー</button>
+      <button class="btn-secondary sheet-action-btn" id="sheet-cart-edit-btn" onclick="closeEstimateSheet(); openCartModal();"><span class="label-unit">🛒 カートを</span><span class="label-unit">編集</span></button>
+      <button class="btn-secondary sheet-action-btn" id="sheet-close-btn" onclick="closeEstimateSheet()">✕ 閉じる</button>
     </div>
   </div>
 
@@ -2969,6 +2969,14 @@ function renderCaseDetail(c, searches) {
   currentCaseDetailData = c;
   document.getElementById('case-detail-title').textContent = c.customerName || '（無題の案件）';
 
+  // アーカイブ済み案件は閲覧専用。ステータス変更・カート対象化・見積書の保存など
+  // 書き込みを伴う操作は一切出さない（該当箇所は下記の isArchived 参照コメントを検索）。
+  // 真偽値をここで1つだけ作り、箇所ごとに条件式を書き直さないようにする
+  // （1箇所だけ条件が食い違う事故を防ぐため）。判定は c.status ではなく c.archivedAt。
+  // status が完了/失注・キャンセルでも、保持期間中でまだ archivedAt が付いていない
+  // 案件は通常どおり編集できるべきなので、archivedAt の有無だけを見る。
+  const isArchived = Number.isFinite(c.archivedAt);
+
   currentCaseDetailSearches = searches.slice().reverse();
   const searchesHTML = currentCaseDetailSearches.length
     ? currentCaseDetailSearches.map((s, i) => `
@@ -2978,10 +2986,11 @@ function renderCaseDetail(c, searches) {
             <span style="font-size:11px;color:var(--text2);">${new Date(s.searchedAt).toLocaleDateString('ja-JP')}</span>
           </div>
           <div style="font-size:13px;color:var(--text2);margin-top:2px;">${escapeHtml(s.manufacturer)} ${escapeHtml(s.name)}</div>
+          ${isArchived ? '' : `
           <div style="display:flex;gap:14px;margin-top:6px;">
             <button type="button" class="detail-link-btn" style="margin:0;" onclick="addHistoryToCart(this, ${i})">🛒 カートに追加</button>
             <button type="button" class="detail-link-btn" style="margin:0;" onclick="reSearchFromHistory(this, ${i})">🔄 型番で再検索</button>
-          </div>
+          </div>`}
         </div>
       `).join('')
     : `<div style="color:var(--text2);font-size:13px;">まだ検索履歴がありません</div>`;
@@ -3006,13 +3015,15 @@ function renderCaseDetail(c, searches) {
 
   document.getElementById('case-detail-body').innerHTML = `
     <div id="case-detail-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;"></div>
+    ${isArchived ? '<div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;">この案件は保存期間が過ぎてアーカイブされています。内容の確認のみ可能です。</div>' : ''}
+    ${isArchived ? '' : `
     <div class="input-card">
       <div class="section-label">案件名</div>
       <div style="display:flex;gap:8px;">
         <input type="text" id="case-name-input" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;flex:1;" />
         <button class="btn-primary" onclick="saveCaseName(this, '${c.id}')">保存</button>
       </div>
-    </div>
+    </div>`}
     <div class="result-card">
       <div class="result-body">
         <div class="field-row">
@@ -3022,18 +3033,21 @@ function renderCaseDetail(c, searches) {
         ${c.memo ? `<div style="font-size:13px;color:var(--text2);margin-top:8px;">${escapeHtml(c.memo)}</div>` : ''}
       </div>
     </div>
+    ${isArchived ? '' : `
     <div class="input-card">
       <div class="section-label">ステータスを変更</div>
       ${actionsHTML}
-    </div>
+    </div>`}
 
     <div class="input-card">
       <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
         <span>カート内容</span>
         <span class="field-val">${cartItems.length}点 / ${yen(cartSubtotal)}</span>
       </div>
-      <button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>
-      <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>
+      ${isArchived
+        ? `<button class="btn-primary" style="width:100%;margin-top:10px;" onclick="previewArchivedEstimate('${c.id}')">📄 見積書を確認する</button>`
+        : `<button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>`}
+      ${isArchived ? '' : `<button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>`}
       <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="exportCaseToFile('${c.id}')">💾 見積もりを保存</button>
       <div style="font-size:12px;color:var(--text2);margin-top:6px;">保存したファイルは、あとでこの画面から呼び出して編集できます</div>
     </div>
@@ -3047,7 +3061,9 @@ function renderCaseDetail(c, searches) {
   `;
 
   // 属性エスケープを気にせず安全に反映するため、値はプロパティ代入で設定する
-  document.getElementById('case-name-input').value = c.customerName || '';
+  // （isArchivedのときは案件名編集カード自体が無く、この要素も存在しないためnullガードする）
+  const nameInput = document.getElementById('case-name-input');
+  if (nameInput) nameInput.value = c.customerName || '';
 }
 
 async function saveCaseName(btn, caseId) {
@@ -3255,7 +3271,7 @@ async function searchArchivedCasesUI(btn) {
       const cases = data.cases || [];
       resultsEl.innerHTML = cases.length
         ? cases.map(c => `
-            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
               <div style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</span>
                 <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
@@ -4574,6 +4590,64 @@ function closeEstimateSheet() {
   document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// アーカイブ済み案件の見積書を閲覧専用で表示する。currentCaseDetailDataは
+// openCaseDetail()が既に取得済みのため、再フェッチせずそのまま使う。
+// setActiveCase()は呼ばない＝currentCartCaseIdを書き換えない（このアーカイブ済み
+// 案件がカート対象になることはない。以後の「カートに追加」は従来どおり現在
+// アクティブな案件に対して行われる）。saveEstimateMeta()も呼ばない＝一切書き込まない。
+//
+// issueDateは案件のcreatedAtを使う。ここは「PDF保存／印刷」も使える閲覧経路のため、
+// 今日の日付にすると、数年前の金額のまま今日付けの見積書が出力されてしまい、
+// 施主に渡すと現在有効な見積書に見えかねない。作成日を出すことで、その紙自体が
+// 過去の記録だと分かるようにする。
+function previewArchivedEstimate(caseId) {
+  const c = currentCaseDetailData;
+  if (!c || c.id !== caseId) {
+    console.error('[previewArchivedEstimate] currentCaseDetailDataが無いか、caseIdが一致しません', caseId);
+    showError(document.getElementById('case-detail-error'), '見積書を表示できませんでした。案件を再度開いてください。');
+    return;
+  }
+
+  const issueDate = new Date(c.createdAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  document.getElementById('estimate-sheet').innerHTML = buildEstimateSheetHTML({
+    items: c.cartItems,
+    clientName: c.estimateMeta?.clientName,
+    clientSite: c.estimateMeta?.clientSite,
+    laborPrice: c.estimateMeta?.laborPrice,
+    visitPrice: c.estimateMeta?.visitPrice,
+    bizNote: c.estimateMeta?.bizNote,
+    companyInfo,
+    issueDate,
+  });
+
+  // 閲覧専用: 「テキストをコピー」はwindow._lastEstimateTextがgenerateEstimateSheet()
+  // でしか更新されないため非表示にする（直前に生成した別の見積書のテキストが
+  // コピーされてしまうことを避けるため）。「カートを編集」はcurrentCartCaseIdを
+  // このアーカイブ済み案件に向けていないため非表示にする（押しても無関係な案件の
+  // カートが開いてしまい意味が通らない）。
+  document.getElementById('sheet-copy-btn').style.display = 'none';
+  document.getElementById('sheet-cart-edit-btn').style.display = 'none';
+  document.getElementById('sheet-close-btn').onclick = () => closeArchivedEstimatePreview(caseId);
+
+  closeCaseDetail();
+  // 通常経路（generateEstimateSheet()）と同じくestimate-form-areaとestimate-sheet-areaは
+  // 排他。ここでform側をnoneにし忘れると、通常の生成→閉じるを経てから閲覧プレビューを
+  // 開いたときにフォームと見積書が両方表示されたまま残る。
+  document.getElementById('estimate-form-area').style.display = 'none';
+  document.getElementById('estimate-sheet-area').style.display = 'block';
+  document.getElementById('estimate-sheet-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 閲覧専用プレビューを閉じて案件詳細に戻る。case-detail-bodyの既存DOMをそのまま
+// 復元するのではなく、openCaseDetail()を呼び直して再取得する。プレビューを開いている
+// 間に別タブやcronで状態が変わっている可能性があるため（API1回分のコストを払ってでも
+// 最新化する）。
+function closeArchivedEstimatePreview(caseId) {
+  document.getElementById('estimate-sheet-area').style.display = 'none';
+  openCaseDetail(caseId);
+}
+
 function yen(n) {
   return '¥' + Number(n || 0).toLocaleString('ja-JP');
 }
@@ -4601,8 +4675,10 @@ function updateEstimatePreview() {
 // こちらの責務、という切り分け。引数には生の値（空文字を含む）をそのまま渡してよい。
 // generateEstimateSheet()（DOM入力から生成）と、閲覧専用プレビュー（案件レコードから
 // 生成、F2で実装予定）の両方から呼ぶことで、同じ入力なら常に同じ出力になることを
-// 構造的に保証する。todayStrは呼び出し側で計算して渡す（ここでは new Date() を呼ばない）。
-function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, bizNote, companyInfo, todayStr }) {
+// 構造的に保証する。issueDateは呼び出し側で計算して渡す（ここでは new Date() を呼ばない）。
+// 「見積書に表示する日付」という意味の中立的な名前で、何の日付にするか（今日か、
+// 案件の作成日か等）は呼び出し側が決める。
+function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, bizNote, companyInfo, issueDate }) {
   // laborPrice/visitPriceが空文字・undefinedだと以降の加算がNaNに化けるため、
   // clientNameと同じ理屈で数値も冒頭で正規化する。itemsが配列でない場合も空配列に倒す。
   // 以降はこの正規化後の値(labor/visit/list)だけを参照し、生の引数は直接使わない。
@@ -4640,7 +4716,7 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
     <div class="sheet-header">
       <div>
         <div class="sheet-title">御 見 積 書</div>
-        <div class="sheet-date">${todayStr}</div>
+        <div class="sheet-date">${issueDate}</div>
       </div>
       <div class="sheet-company">
         ${logoHTML}
@@ -4733,8 +4809,16 @@ async function generateEstimateSheet(btn) {
     visitPrice,
     bizNote: document.getElementById('biz-note').value,
     companyInfo,
-    todayStr,
+    issueDate: todayStr,
   });
+
+  // .sheet-actionsはこの通常生成と previewArchivedEstimate()（閲覧専用プレビュー）の
+  // 両方で使い回すDOMなので、閲覧専用モードが隠した「テキストをコピー」「カートを編集」
+  // を毎回ここで復元し、閉じるボタンの動作も通常のcloseEstimateSheet()に戻す。
+  // 直前に閲覧専用プレビューを経由していなくても無害（既に既定状態なら何も変わらない）。
+  document.getElementById('sheet-copy-btn').style.display = '';
+  document.getElementById('sheet-cart-edit-btn').style.display = '';
+  document.getElementById('sheet-close-btn').onclick = closeEstimateSheet;
 
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'block';
