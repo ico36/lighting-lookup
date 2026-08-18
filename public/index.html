@@ -3471,6 +3471,7 @@ function exportCaseToFile(caseId) {
       // rawDetail（検索結果の仕様・価格情報）は見積書に不要なため保存しない
     })),
     estimateMeta: c.estimateMeta || {},
+    duplicatedFrom: c.duplicatedFrom || null,
     companyInfo: companyInfo || null,
     exportedAt: new Date().toISOString()
   };
