@@ -3448,6 +3448,18 @@ let currentCartCaseId = localStorage.getItem('cart_case_id') || null;
 let cartCase = null;
 let replacingItemId = null; // 「再検索して差し替え」対象のitemId。R2で消費・クリアする
 
+// 差し替えモードを終了する。replacingItemIdをクリアするだけでなく、検索結果を
+// 再描画して候補のボタンを「🛒 カートに追加」に、バナーを非表示に戻す。再描画せず
+// クリアするだけだと、画面上のボタンは「🔁 この器具に差し替える」のまま残り、
+// 押しても executeCartItemReplace() の !replacingItemId 判定で静かに何も起きなく
+// なる（F2で決めた「押せるが失敗する状態を作らない」方針に反する）。
+// renderResult()は同期処理でAPI呼び出しを行わず、lastResult/detailCache/
+// currentDetailIndexへの副作用も無いことを確認済み（8/19の調査）。
+function clearReplaceMode() {
+  replacingItemId = null;
+  if (lastResult) renderResult(lastResult);
+}
+
 // 「対象の案件」がまだ無ければ下書き案件を自動作成し、以後はそれをカートの対象にする
 async function ensureCartCase() {
   if (currentCartCaseId) return currentCartCaseId;
@@ -3488,6 +3500,9 @@ async function setActiveCase(caseId) {
   currentCartCaseId = caseId;
   localStorage.setItem('cart_case_id', caseId);
   await refreshCartCase();
+  // カート対象が切り替わると、差し替えモードの前提（「今の対象案件のこの
+  // アイテムを差し替える」）が崩れるため、モードごと解除する。
+  clearReplaceMode();
 }
 
 // 案件一覧・詳細から、既存の案件をカートの対象に切り替える
@@ -3959,6 +3974,82 @@ async function startCartItemReplace(btn, itemId) {
   }, '再検索中...');
 }
 
+// 差し替えモードのバナー「やめる」ボタン
+function cancelCartItemReplace() {
+  clearReplaceMode();
+}
+
+// 差し替えを実行する。addCandidateToCart()と同じ(btn, index, errorElId)の
+// 引数構成にして、候補カード・商品詳細モーダルのどちらからも同じ形で呼べるようにする。
+// ensureCartCase()は使わない。あれは案件が無ければ新規作成する関数で、差し替え経路で
+// 呼ぶと空の下書き案件を作ってから404になり保存件数の枠を無駄に消費する。
+// currentCartCaseIdを直接見て、無ければ差し替えモードごと諦める。
+async function executeCartItemReplace(btn, index, errorElId) {
+  const candidate = (lastResult && lastResult._candidates || [])[index];
+  if (!candidate) return;
+  if (!replacingItemId) return;
+
+  const errorEl = document.getElementById(errorElId);
+  hideError(errorEl);
+
+  if (!currentCartCaseId) {
+    clearReplaceMode();
+    showError(errorEl, '差し替え対象の案件が見つかりません。カートを開き直してください。');
+    return;
+  }
+
+  const cacheKey = candidate.model + '|' + candidate.manufacturer;
+  const rawDetail = detailCache[cacheKey] || null;
+  const estimatedUnitPrice = estimateUnitPriceFromDetail(rawDetail);
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cartReplace: {
+            itemId: replacingItemId,
+            name: candidate.name || '',
+            modelNumber: candidate.model || '',
+            manufacturer: candidate.manufacturer || '',
+            unitPrice: estimatedUnitPrice,
+            rawDetail
+          }
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          return;
+        }
+        if (response.status === 404) {
+          // api/cases/[id].js は404を2経路で返す（案件自体が無い/所有者不一致の
+          // CASE_NOT_FOUND、案件はあるがアイテムが無いCART_ITEM_NOT_FOUND）。
+          // 文字列一致ではなくstatusで判定する（CASE_LIMIT_REACHED/case_limit_exceeded
+          // のようにサーバー内部コードとレスポンスのerrorが食い違う前例があるため）。
+          // どちらのケースも「差し替えの前提が崩れている」点は同じなので区別しない。
+          clearReplaceMode();
+          showError(errorEl, '差し替え対象の案件または器具が見つかりませんでした。カートを確認してください。');
+          return;
+        }
+        throw new Error(data.error || '差し替えに失敗しました');
+      }
+
+      cartCase = data.case;
+      updateCartBadge();
+      // clearReplaceMode()がrenderResult()を呼ぶため、openCartModal()より先に呼ぶ
+      // （検索結果の画面をたたんでからカートを開く順序を守る）。
+      clearReplaceMode();
+      openCartModal();
+    } catch (err) {
+      showError(errorEl, err.message || '通信エラーが発生しました');
+    }
+  }, '差し替え中...');
+}
+
 // カートの中身をもとに見積書フォームを開く
 async function openEstimateFromCart() {
   await refreshCartCase();
@@ -4407,6 +4498,14 @@ function renderResult(r) {
 
   lastResult._candidates = candidates;
 
+  // 差し替えモード中(replacingItemId)なら、対象アイテムをcartCaseから引いて
+  // バナーに出す型番を用意する。見つからなくても(cartCaseとの不整合等)
+  // バナー自体はモードの有無(replacingItemId)だけで出すため、型番部分だけ
+  // 空になる形にする。
+  const replacingItem = replacingItemId
+    ? (cartCase && cartCase.cartItems || []).find(i => i.itemId === replacingItemId)
+    : null;
+
   const sectionTitle = isCurrent
     ? 'この器具の情報（見積に使う候補を選択）'
     : '後継器・互換品（見積に使う候補を選択）';
@@ -4427,7 +4526,9 @@ function renderResult(r) {
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${escapeHtml(s.note)}</div>` : ''}
         <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap;">
           <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
-          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i}, 'result-error')">🛒 カートに追加</button>
+          ${replacingItemId
+            ? `<button type="button" class="detail-link-btn" style="margin:0;" onclick="executeCartItemReplace(this, ${i}, 'result-error')">🔁 この器具に差し替える</button>`
+            : `<button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i}, 'result-error')">🛒 カートに追加</button>`}
         </div>
       </div>
     </div>
@@ -4437,6 +4538,11 @@ function renderResult(r) {
 
   document.getElementById('result-content').innerHTML = `
     <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。</div>
+    ${replacingItemId ? `
+    <div style="font-size:13px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:10px 14px;border-radius:8px;margin-bottom:16px;line-height:1.6;">
+      🔁 「${replacingItem ? escapeHtml(replacingItem.modelNumber) : '対象の器具'}」を差し替える候補を選んでください。
+      <button type="button" class="detail-link-btn" style="margin:0 0 0 8px;" onclick="cancelCartItemReplace()">やめる</button>
+    </div>` : ''}
 
     <div class="result-card">
       <div class="result-header">
@@ -4657,7 +4763,9 @@ function renderDetailModal(d, fallback) {
     </div>
 
     <div style="margin-top:16px;">
-      <button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(this, currentDetailIndex, 'detail-modal-error')">🛒 カートに追加</button>
+      ${replacingItemId
+        ? `<button class="btn-secondary" style="width:100%;" onclick="executeCartItemReplace(this, currentDetailIndex, 'detail-modal-error')">🔁 この器具に差し替える</button>`
+        : `<button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(this, currentDetailIndex, 'detail-modal-error')">🛒 カートに追加</button>`}
     </div>
   `;
 }
