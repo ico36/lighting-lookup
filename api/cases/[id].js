@@ -4,6 +4,8 @@
 //   { status }                       ... ステータスを変更（任意のステータス間で自由に遷移可能）
 //   { cartAdd: {...} }                ... カートに器具を1点追加
 //   { cartUpdate: { itemId, ... } }   ... カート内アイテムの単価・数量を更新
+//   { cartReplace: { itemId, name, modelNumber, manufacturer, rawDetail, unitPrice } }
+//                                      ... カート内アイテムを型番の再検索結果で差し替える
 //   { cartRemove: { itemId } }        ... カートからアイテムを削除
 //   { estimateMeta: {...} }           ... 見積書の付随情報（お客様名・工事場所・施工費・出張費・備考）を更新
 //   { restoreImport: {...} }          ... ローカル保存したJSONファイルの内容で
@@ -22,6 +24,7 @@ import {
   updateCaseStatus,
   addCartItem,
   updateCartItem,
+  replaceCartItem,
   removeCartItem,
   updateEstimateMeta,
   restoreCaseFromImport,
@@ -55,7 +58,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
-    const { status, cartAdd, cartUpdate, cartRemove, estimateMeta, restoreImport, customerName } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, customerName } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -85,6 +88,15 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'itemIdが指定されていません' });
         }
         const updated = await updateCartItem(id, itemId, updates);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (cartReplace) {
+        const { itemId, ...patch } = cartReplace;
+        if (!itemId) {
+          return res.status(400).json({ error: 'itemIdが指定されていません' });
+        }
+        const updated = await replaceCartItem(id, itemId, patch);
         return res.status(200).json({ case: updated });
       }
 
