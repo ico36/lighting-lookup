@@ -912,6 +912,27 @@
     line-height: 1.7;
   }
 
+  /* ===== 廃番注意（複製案件・常時表示） =====
+     複製元の器具データが古い可能性を知らせる警告。.disclaimer-note と見た目の
+     プロパティは全て同一（共有: background/border/border-left-width/border-radius/
+     padding/margin-bottom/color/font-size/line-height。変更: なし）。あえてクラスを
+     分けているのは、.disclaimer-note が「利用規約の免責条項」用に使用箇所を2つと
+     明記して管理しているため。用途の異なる警告を混ぜて「使用箇所は2つ」の記述を
+     実態と食い違わせないための分離。
+     使用箇所: renderCaseDetail() の案件詳細上部・showEstimateForm() の見積フォーム
+     上部（#duplicated-from-warning）。 */
+  .warning-note {
+    background: rgba(245,158,11,0.08);
+    border: 1px solid rgba(245,158,11,0.3);
+    border-left-width: 3px;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    color: var(--warning);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
   @media print {
     /* 見積書(#estimate-sheet)以外はすべて印刷対象から外す。検索結果・商品詳細・
        案件一覧などのモーダルが開いていても印刷に含めないための対策。
@@ -1291,6 +1312,7 @@
 
   <div id="estimate-form-area" style="display:none;">
     <div id="estimate-form-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:14px;"></div>
+    <div id="duplicated-from-warning" class="warning-note" style="display:none;"></div>
     <div class="input-card">
       <div class="section-label">お客様情報</div>
       <div class="company-info-grid">
@@ -2965,6 +2987,20 @@ function backToCasesList() {
   openCasesModal();
 }
 
+// duplicatedFrom.createdAtから警告文を組み立てる。createdAtがNumber.isFiniteかつ
+// 0より大きい（8/18のrestoreCaseFromImport()のガードと同じ条件。0だとエポック＝
+// 1970年表示になるため）場合のみ日付を含め、そうでなければ日付部分を省いた文面にする。
+// 警告の本体は「中身が古いので発注前に確認せよ」であり日付は補足情報のため、
+// 日付が読めないことを理由に警告ごと消さない。renderCaseDetail()とshowEstimateForm()の
+// 両方で使うため、文面を1箇所にまとめる（2箇所に分散すると食い違う事故が起きる）。
+function duplicatedFromWarningText(duplicatedFrom) {
+  const createdAt = duplicatedFrom?.createdAt;
+  const datePart = Number.isFinite(createdAt) && createdAt > 0
+    ? new Date(createdAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }) + '時点の'
+    : '過去の案件の';
+  return `この案件は${datePart}内容をもとに複製されています。器具の廃番や価格改定の可能性があるため、発注・見積提出前に最新情報をご確認ください。`;
+}
+
 function renderCaseDetail(c, searches) {
   currentCaseDetailData = c;
   document.getElementById('case-detail-title').textContent = c.customerName || '（無題の案件）';
@@ -3016,6 +3052,7 @@ function renderCaseDetail(c, searches) {
   document.getElementById('case-detail-body').innerHTML = `
     <div id="case-detail-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;"></div>
     ${isArchived ? '<div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;">この案件は保存期間が過ぎてアーカイブされています。内容の確認のみ可能です。</div>' : ''}
+    ${c.duplicatedFrom ? `<div class="warning-note">${duplicatedFromWarningText(c.duplicatedFrom)}</div>` : ''}
     ${isArchived ? '' : `
     <div class="input-card">
       <div class="section-label">案件名</div>
@@ -3047,6 +3084,7 @@ function renderCaseDetail(c, searches) {
       ${isArchived
         ? `<button class="btn-primary" style="width:100%;margin-top:10px;" onclick="previewArchivedEstimate('${c.id}')">📄 見積書を確認する</button>`
         : `<button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>`}
+      ${isArchived ? `<button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="duplicateCurrentCase(this, '${c.id}')">🆕 この内容で新しい案件を作る</button>` : ''}
       ${isArchived ? '' : `<button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="setAsCartTarget('${c.id}')">🛒 この案件をカートの対象にする</button>`}
       <button class="btn-secondary" style="width:100%;margin-top:8px;" onclick="exportCaseToFile('${c.id}')">💾 見積もりを保存</button>
       <div style="font-size:12px;color:var(--text2);margin-top:6px;">保存したファイルは、あとでこの画面から呼び出して編集できます</div>
@@ -3455,6 +3493,44 @@ async function setActiveCase(caseId) {
 async function setAsCartTarget(caseId) {
   await setActiveCase(caseId);
   alert('この案件をカートの対象に設定しました。');
+}
+
+// アーカイブ済み案件を複製して新しい編集可能な案件を作る。setActiveCase()は呼ばない
+// （カート対象の切り替えは🛒ボタンを押したときだけ、というF2の規則に例外を作らないため）。
+async function duplicateCurrentCase(btn, caseId) {
+  const errorEl = document.getElementById('case-detail-error');
+  hideError(errorEl);
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch('/api/cases', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duplicateFrom: caseId })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired(closeCaseDetail);
+          return;
+        }
+        if (isCaseLimitError(data)) {
+          showCaseLimitNotice(data.limits);
+          return;
+        }
+        if (response.status === 404) {
+          showError(errorEl, '複製元の案件が見つかりませんでした。');
+          return;
+        }
+        throw new Error(data.message || data.error || '複製に失敗しました');
+      }
+
+      await openCaseDetail(data.case.id);
+    } catch (err) {
+      showError(errorEl, err.message || '通信エラーが発生しました');
+    }
+  }, '複製中...');
 }
 
 // 案件詳細画面から、その案件のcartItems・estimateMetaで見積書フォームを開く
@@ -4566,6 +4642,14 @@ function copyOrder() {
 function showEstimateForm() {
   renderEstimateCompanyDisplay();
   renderEstimateCartItems();
+
+  const warningEl = document.getElementById('duplicated-from-warning');
+  if (cartCase?.duplicatedFrom) {
+    warningEl.textContent = duplicatedFromWarningText(cartCase.duplicatedFrom);
+    warningEl.style.display = 'block';
+  } else {
+    warningEl.style.display = 'none';
+  }
 
   // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考を引き継ぐ
   const meta = (cartCase && cartCase.estimateMeta) || {};
