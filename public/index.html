@@ -3559,7 +3559,8 @@ function exportCaseToFile(caseId) {
       modelNumber: item.modelNumber,
       manufacturer: item.manufacturer,
       unitPrice: item.unitPrice,
-      quantity: item.quantity
+      quantity: item.quantity,
+      replacedAt: item.replacedAt
       // rawDetail（検索結果の仕様・価格情報）は見積書に不要なため保存しない
     })),
     estimateMeta: c.estimateMeta || {},
