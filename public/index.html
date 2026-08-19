@@ -3446,6 +3446,7 @@ async function attachCurrentSearchToCase(btn) {
 
 let currentCartCaseId = localStorage.getItem('cart_case_id') || null;
 let cartCase = null;
+let replacingItemId = null; // 「再検索して差し替え」対象のitemId。R2で消費・クリアする
 
 // 「対象の案件」がまだ無ければ下書き案件を自動作成し、以後はそれをカートの対象にする
 async function ensureCartCase() {
@@ -3851,6 +3852,7 @@ function renderCartItems() {
             </div>
             <button class="modal-close" onclick="removeCartItemUI('${item.itemId}')">✕</button>
           </div>
+          ${item.modelNumber ? `<button type="button" class="detail-link-btn" style="margin:8px 0 0;width:100%;text-align:left;" onclick="startCartItemReplace(this, '${item.itemId}')">🔄 再検索して差し替え</button>` : ''}
           ${isZeroPrice ? `<div style="font-size:12px;color:var(--error);margin-top:8px;">⚠️ 単価が未設定です。金額を入力してください</div>` : ''}
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
             <div class="yen-prefix" style="flex:1;"><span>¥</span><input type="number" class="num-input" value="${item.unitPrice}" min="0" onchange="updateCartItemUI('${item.itemId}', 'unitPrice', this.value)" /></div>
@@ -3925,6 +3927,36 @@ async function removeCartItemUI(itemId) {
   } catch (err) {
     showError(errorEl, err.message || '通信エラーが発生しました');
   }
+}
+
+// 「再検索して差し替え」の開始。updateCartItemUI/removeCartItemUIと違い、PATCHを
+// 飛ばして操作を完結させる関数ではなく、状態(replacingItemId)を立てて検索フォームへ
+// 移動するだけ。差し替えの実行そのものはR2の別関数が担う。
+//
+// 型番はonclickの引数として受け取らず、itemIdだけを受け取ってcartCase.cartItemsから
+// 引く。型番はAIが返した候補や利用者の入力に由来する自由文字列で、"や'が混ざると
+// onclick="..."属性やJS文字列を壊しかねない。渡すのはUUIDのitemIdだけにする
+// （removeCartItemUI/updateCartItemUIが安全なのも同じ理由）。
+// cartCaseは代入9箇所すべてがdata.caseをそのまま入れておりcartItemsは必ず配列なので、
+// renderCartItems()の描画元と同じ値をここでも参照できる。
+async function startCartItemReplace(btn, itemId) {
+  const item = (cartCase && cartCase.cartItems || []).find(i => i.itemId === itemId);
+  // ボタンを出す条件(item.modelNumberが空なら出さない)と二重の防御。
+  // renderCartItems()の再描画が間に合わずボタンが古いDOMに残っていた場合に備える。
+  if (!item || !item.modelNumber) return;
+
+  await withButtonGuard(btn, async () => {
+    replacingItemId = itemId;
+    closeCartModal();
+
+    uploadedImages = [];
+    renderPreviews();
+    document.getElementById('model-input').value = item.modelNumber;
+    document.getElementById('note-input').value = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    await doSearch();
+  }, '再検索中...');
 }
 
 // カートの中身をもとに見積書フォームを開く
