@@ -3867,7 +3867,7 @@ function renderCartItems() {
             </div>
             <button class="modal-close" onclick="removeCartItemUI('${item.itemId}')">✕</button>
           </div>
-          ${item.modelNumber ? `<button type="button" class="detail-link-btn" style="margin:8px 0 0;width:100%;text-align:left;" onclick="startCartItemReplace(this, '${item.itemId}')">🔄 再検索して差し替え</button>` : ''}
+          ${item.modelNumber ? `<button type="button" class="detail-link-btn" style="margin:8px 0 0;" onclick="startCartItemReplace(this, '${item.itemId}')">🔄 再検索して差し替え</button>` : ''}
           ${isZeroPrice ? `<div style="font-size:12px;color:var(--error);margin-top:8px;">⚠️ 単価が未設定です。金額を入力してください</div>` : ''}
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
             <div class="yen-prefix" style="flex:1;"><span>¥</span><input type="number" class="num-input" value="${item.unitPrice}" min="0" onchange="updateCartItemUI('${item.itemId}', 'unitPrice', this.value)" /></div>
