@@ -16,6 +16,7 @@ import { searchArchivedCases } from '../../lib/cases';
 import { canUseFeature, getCampaignStatus } from '../../lib/featureCampaigns';
 
 const FEATURE_KEY = 'archiveSearch';
+const DATE_FORMAT = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function handler(req, res) {
   // お試し期間終了後のプラン判定に limits.plan を使うため requireAuthWithPlan()
@@ -45,10 +46,35 @@ export default async function handler(req, res) {
   }
 
   const { from, to } = req.query;
-  const range = {
-    from: from ? new Date(from) : undefined,
-    to: to ? new Date(to) : undefined,
-  };
+
+  if (from && !DATE_FORMAT.test(from)) {
+    return res.status(400).json({ error: '開始日はYYYY-MM-DD形式で指定してください' });
+  }
+  if (to && !DATE_FORMAT.test(to)) {
+    return res.status(400).json({ error: '終了日はYYYY-MM-DD形式で指定してください' });
+  }
+
+  // from/toはYYYY-MM-DDのまま受け取るが、JST(UTC+9)固定で解釈する。
+  // from → その日のJST 00:00:00.000、to → その日のJST 23:59:59.999。
+  // ここをUTCの0時として解釈すると、cronの自動アーカイブ(api/cron/process-cases.js)
+  // はJST 3:00に走り、archivedAtはその時点のDate.now()（UTC基準の絶対時刻）で
+  // 記録されるため、JSTでの「その日」の一部(JST 0:00〜8:59分)がUTC解釈では
+  // 前日側にずれてしまう。暗黙のローカルタイムゾーン(実行環境依存)にも
+  // 依存しないよう、明示的なオフセット(+09:00)付きの文字列にしてからDateへ渡す。
+  const fromDate = from ? new Date(`${from}T00:00:00.000+09:00`) : undefined;
+  const toDate = to ? new Date(`${to}T23:59:59.999+09:00`) : undefined;
+
+  if (fromDate && Number.isNaN(fromDate.getTime())) {
+    return res.status(400).json({ error: '開始日に存在しない日付が指定されています' });
+  }
+  if (toDate && Number.isNaN(toDate.getTime())) {
+    return res.status(400).json({ error: '終了日に存在しない日付が指定されています' });
+  }
+  if (fromDate && toDate && fromDate.getTime() > toDate.getTime()) {
+    return res.status(400).json({ error: '開始日は終了日より前の日付を指定してください' });
+  }
+
+  const range = { from: fromDate, to: toDate };
 
   const cases = await searchArchivedCases(email, range);
 
