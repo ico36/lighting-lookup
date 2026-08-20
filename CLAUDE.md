@@ -42,6 +42,7 @@ Anthropic API（Claude + web_search ツール） / Stripe / Upstash Redis / Verc
 - サーバーレス関数のコールドスタート対策として、UptimeRobotが `/api/analyze` に5分おきにpingしている。フロント側にも `fetchWithRetry()`（最大2回リトライ）を実装済み。
 - デプロイはGitHub `main` へのpushでVercelが自動実行。CIテストは無い。
 - コミット・push・Vercel本番環境への直接操作（Blobストア作成/削除、Redeployなど）は、都度ユーザーの明示的な許可を得てから行うこと（過去のセッションで確立した運用ルール）。
+- コミットメッセージ末尾に `Co-Authored-By` / `Claude-Session` 行は書かない。モデル名を確定できないまま推測で埋めると事実と異なる記録が残るため（実際に「Claude Sonnet 5」と書かれたが正しくは Opus 5 だった事例あり）。
 
 ## 開発の背景・設計判断の記録
 
