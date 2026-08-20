@@ -3275,6 +3275,11 @@ async function searchArchivedCasesUI(btn) {
   const resultsEl = document.getElementById('archive-search-results');
   if (!resultsEl) return;
 
+  if (fromEl.value && toEl.value && fromEl.value > toEl.value) {
+    resultsEl.innerHTML = `<div class="error-box">⚠️ 開始日は終了日より前の日付を指定してください</div>`;
+    return;
+  }
+
   resultsEl.innerHTML = `<div style="color:var(--text2);font-size:13px;">検索中...</div>`;
 
   const params = new URLSearchParams();
@@ -3317,7 +3322,8 @@ async function searchArchivedCasesUI(btn) {
               <div style="font-size:12px;color:var(--text2);margin-top:2px;">アーカイブ日: ${new Date(c.archivedAt).toLocaleDateString('ja-JP')}</div>
             </div>
           `).join('')
-        : `<div style="color:var(--text2);font-size:13px;">該当する案件はありませんでした</div>`;
+        : `<div style="color:var(--text2);font-size:13px;">該当する案件はありませんでした</div>
+           <div style="color:var(--text2);font-size:13px;margin-top:4px;">保存期間が過ぎて自動的にアーカイブされた案件のみが対象です。完了・失注にしたばかりの案件は、通常の案件一覧に表示されます。</div>`;
     } catch (err) {
       resultsEl.innerHTML = `<div class="error-box">⚠️ ${err.message || '通信エラーが発生しました'}</div>`;
     }
