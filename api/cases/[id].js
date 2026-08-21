@@ -68,6 +68,21 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PATCH') {
+    // 【P3-2とは別件】アーカイブ済み案件への書き込みは全プラン共通で不可にする。
+    // これはプラン制限ではなく、全ユーザーに共通する担保漏れの修正。
+    // 「アーカイブ済みは閲覧専用」はpublic/index.htmlのisArchived判定でボタンを
+    // 出さないことでしか担保されておらず、API を直接叩けばプラン・契約状況を問わず
+    // status変更・カート操作・見積り情報の書き換えが素通りしていた
+    // (lib/cases.jsの各更新関数はarchivedAtを一切参照していない)。アーカイブは
+    // 全プランで永久保持・復元不可の方針のため、書き込みを閉じても「編集し直す」
+    // 手段は元から存在せず(複製して新しい案件を作るのが唯一の経路)実害は無い。
+    if (Number.isFinite(record.archivedAt)) {
+      return res.status(403).json({
+        error: 'CASE_ARCHIVED',
+        message: 'この案件はアーカイブ済みのため編集できません。',
+      });
+    }
+
     const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, customerName } = req.body || {};
 
     try {
