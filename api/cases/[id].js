@@ -33,8 +33,11 @@ import {
   listSearchesForCase,
   listStatusLogs,
 } from '../../lib/cases';
+import { canUseFeature } from '../../lib/featureCampaigns';
+import { featureRestrictedBody } from '../../lib/responses';
 
 const VALID_STATUSES = Object.values(STATUS);
+const FEATURE_KEY = 'archiveAccess';
 
 export default async function handler(req, res) {
   // 完了/失注へのステータス変更時に、そのときのプランの保持期間(limits.retentionDays)を
@@ -50,6 +53,13 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET') {
+    // アーカイブ済み案件の詳細閲覧はプラン制限の対象(工程P3)。判定は record.archivedAt
+    // の有無で行う(public/index.htmlのisArchived判定と同じ基準)。通常案件は
+    // このガードを通らない。
+    if (Number.isFinite(record.archivedAt) && !canUseFeature(FEATURE_KEY, limits.plan)) {
+      return res.status(403).json(featureRestrictedBody({ featureKey: FEATURE_KEY }));
+    }
+
     const [searches, logs] = await Promise.all([
       listSearchesForCase(id),
       listStatusLogs(id),

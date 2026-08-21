@@ -7,8 +7,11 @@
 //   （アーカイブ済み案件の「この内容で新しい案件を作る」用）
 
 import { requireAuthWithPlan } from '../_auth';
-import { createCase, createDraftCase, duplicateCase, listVisibleCases } from '../../lib/cases';
-import { caseLimitExceededBody } from '../../lib/responses';
+import { createCase, createDraftCase, duplicateCase, getCase, listVisibleCases } from '../../lib/cases';
+import { caseLimitExceededBody, featureRestrictedBody } from '../../lib/responses';
+import { canUseFeature } from '../../lib/featureCampaigns';
+
+const FEATURE_KEY = 'archiveAccess';
 
 export default async function handler(req, res) {
   // 案件の保存件数上限(limits.caseLimit)が要るため requireAuthWithPlan() を使う
@@ -34,6 +37,23 @@ export default async function handler(req, res) {
         error: 'INVALID_REQUEST',
         message: 'duplicateFromの形式が正しくありません',
       });
+    }
+
+    // 複製元がアーカイブ済み案件のときだけプラン制限する(工程P3)。存在しない/
+    // 他人の案件はここでは弾かず、duplicateCase() 側の既存のCASE_NOT_FOUND(404)に
+    // 委ねる(このガードで区別すると「そのIDは存在する」情報が漏れるため)。
+    // duplicateCase() も内部で同じ id を getCase() し直すが、複製実行前にプラン判定
+    // したいこと・判定ロジックをAPI層に閉じたいことを優先し、二重取得を許容する。
+    if (req.body?.duplicateFrom) {
+      const source = await getCase(req.body.duplicateFrom);
+      if (
+        source &&
+        source.email === email &&
+        Number.isFinite(source.archivedAt) &&
+        !canUseFeature(FEATURE_KEY, limits.plan)
+      ) {
+        return res.status(403).json(featureRestrictedBody({ featureKey: FEATURE_KEY }));
+      }
     }
 
     try {

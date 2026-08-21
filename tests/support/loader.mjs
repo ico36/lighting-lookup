@@ -27,6 +27,17 @@ const FAKES_DIR = new URL('./fakes/', import.meta.url);
 // から見た `./_auth` は本物のまま通す。
 const CHECKOUT_JS = path.join(REPO_ROOT, 'api', 'checkout.js');
 
+// api/cases/ 配下は1階層深いため、_auth.js への相対指定は `../_auth`。
+// この3ファイル(工程P3-2でテスト対象にするもの)だけをフェイクへ差し替える。
+const CASES_ID_JS = path.join(REPO_ROOT, 'api', 'cases', '[id].js');
+const CASES_INDEX_JS = path.join(REPO_ROOT, 'api', 'cases', 'index.js');
+const CASES_ARCHIVE_JS = path.join(REPO_ROOT, 'api', 'cases', 'archive.js');
+
+// lib/cases.js が読む `./redis`(Upstash Redisクライアント)をフェイクへ。
+// lib/cases.js 自体はフェイクにせず本物を読み込み、その下の永続化層だけを
+// 差し替える(tests/support/fakes/redis.mjs のコメント参照)。
+const LIB_CASES_JS = path.join(REPO_ROOT, 'lib', 'cases.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -41,6 +52,22 @@ export async function resolve(specifier, context, nextResolve) {
     const parentPath = fileURLToPath(context.parentURL);
     if (parentPath === CHECKOUT_JS) {
       return { url: new URL('auth.mjs', FAKES_DIR).href, shortCircuit: true };
+    }
+  }
+
+  // 2b. api/cases/ 配下の `../_auth` も同じフェイクへ(工程P3-2)。
+  if (specifier === '../_auth' && context.parentURL) {
+    const parentPath = fileURLToPath(context.parentURL);
+    if (parentPath === CASES_ID_JS || parentPath === CASES_INDEX_JS || parentPath === CASES_ARCHIVE_JS) {
+      return { url: new URL('auth.mjs', FAKES_DIR).href, shortCircuit: true };
+    }
+  }
+
+  // 2c. lib/cases.js が読む `./redis` をフェイクへ(工程P3-2)。
+  if (specifier === './redis' && context.parentURL) {
+    const parentPath = fileURLToPath(context.parentURL);
+    if (parentPath === LIB_CASES_JS) {
+      return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
 
