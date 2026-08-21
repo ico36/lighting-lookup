@@ -1571,6 +1571,12 @@
     <div id="cases-list-body"></div>
 
     <div class="section-label" style="margin-top:24px;">過去の案件を検索（完了・失注案件）</div>
+    <!-- 工程P3-3時点でこの要素を描画するJSは無い(searchArchivedCasesUI()から
+         data.campaign参照を撤去したため)。アーカイブ検索自体は全プラン開放済みで
+         このバナーの出番は無くなったが、lib/featureCampaigns.jsのキャンペーン機構
+         (endsAt/allowedPlans)自体は将来の期間限定告知(材料屋発注機能等)に転用する
+         想定のため、DOM要素は残してある。次に使うときは、この要素のid/styleを
+         そのまま流用してよい。 -->
     <div id="archive-search-campaign-banner" style="display:none;font-size:12px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6;"></div>
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
       <input type="date" id="archive-search-from" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
@@ -2000,6 +2006,46 @@ function showCaseLimitNotice(limits) {
 function hideCaseLimitNotice() {
   const el = document.getElementById('case-limit-notice');
   if (el) el.style.display = 'none';
+}
+
+// ===== アーカイブ済み案件への書き込み禁止(CASE_ARCHIVED) =====
+//
+// api/cases/[id].js のPATCHは、対象がアーカイブ済みならプランを問わず403
+// CASE_ARCHIVED を返す(feature_restrictedとは別軸。工程P3のプラン制限ではなく
+// 全プラン共通の書き込み禁止)。アップグレードでは解決しないため、
+// renderUpgradeCta() は使わず固定の案内にする。
+//
+// 【文言に複製を含めない理由】ライトはアーカイブ済み案件を複製できない
+// (POST /api/cases のduplicateFromはfeature_restrictedで403になる。CASE_ARCHIVED
+// とは別のエラーコード)。全プランで実行できる操作(他の案件を選ぶ/新しい案件を
+// 作る)だけを案内する。
+//
+// 【cart_case_idを自動解除しない理由】カート対象案件が裏でcronアーカイブされた
+// ケースで最も踏みやすいエラーだが、自動解除は利用者の意図しない状態変化になる。
+// 案内文と「案件一覧を開く」ボタンを添えることで、同じ操作を繰り返す事故を防ぎつつ
+// 状態自体は利用者の操作(案件一覧からの選び直し/新規作成)に委ねる。
+function isCaseArchivedError(data) {
+  return !!data && data.error === 'CASE_ARCHIVED';
+}
+
+// innerHTML で組み立てている。現状は固定文言のみで動的な値を含まないため安全だが、
+// 将来ここに案件名など利用者由来の値を差し込む変更をする場合は、必ず escapeHtml()
+// を通してから連結すること（他の innerHTML 組み立て箇所と同じ注意点）。
+function renderCaseArchivedNotice(errorEl) {
+  if (!errorEl) return;
+  errorEl.innerHTML =
+    'この案件はアーカイブ済みのため編集できません。案件一覧から他の案件を選ぶか、新しい案件を作成してください。' +
+    '<button type="button" class="detail-link-btn" style="margin:6px 0 0;" onclick="openCasesModal()">📋 案件一覧を開く</button>';
+  errorEl.style.display = 'block';
+}
+
+// api/cases/[id].jsのGET・api/cases/index.jsのduplicateFromが返す403
+// feature_restricted(lib/featureCampaigns.jsのプラン制限)の判定。isCaseLimitError()・
+// isCaseArchivedError()と同じ形にする。文字列'feature_restricted'を呼び出し元
+// (openCaseDetail()・duplicateCurrentCase())に直書きすると、片方だけ直す事故が
+// 起きるため、判定は必ずここを経由する。
+function isFeatureRestrictedError(data) {
+  return !!data && data.error === 'feature_restricted';
 }
 
 function closeCaseLimitNotice() {
@@ -2968,6 +3014,23 @@ async function openCaseDetail(caseId) {
         handleSessionExpired(closeCaseDetail);
         return;
       }
+      // アーカイブ済み案件の詳細閲覧はプラン制限の対象(工程P3)。CASE_ARCHIVEDと違い
+      // アップグレードで解決するため、renderUpgradeCta()を使う。モーダル自体は
+      // 開いたまま(クリックに反応がないと壊れて見えるため)、中身だけ制限ビューに
+      // 差し替える。
+      if (isFeatureRestrictedError(data)) {
+        // renderCaseDetail()を通らないため、case-detail-titleは前回開いた案件名の
+        // ままになる(このモーダルはbodyだけ再利用し、titleは別要素で独立している)。
+        // 別案件の名前が制限ビューと一緒に表示され続ける事故を防ぐため、ここで
+        // 明示的に上書きする。
+        document.getElementById('case-detail-title').textContent = '案件詳細（アーカイブ済み）';
+        bodyEl.innerHTML = `
+          <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;">この案件はアーカイブ済みです。上位プランで閲覧できます。</div>
+          <div id="case-detail-upgrade-cta"></div>
+        `;
+        renderUpgradeCta('case-detail-upgrade-cta');
+        return;
+      }
       throw new Error(data.error || '案件詳細の取得に失敗しました');
     }
 
@@ -3168,6 +3231,10 @@ async function saveCaseName(btn, caseId) {
           handleSessionExpired();
           return;
         }
+        if (isCaseArchivedError(data)) {
+          renderCaseArchivedNotice(errorEl);
+          return;
+        }
         throw new Error(data.error || '案件名の保存に失敗しました');
       }
 
@@ -3198,6 +3265,10 @@ async function changeCaseStatus(btn, newStatus) {
       if (!response.ok) {
         if (response.status === 401) {
           handleSessionExpired(closeCaseDetail);
+          return;
+        }
+        if (isCaseArchivedError(data)) {
+          renderCaseArchivedNotice(errorEl);
           return;
         }
         throw new Error(data.message || data.error || 'ステータスの変更に失敗しました');
@@ -3237,6 +3308,10 @@ async function addHistoryToCart(btn, index) {
       if (!response.ok) {
         if (response.status === 401) {
           handleSessionExpired(closeCaseDetail);
+          return;
+        }
+        if (isCaseArchivedError(data)) {
+          renderCaseArchivedNotice(errorEl);
           return;
         }
         throw new Error(data.error || 'カートへの追加に失敗しました');
@@ -3315,7 +3390,6 @@ async function deleteCaseHandler(btn, caseId) {
 async function searchArchivedCasesUI(btn) {
   const fromEl = document.getElementById('archive-search-from');
   const toEl = document.getElementById('archive-search-to');
-  const bannerEl = document.getElementById('archive-search-campaign-banner');
   const resultsEl = document.getElementById('archive-search-results');
   if (!resultsEl) return;
 
@@ -3340,19 +3414,10 @@ async function searchArchivedCasesUI(btn) {
           handleSessionExpired(closeCasesModal);
           return;
         }
-        if (response.status === 403) {
-          bannerEl.style.display = 'none';
-          resultsEl.innerHTML = `<div class="error-box">⚠️ ${data.message || 'この機能は利用できません'}</div>`;
-          return;
-        }
+        // GET /api/cases/archive は工程P3-2で全プラン開放し、プラン制限による
+        // 403を返さなくなった(401以外は実質ここに来ない)。以前あった403分岐
+        // (バナー非表示+専用メッセージ)は撤去した。
         throw new Error(data.error || '検索に失敗しました');
-      }
-
-      if (data.campaign && data.campaign.active) {
-        bannerEl.textContent = '🎁 ' + data.campaign.message;
-        bannerEl.style.display = 'block';
-      } else {
-        bannerEl.style.display = 'none';
       }
 
       const cases = data.cases || [];
@@ -3587,6 +3652,16 @@ async function duplicateCurrentCase(btn, caseId) {
         }
         if (response.status === 404) {
           showError(errorEl, '複製元の案件が見つかりませんでした。');
+          return;
+        }
+        // アーカイブ済み案件の複製はプラン制限の対象(工程P3)。アップグレードで
+        // 解決するため、CASE_ARCHIVEDとは別にrenderUpgradeCta()を出す。
+        if (isFeatureRestrictedError(data)) {
+          errorEl.innerHTML =
+            '<div style="margin-bottom:8px;">この案件の複製は上位プランでご利用いただけます。</div>' +
+            '<div id="case-detail-duplicate-upgrade-cta"></div>';
+          errorEl.style.display = 'block';
+          renderUpgradeCta('case-detail-duplicate-upgrade-cta');
           return;
         }
         throw new Error(data.message || data.error || '複製に失敗しました');
@@ -3868,6 +3943,10 @@ async function addCandidateToCart(btn, index, errorElId) {
           handleSessionExpired();
           return;
         }
+        if (isCaseArchivedError(data)) {
+          renderCaseArchivedNotice(errorEl);
+          return;
+        }
         throw new Error(data.error || 'カートへの追加に失敗しました');
       }
 
@@ -3954,6 +4033,10 @@ async function updateCartItemUI(itemId, field, value) {
         handleSessionExpired();
         return;
       }
+      if (isCaseArchivedError(data)) {
+        renderCaseArchivedNotice(errorEl);
+        return;
+      }
       throw new Error(data.error || '更新に失敗しました');
     }
 
@@ -3981,6 +4064,10 @@ async function removeCartItemUI(itemId) {
     if (!response.ok) {
       if (response.status === 401) {
         handleSessionExpired();
+        return;
+      }
+      if (isCaseArchivedError(data)) {
+        renderCaseArchivedNotice(errorEl);
         return;
       }
       throw new Error(data.error || '削除に失敗しました');
@@ -4083,6 +4170,11 @@ async function executeCartItemReplace(btn, index, errorElId) {
           // どちらのケースも「差し替えの前提が崩れている」点は同じなので区別しない。
           clearReplaceMode();
           showError(errorEl, '差し替え対象の案件または器具が見つかりませんでした。カートを確認してください。');
+          return;
+        }
+        if (isCaseArchivedError(data)) {
+          clearReplaceMode();
+          renderCaseArchivedNotice(errorEl);
           return;
         }
         throw new Error(data.error || '差し替えに失敗しました');
@@ -5134,12 +5226,24 @@ async function saveEstimateMeta(meta) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ estimateMeta: meta })
     });
+
     if (response.ok) {
       const data = await response.json();
       cartCase = data.case;
+      return;
+    }
+
+    // 見積書自体は既に生成・表示済みのため、保存失敗は基本的に静かに無視する
+    // (一時的な通信エラー等でこの保存だけ失敗しても、直前に見せた見積書の内容
+    // 自体は正しいまま)。ただしCASE_ARCHIVEDだけは例外にする。黙って無視すると
+    // 「保存したつもりが実は保存されていない」まま気づかれず、次回この案件を
+    // 開いたときにお客様名等を入力し直す羽目になるため、この場合だけ知らせる。
+    const data = await response.json().catch(() => null);
+    if (isCaseArchivedError(data)) {
+      alert('この案件はアーカイブ済みのため、お客様名・工事場所等の入力内容は保存されませんでした。見積書自体は問題なく生成されています。');
     }
   } catch (err) {
-    // 見積書自体は生成済みのため、保存失敗時は静かに無視する
+    // 通信エラー等。見積書自体は生成済みのため、静かに無視する。
   }
 }
 
