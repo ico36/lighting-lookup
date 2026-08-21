@@ -3001,6 +3001,45 @@ function duplicatedFromWarningText(duplicatedFrom) {
   return `この案件は${datePart}内容をもとに複製されています。器具の廃番や価格改定の可能性があるため、発注・見積提出前に最新情報をご確認ください。`;
 }
 
+// この件数以下なら「カート内容」の<details>を開いた状態で表示する。この機能の目的が
+// 「案件名だけでは判別できないので器具の内容で見分ける」ことなので、詳細を開いた
+// 瞬間に見えている方がよい。件数が多い案件だけ閉じて縦に伸び続けるのを防ぐ。
+const CART_BREAKDOWN_AUTO_OPEN_MAX = 5;
+
+// カート内容カードの内訳(器具ごとの1行)。<details>の中身として呼ばれる想定で、
+// 開閉自体の判断(CART_BREAKDOWN_AUTO_OPEN_MAX)はrenderCaseDetail()側が持つ。
+// 読み取り専用(inputや削除ボタンを持たない)。編集はカートモーダルのrenderCartItems()から
+// 行う運用のため、ここでは表示だけに絞る。
+function renderCartItemsBreakdown(items) {
+  if (!items.length) {
+    return `<div style="font-size:13px;color:var(--text2);padding:8px 0 4px;">まだ器具が入っていません</div>`;
+  }
+  return `
+    <div style="padding-top:4px;">
+      ${items.map(item => {
+        // renderCartItems()(カートモーダル)・zeroPriceItems(見積書プレビュー)と
+        // 同じ判定(!unitPrice || unitPrice <= 0)。単価は addCartItem() 等で必ず
+        // 数値(未入力時は0)に正規化されるためNaNにはならないが、0は「未入力のまま」
+        // であって「0円の器具」ではないため、他画面と同じく金額を出さず注意書きにする。
+        const isZeroPrice = !item.unitPrice || item.unitPrice <= 0;
+        const label = [item.manufacturer, item.name].filter(Boolean).map(escapeHtml).join(' ') || '（名称未設定）';
+        return `
+        <div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          <div style="flex:1;min-width:0;">
+            <div>${label}</div>
+            <div style="color:var(--text2);font-size:12px;margin-top:1px;">${escapeHtml(item.modelNumber)}</div>
+          </div>
+          <div style="text-align:right;white-space:nowrap;color:var(--text2);">
+            <div>${item.quantity}台</div>
+            <div style="margin-top:1px;${isZeroPrice ? 'color:var(--error);' : ''}">${isZeroPrice ? '未入力' : yen(item.unitPrice * item.quantity)}</div>
+          </div>
+        </div>
+      `;
+      }).join('')}
+    </div>
+  `;
+}
+
 function renderCaseDetail(c, searches) {
   currentCaseDetailData = c;
   document.getElementById('case-detail-title').textContent = c.customerName || '（無題の案件）';
@@ -3077,10 +3116,15 @@ function renderCaseDetail(c, searches) {
     </div>`}
 
     <div class="input-card">
-      <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>カート内容</span>
-        <span class="field-val">${cartItems.length}点 / ${yen(cartSubtotal)}</span>
-      </div>
+      <details${cartItems.length > CART_BREAKDOWN_AUTO_OPEN_MAX ? '' : ' open'}>
+        <summary style="cursor:pointer;">
+          <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
+            <span>カート内容</span>
+            <span class="field-val">${cartItems.length}点 / ${yen(cartSubtotal)}</span>
+          </div>
+        </summary>
+        ${renderCartItemsBreakdown(cartItems)}
+      </details>
       ${isArchived
         ? `<button class="btn-primary" style="width:100%;margin-top:10px;" onclick="previewArchivedEstimate('${c.id}')">📄 見積書を確認する</button>`
         : `<button class="btn-primary" style="width:100%;margin-top:10px;" onclick="openEstimateFromCaseDetail('${c.id}')">📄 見積書を作成/編集</button>`}
