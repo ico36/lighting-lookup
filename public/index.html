@@ -4057,8 +4057,40 @@ async function openCartModal() {
   await refreshCartCase();
 }
 
+// モーダルを閉じるタイミングで、見積書フォームの器具明細(#estimate-cart-items・
+// 材料費小計)と合計プレビューを最新化する。モーダル内でのカート変更(追加・削除・
+// 差し替え)を行う各関数(addCandidateToCart()・updateCartItemUI()・
+// removeCartItemUI()・executeCartItemReplace())はcartCaseを都度data.caseで
+// 上書き済みだが、見積書フォーム側のDOM(renderEstimateCartItems()の描画先)は
+// renderCartItems()(モーダル側の描画)とは別関数・別要素なので、そちらは
+// 呼ばない限り古いままになる。
+//
+// 【4箇所への個別追記ではなくここに集約する理由】
+// 1. .modal-overlay(CSS)はposition:fixed; inset:0;でビューポート全体を覆う。
+//    モーダルを開いている間、背後の見積書フォームは実質見えないため、器具の
+//    増減のたびに背後で即時再描画しても利用者には見えず、無駄な描画コストに
+//    しかならない。閉じる瞬間に1回反映すれば十分。
+// 2. 4つの変更関数それぞれに同じ2行を複製すると、将来カート変更の関数が
+//    増えたときに追記漏れが起きうる(判定・処理を1箇所に集約して分散させない
+//    という、このリポジトリの他の箇所とも共通する考え方)。
+// 3. ヘッダーのカートボタン・「カートを編集」ボタンのどちらから開いても、
+//    閉じる関数はこのcloseCartModal()1つに共通しているため、経路を問わず
+//    自動的に反映される。
+//
+// 【showEstimateForm()を丸ごと呼ばない理由】showEstimateForm()は顧客情報欄
+// (client-name等)をcartCase.estimateMeta(サーバー保存済みの値)で上書きする
+// (工程「見積書画面のカート編集」不具合修正時に特定した仕組みと同じ)。生成前の
+// 入力はサーバーに保存されないため、丸ごと呼ぶと未保存の入力が消える。ここでは
+// 明細と合計プレビューだけを再描画し、顧客情報欄には一切触れない。
+//
+// #estimate-cart-items・price-labor/price-visit等はestimate-form-area直下の
+// 静的マークアップで、display:noneでもgetElementById/innerHTML/textContentの
+// 書き込みは問題なく成功する。見積書フォームを開いていない状態でモーダルを
+// 閉じても、単に見えない場所を再描画するだけで無害。
 function closeCartModal() {
   document.getElementById('cart-overlay').classList.remove('open');
+  renderEstimateCartItems();
+  updateEstimatePreview();
 }
 
 function renderCartItems() {
