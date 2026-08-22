@@ -5255,6 +5255,19 @@ async function generateEstimateSheet(btn) {
     return;
   }
 
+  // 宛名(見積書に載るお客様の名前)の必須チェック。単価¥0のconfirm()より前に置く
+  // (先にconfirmを通過させてから宛名不足に気づかせるのは二度手間になるため、
+  // 必須項目のチェックを先に済ませる)。以前はここで空文字を'お客様'にフォールバック
+  // していたが、保存値・コピー用テキスト・見積書HTMLの3経路で「フォールバック済みか
+  // 生の値か」が食い違う不整合の原因になっていた。空欄は生成そのものを止めて
+  // 入力を促す方針にする。
+  const clientNameEl = document.getElementById('client-name');
+  if (!clientNameEl.value.trim()) {
+    showError(errorEl, '宛名が空欄です。入力してください。');
+    clientNameEl.focus();
+    return;
+  }
+
   const zeroPriceItems = items.filter(item => !item.unitPrice || item.unitPrice <= 0);
   if (zeroPriceItems.length > 0) {
     const names = zeroPriceItems
@@ -5268,7 +5281,8 @@ async function generateEstimateSheet(btn) {
 
   await withButtonGuard(btn, async () => {
 
-  const clientName = document.getElementById('client-name').value.trim() || 'お客様';
+  // 空欄は上のチェックで既に弾いているため、この時点で必ず非空
+  const clientName = clientNameEl.value.trim();
   const clientSite = document.getElementById('client-site').value.trim();
   const bizName = companyInfo?.name || '（屋号未設定）';
   const bizTel = companyInfo?.tel || '';
