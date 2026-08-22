@@ -1314,6 +1314,14 @@
     <div id="estimate-form-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:14px;"></div>
     <div id="duplicated-from-warning" class="warning-note" style="display:none;"></div>
     <div class="input-card">
+      <div class="section-label">案件名</div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="estimate-case-name-input" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" style="margin-bottom:0;flex:1;" />
+        <button class="btn-primary" onclick="saveEstimateCaseName(this)">保存</button>
+      </div>
+      <div id="estimate-case-name-msg" style="font-size:12px;margin-top:8px;"></div>
+    </div>
+    <div class="input-card">
       <div class="section-label">お客様情報</div>
       <div class="company-info-grid">
         <input type="text" id="client-name" placeholder="お客様名（例：山田様）" />
@@ -5053,6 +5061,18 @@ function showEstimateForm() {
     warningEl.style.display = 'none';
   }
 
+  // 案件名(customerName)も他の欄と同じくcartCaseから書き戻す。
+  // 【client-name等と同じ制約】この関数はopenEstimateFromCaseDetail()・
+  // openEstimateFromCart()から呼ばれ、どちらも「フォームを開き直す」経路のため、
+  // 案件名を編集して保存ボタンを押す前に、カートモーダル内の「見積書を作成」
+  // (openEstimateFromCart())やヘッダーの案件一覧から同じ案件を開き直す
+  // (openEstimateFromCaseDetail())を経由すると、未保存の入力がここで
+  // cartCase.customerNameに上書きされる。これはclient-name・client-site・
+  // biz-noteが元から持っている制約と同じで、今回新たに導入したものではない
+  // (closeCartModal()がこの関数を呼ばずrenderEstimateCartItems()/
+  // updateEstimatePreview()だけを呼ぶのは、まさにこの上書きを避けるため)。
+  document.getElementById('estimate-case-name-input').value = (cartCase && cartCase.customerName) || '';
+
   // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考を引き継ぐ
   const meta = (cartCase && cartCase.estimateMeta) || {};
   document.getElementById('client-name').value = meta.clientName || '';
@@ -5065,6 +5085,80 @@ function showEstimateForm() {
   document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 見積書画面から案件名(customerName)を保存する。案件詳細のsaveCaseName()と
+// 役割は同じ(PATCH { customerName })だが、対象の入力欄・caseIdの取得元が違う
+// ため別関数にしている(case-name-inputは案件詳細のカードにしか存在せず、
+// この画面からはcurrentCartCaseId経由で対象を決める)。
+//
+// 【フィードバックの出し分け】空欄チェック・成功・通信エラー等の「この欄の
+// 保存操作としてよく起きる結果」はestimate-case-name-msgに出す。文言・色の
+// 付け方(var(--error)/var(--success))はattachCurrentSearchToCase()の
+// case-attach-msg(同じ「案件名を入力してください」チェックと「保存しました」
+// 成功表示を持つ既存の兄弟パターン)にそのまま揃えている。
+// 一方CASE_ARCHIVEDだけはestimate-form-error(画面上部の大きい通知)に出す。
+// これは案件全体が編集不能になったという、この欄だけの問題ではない重大な
+// 状態変化であり、saveCaseName()も同じ理由でこちらを使っているため揃えた。
+//
+// 保存後にcartCaseとcurrentCaseDetailData(開いていれば)の両方を更新するのは
+// saveCaseName()と同じ理由: 他の画面に古い案件名が残らないようにするため。
+//
+// isCaseArchivedError()のガードは、この画面がアーカイブ済み案件を対象にする
+// 経路が無い(previewArchivedEstimate()は別の閲覧専用パスで、estimate-form-area
+// を開かない)ため現状は到達しない。それでもsaveCaseName()と同じ理由(工程P4の
+// 方針: 到達不能を理由に生のエラーコードを画面に出す状態を作らない)でガードを残す。
+async function saveEstimateCaseName(btn) {
+  const input = document.getElementById('estimate-case-name-input');
+  const newName = input.value.trim();
+  const msgEl = document.getElementById('estimate-case-name-msg');
+  const errorEl = document.getElementById('estimate-form-error');
+  hideError(errorEl);
+  msgEl.textContent = '';
+
+  // 空欄のまま保存すると案件名が空になり、案件一覧で識別できなくなる。
+  // attachCurrentSearchToCase()の空欄チェックと同じ文言・同じ扱い(D2の宛名
+  // チェックと同様、フォーカスを空欄自体に戻す)。
+  if (!newName) {
+    msgEl.textContent = '案件名を入力してください';
+    msgEl.style.color = 'var(--error)';
+    input.focus();
+    return;
+  }
+  if (!currentCartCaseId) return;
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerName: newName })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          return;
+        }
+        if (isCaseArchivedError(data)) {
+          renderCaseArchivedNotice(errorEl);
+          return;
+        }
+        throw new Error(data.error || '案件名の保存に失敗しました');
+      }
+
+      cartCase = data.case;
+      if (currentCaseDetailData && currentCaseDetailData.id === currentCartCaseId) {
+        currentCaseDetailData = data.case;
+      }
+      msgEl.textContent = '保存しました';
+      msgEl.style.color = 'var(--success)';
+    } catch (err) {
+      msgEl.textContent = err.message || '通信エラーが発生しました';
+      msgEl.style.color = 'var(--error)';
+    }
+  }, '保存中...');
 }
 
 // 見積書を閉じてフォームに戻る。generateEstimateSheet() 末尾の表示切り替えの鏡写し。
