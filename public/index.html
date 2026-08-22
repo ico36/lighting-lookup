@@ -1333,7 +1333,7 @@
     <div class="input-card">
       <div class="section-label" style="display:flex;justify-content:space-between;align-items:center;">
         <span>器具明細（カートの内容）</span>
-        <button type="button" class="detail-link-btn" style="margin:0;" onclick="closeEstimateForm(); openCartModal();">カートを編集 →</button>
+        <button type="button" class="detail-link-btn" style="margin:0;" onclick="openCartModal();">カートを編集 →</button>
       </div>
       <div id="estimate-cart-items"></div>
       <div class="estimate-form-row" style="margin-top:4px;">
@@ -4293,10 +4293,6 @@ async function openEstimateFromCart() {
   hideError(document.getElementById('cart-error'));
   closeCartModal();
   showEstimateForm();
-}
-
-function closeEstimateForm() {
-  document.getElementById('estimate-form-area').style.display = 'none';
 }
 
 function renderEstimateCartItems() {
