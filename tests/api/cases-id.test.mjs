@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import handler from '../../api/cases/[id].js';
 import { fakeReq, fakeRes } from '../support/fakeHttp.mjs';
 import { __setAuth, __reset as __resetAuth } from '../support/fakes/auth.mjs';
-import { __resetFakeRedis } from '../support/fakes/redis.mjs';
+import { __resetFakeRedis, redis, redisKey } from '../support/fakes/redis.mjs';
 import { createCase, updateCaseStatus, archiveCase, STATUS } from '../../lib/cases.js';
 
 const EMAIL = 'id-tester@example.com';
@@ -150,4 +150,100 @@ test('アーカイブ済み案件へのPATCH禁止はプランに関わらず効
   await handler(proReq, proRes);
   assert.equal(proRes.statusCode, 403);
   assert.equal(proRes.body.error, 'CASE_ARCHIVED');
+});
+
+// ----- 手動アーカイブ(工程P4-1。{ archive: true }) -----
+
+async function createCompletedCase(customerName) {
+  const created = await createCase(EMAIL, { customerName }, { caseLimit: 5 });
+  return updateCaseStatus(created.id, STATUS.COMPLETED, 'user', { retentionDays: 30 });
+}
+
+async function createLostCase(customerName) {
+  const created = await createCase(EMAIL, { customerName }, { caseLimit: 5 });
+  return updateCaseStatus(created.id, STATUS.LOST, 'user', { retentionDays: 30 });
+}
+
+test('PATCH { archive: true }: 完了の案件 → 200、archivedAtがセットされ:archivedへ移動する', async () => {
+  const completed = await createCompletedCase('完了アーカイブ様');
+  setPlan('light');
+
+  const req = fakeReq({ archive: true }, { method: 'PATCH', query: { id: completed.id } });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(Number.isFinite(res.body.case.archivedAt), 'archivedAtが数値でセットされていない');
+
+  // lib/cases.jsのarchiveCase()がcases:{email}:archived ZSETへ実際にzaddしているかを
+  // フェイクRedis経由で直接確認する(レスポンスのarchivedAtフィールドだけでは、
+  // 案件本体は書き換わったがZSETへの移動が漏れているケースを見逃すため)。
+  const archivedZsetSize = await redis.zcard(redisKey('cases', EMAIL, 'archived'));
+  assert.equal(archivedZsetSize, 1, 'cases:{email}:archived ZSETへ移動していない');
+});
+
+test('PATCH { archive: true }: 失注・キャンセルの案件 → 200、archivedAtがセットされ:archivedへ移動する', async () => {
+  const lost = await createLostCase('失注アーカイブ様');
+  setPlan('light');
+
+  const req = fakeReq({ archive: true }, { method: 'PATCH', query: { id: lost.id } });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(Number.isFinite(res.body.case.archivedAt), 'archivedAtが数値でセットされていない');
+
+  const archivedZsetSize = await redis.zcard(redisKey('cases', EMAIL, 'archived'));
+  assert.equal(archivedZsetSize, 1, 'cases:{email}:archived ZSETへ移動していない');
+});
+
+test('PATCH { archive: true }: 完了・失注以外(承認待ち) → 403 CASE_NOT_ARCHIVABLE', async () => {
+  const normal = await createNormalCase('承認待ち様'); // createCase()のデフォルトは承認待ち
+  setPlan('light');
+
+  const req = fakeReq({ archive: true }, { method: 'PATCH', query: { id: normal.id } });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.error, 'CASE_NOT_ARCHIVABLE');
+  assert.equal(typeof res.body.message, 'string');
+  assert.ok(res.body.message.length > 0, 'messageが空(フロントでエラーコードの生文字列が見える経路になる)');
+});
+
+// 【新しいチェックを足していないことの固定】archive分岐自体には二重アーカイブの
+// チェックを追加していない(判定を2箇所に分散させないため)。この403は、PATCH共通の
+// 既存ガード(record.archivedAtの有無を見るCASE_ARCHIVED、archive分岐より前で
+// 効く)がそのまま拾った結果であることを、body: { archive: true }で固定する。
+test('PATCH { archive: true }: 既にアーカイブ済み → 403 CASE_ARCHIVED(新しいチェックを追加していないことの固定)', async () => {
+  const archived = await createArchivedCase('二重アーカイブ様');
+  setPlan('light');
+
+  const req = fakeReq({ archive: true }, { method: 'PATCH', query: { id: archived.id } });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.error, 'CASE_ARCHIVED');
+});
+
+// 【分岐順序の固定】archive分岐はaction分岐群の最後(customerNameの後・400
+// フォールバックの前)に置いている。status等と同時に送られた場合、先行するif群が
+// 先勝ちして即returnするため、archive分岐には到達しない。ここではstatusと同時に
+// archive: trueを送り、statusの変更だけが実行されて(承認済みへ変わる)アーカイブは
+// 実行されない(archivedAtがnullのまま)ことを確認する。
+test('PATCH { status, archive } 同時送信 → statusが勝ち、アーカイブは実行されない(archive分岐を最後に置いた設計の固定)', async () => {
+  const completed = await createCompletedCase('同時送信様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { status: STATUS.APPROVED, archive: true },
+    { method: 'PATCH', query: { id: completed.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.status, STATUS.APPROVED);
+  assert.equal(res.body.case.archivedAt, null, 'archive分岐が実行されてしまっている(statusより先に評価された)');
 });
