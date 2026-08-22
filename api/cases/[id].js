@@ -12,6 +12,10 @@
 //                                        customerName・memo・cartItems・estimateMetaを一括復元
 //                                        （ステータスは変更しない）
 //   { customerName }                  ... 案件名（案件一覧・案件詳細の表示名）を変更
+//   { archive: true }                 ... 手動アーカイブ。status が完了/失注・キャンセルの
+//                                        案件のみ可（それ以外は403 CASE_NOT_ARCHIVABLE）。
+//                                        復元は実装しない。自動アーカイブ(cronによる
+//                                        保持期間経過)と同じ archiveCase() を呼ぶ
 // DELETE /api/cases/{id} ... 案件を完全に削除する（archiveとは異なり物理削除。取り消し不可）
 //
 // 発注ボタンなど承認済み以降でしか出せない操作は、フロント側で
@@ -20,6 +24,7 @@
 import { requireAuthWithPlan } from '../_auth';
 import {
   STATUS,
+  TERMINAL_STATUSES,
   getCase,
   updateCaseStatus,
   addCartItem,
@@ -30,6 +35,7 @@ import {
   restoreCaseFromImport,
   updateCaseName,
   deleteCase,
+  archiveCase,
   listSearchesForCase,
   listStatusLogs,
 } from '../../lib/cases';
@@ -83,7 +89,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, customerName } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, customerName, archive } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -145,6 +151,23 @@ export default async function handler(req, res) {
 
       if (customerName !== undefined) {
         const updated = await updateCaseName(id, customerName);
+        return res.status(200).json({ case: updated });
+      }
+
+      // 手動アーカイブ。最後に置くのは、status等と同時に送られた場合にこの分岐が
+      // 他の更新を食ってしまわないため(この分岐より前のif群がすべて先勝ちする)。
+      // 「既にアーカイブ済みの案件への手動アーカイブ」は、この分岐に来る前に
+      // このPATCHブロック冒頭にある CASE_ARCHIVED ガード(全action共通、record.archivedAt
+      // の有無を見て403を返す)で弾かれるため、ここでは二重アーカイブのチェックを
+      // しない(判定を2箇所に分散させない)。
+      if (archive) {
+        if (!TERMINAL_STATUSES.includes(record.status)) {
+          return res.status(403).json({
+            error: 'CASE_NOT_ARCHIVABLE',
+            message: 'アーカイブできるのは「完了」または「失注・キャンセル」の案件のみです。',
+          });
+        }
+        const updated = await archiveCase(id);
         return res.status(200).json({ case: updated });
       }
 
