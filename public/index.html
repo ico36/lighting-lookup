@@ -1560,7 +1560,7 @@
     <div style="font-size:12px;color:var(--text2);margin-top:6px;margin-bottom:14px;">「見積もりを保存」で保存したファイルを選んでください</div>
     <div id="import-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:14px;"></div>
     <div id="new-case-form" style="display:none;margin-bottom:16px;padding:14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
-      <input type="text" id="new-case-customer" class="stacked-input" placeholder="お客様名（例：山田様）" />
+      <input type="text" id="new-case-customer" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" />
       <input type="text" id="new-case-memo" class="stacked-input" placeholder="メモ（任意）" style="margin-bottom:0;" />
       <div id="new-case-error" style="display:none;color:var(--error);font-size:13px;margin-top:8px;"></div>
       <div style="display:flex;gap:8px;margin-top:12px;">
@@ -3180,7 +3180,7 @@ function renderCaseDetail(c, searches) {
     <div class="input-card">
       <div class="section-label">案件名</div>
       <div style="display:flex;gap:8px;">
-        <input type="text" id="case-name-input" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;flex:1;" />
+        <input type="text" id="case-name-input" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" style="margin-bottom:0;flex:1;" />
         <button class="btn-primary" onclick="saveCaseName(this, '${c.id}')">保存</button>
       </div>
     </div>`}
@@ -3583,7 +3583,7 @@ async function attachCurrentSearchToCase(btn) {
         const nameInput = document.getElementById('case-attach-new-name');
         const name = nameInput.value.trim();
         if (!name) {
-          msgEl.textContent = 'お客様名を入力してください';
+          msgEl.textContent = '案件名を入力してください';
           msgEl.style.color = 'var(--error)';
           return;
         }
@@ -4879,7 +4879,7 @@ function renderResult(r) {
       <div class="result-body">
         <select id="case-attach-select" onchange="onCaseAttachSelectChange()" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;font-family:inherit;"></select>
         <div id="case-attach-new-wrap" style="display:none;margin-top:10px;">
-          <input type="text" id="case-attach-new-name" class="stacked-input" placeholder="お客様名（例：山田様）" style="margin-bottom:0;" />
+          <input type="text" id="case-attach-new-name" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" style="margin-bottom:0;" />
         </div>
         <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="attachCurrentSearchToCase(this)">この案件に保存</button>
         <div id="case-attach-msg" style="font-size:12px;margin-top:8px;"></div>
