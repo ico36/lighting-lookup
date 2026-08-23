@@ -11,6 +11,12 @@
 //   { restoreImport: {...} }          ... ローカル保存したJSONファイルの内容で
 //                                        customerName・memo・cartItems・estimateMetaを一括復元
 //                                        （ステータスは変更しない）
+//   { estimateFormSave: { customerName?, estimateMeta? } }
+//                                      ... 見積書フォーム画面の「保存」ボタン用。案件名と
+//                                        見積書の付随情報を1回のリクエストでまとめて更新する
+//                                        （どちらか一方の省略可）。customerName・estimateMeta
+//                                        を別々のリクエストで送ると、並列実行時に後勝ちで
+//                                        片方の更新が消える恐れがあるため、まとめて1回で確定させる
 //   { customerName }                  ... 案件名（案件一覧・案件詳細の表示名）を変更
 //   { archive: true }                 ... 手動アーカイブ。status が完了/失注・キャンセルの
 //                                        案件のみ可（それ以外は403 CASE_NOT_ARCHIVABLE）。
@@ -34,6 +40,7 @@ import {
   updateEstimateMeta,
   restoreCaseFromImport,
   updateCaseName,
+  updateCaseNameAndEstimateMeta,
   deleteCase,
   archiveCase,
   listSearchesForCase,
@@ -89,7 +96,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, customerName, archive } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, estimateFormSave, customerName, archive } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -146,6 +153,26 @@ export default async function handler(req, res) {
 
       if (restoreImport) {
         const updated = await restoreCaseFromImport(id, restoreImport);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (estimateFormSave) {
+        const { customerName: formCustomerName, estimateMeta: formEstimateMeta } = estimateFormSave;
+        // 両方省略はクライアント側の不具合の兆候(何も更新するもの無しでこの
+        // アクションを送る意味が無い)なので、他の分岐(cartUpdate等のitemId必須
+        // チェック)と同じく400で弾く。updateCaseNameAndEstimateMeta()自体は
+        // 両方省略でも壊れない(recordを素通りさせるだけ)が、ここでは呼び出し側の
+        // 誤りに気づけるようにする。
+        if (formCustomerName === undefined && formEstimateMeta === undefined) {
+          return res.status(400).json({
+            error: 'INVALID_REQUEST',
+            message: 'customerNameとestimateMetaのどちらも指定されていません',
+          });
+        }
+        const updated = await updateCaseNameAndEstimateMeta(id, {
+          customerName: formCustomerName,
+          estimateMeta: formEstimateMeta,
+        });
         return res.status(200).json({ case: updated });
       }
 

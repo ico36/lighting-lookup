@@ -247,3 +247,130 @@ test('PATCH { status, archive } 同時送信 → statusが勝ち、アーカイ�
   assert.equal(res.body.case.status, STATUS.APPROVED);
   assert.equal(res.body.case.archivedAt, null, 'archive分岐が実行されてしまっている(statusより先に評価された)');
 });
+
+// ----- estimateFormSave(工程E1。見積書フォーム画面の「保存」ボタン用) -----
+// customerNameとestimateMetaを1回のPATCHでまとめて更新する複合アクション。
+// updateCaseName()・updateEstimateMeta()を別々のリクエストで直列に送ると安全だが、
+// 並列だと後勝ちで片方の更新が消えるレースコンディションが起きるため、まとめて
+// 1回のread-modify-writeで確定させる設計にした(lib/cases.jsのコメント参照)。
+
+test('PATCH { estimateFormSave: { customerName, estimateMeta } }: 両方同時に更新される', async () => {
+  const created = await createNormalCase('更新前様');
+  setPlan('light');
+
+  const req = fakeReq(
+    {
+      estimateFormSave: {
+        customerName: '更新後様',
+        estimateMeta: {
+          clientName: 'お客様太郎',
+          clientSite: '2階リビング',
+          laborPrice: 5000,
+          visitPrice: 1000,
+          bizNote: '備考テキスト',
+        },
+      },
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.customerName, '更新後様');
+  assert.deepEqual(res.body.case.estimateMeta, {
+    clientName: 'お客様太郎',
+    clientSite: '2階リビング',
+    laborPrice: 5000,
+    visitPrice: 1000,
+    bizNote: '備考テキスト',
+  });
+});
+
+test('PATCH { estimateFormSave: { customerName } }: customerNameのみ指定時はestimateMetaを変更しない', async () => {
+  const created = await createNormalCase('元の名前様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { estimateFormSave: { customerName: '名前だけ変更様' } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.customerName, '名前だけ変更様');
+  assert.deepEqual(
+    res.body.case.estimateMeta,
+    { clientName: '', clientSite: '', laborPrice: 0, visitPrice: 0, bizNote: '' },
+    'estimateMetaを指定していないのに変化している'
+  );
+});
+
+test('PATCH { estimateFormSave: { estimateMeta } }: estimateMetaのみ指定時はcustomerNameを変更しない', async () => {
+  const created = await createNormalCase('名前は変えない様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { estimateFormSave: { estimateMeta: { clientName: 'お客様花子' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.customerName, '名前は変えない様', 'customerNameを指定していないのに変化している');
+  assert.equal(res.body.case.estimateMeta.clientName, 'お客様花子');
+});
+
+test('PATCH { estimateFormSave: {} }: customerName・estimateMetaどちらも無い場合は400 INVALID_REQUEST', async () => {
+  const created = await createNormalCase('空リクエスト様');
+  setPlan('light');
+
+  const req = fakeReq({ estimateFormSave: {} }, { method: 'PATCH', query: { id: created.id } });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error, 'INVALID_REQUEST');
+});
+
+test('アーカイブ済み案件にPATCH { estimateFormSave: {...} } → 403 CASE_ARCHIVED(既存ガードがこの分岐にも効く)', async () => {
+  const archived = await createArchivedCase('保存禁止様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { estimateFormSave: { customerName: '書き換えを試みる' } },
+    { method: 'PATCH', query: { id: archived.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.error, 'CASE_ARCHIVED');
+});
+
+// 【分岐順序の固定】estimateFormSave分岐はrestoreImportの直後・customerNameの直前に
+// 置いている。customerNameと同時に送られた場合、先行するestimateFormSaveが先勝ちして
+// 即returnするため、customerName単体の分岐には到達しない。
+test('PATCH { estimateFormSave, customerName } 同時送信 → estimateFormSaveが勝つ(customerNameより前に置いた設計の固定)', async () => {
+  const created = await createNormalCase('同時送信前様');
+  setPlan('light');
+
+  const req = fakeReq(
+    {
+      estimateFormSave: { customerName: 'estimateFormSave側の名前' },
+      customerName: 'customerName側の名前',
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    res.body.case.customerName,
+    'estimateFormSave側の名前',
+    'customerName単体分岐に流れてしまっている(順序が逆)'
+  );
+});
