@@ -3050,15 +3050,21 @@ function renderCasesList() {
   // (アーカイブ済み案件がカート対象になる経路が両方向とも無く、常に成立しない判定に
   // なるため)。絵文字はヘッダーの🛒カートボタン・案件詳細の「🛒 この案件をカートの
   // 対象にする」ボタンと表記を統一している。
-  bodyEl.innerHTML = pageItems.map(c => `
-    <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
+  bodyEl.innerHTML = pageItems.map(c => {
+    // 条件を1回だけ評価して枠線・背景・絵文字の3箇所で使い回す(CSSクラスに切り出さない
+    // のは、行のスタイルがインラインで書かれており優先度の都合で上書きが効かず、
+    // クラス化するには行全体のスタイル管理方式を変える必要があるため)。
+    const isCartTarget = c.id === currentCartCaseId;
+    return `
+    <div style="display:flex;justify-content:space-between;align-items:center;background:${isCartTarget ? 'rgba(79,142,247,0.15)' : 'var(--bg)'};border:1px solid ${isCartTarget ? 'var(--accent)' : 'var(--border)'};border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
       <div>
-        <div style="font-weight:600;">${c.id === currentCartCaseId ? '🛒 ' : ''}${escapeHtml(c.customerName) || '（無題の案件）'}</div>
+        <div style="font-weight:600;">${isCartTarget ? '🛒 ' : ''}${escapeHtml(c.customerName) || '（無題の案件）'}</div>
         <div style="font-size:12px;color:var(--text2);margin-top:2px;">${new Date(c.createdAt).toLocaleDateString('ja-JP')}</div>
       </div>
       <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   renderCasesPager(totalPages);
 }
