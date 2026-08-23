@@ -3046,10 +3046,14 @@ function renderCasesList() {
   const startIdx = (casesCurrentPage - 1) * CASES_PER_PAGE;
   const pageItems = filtered.slice(startIdx, startIdx + CASES_PER_PAGE);
 
+  // P5-3: カート対象の案件を一覧で見分けるための印。アーカイブ検索結果側には出さない
+  // (アーカイブ済み案件がカート対象になる経路が両方向とも無く、常に成立しない判定に
+  // なるため)。絵文字はヘッダーの🛒カートボタン・案件詳細の「🛒 この案件をカートの
+  // 対象にする」ボタンと表記を統一している。
   bodyEl.innerHTML = pageItems.map(c => `
     <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
       <div>
-        <div style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</div>
+        <div style="font-weight:600;">${c.id === currentCartCaseId ? '🛒 ' : ''}${escapeHtml(c.customerName) || '（無題の案件）'}</div>
         <div style="font-size:12px;color:var(--text2);margin-top:2px;">${new Date(c.createdAt).toLocaleDateString('ja-JP')}</div>
       </div>
       <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
