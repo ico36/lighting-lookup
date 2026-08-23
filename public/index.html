@@ -1320,11 +1320,7 @@
     <div id="duplicated-from-warning" class="warning-note" style="display:none;"></div>
     <div class="input-card">
       <div class="section-label">案件名</div>
-      <div style="display:flex;gap:8px;">
-        <input type="text" id="estimate-case-name-input" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" style="margin-bottom:0;flex:1;" />
-        <button class="btn-primary" onclick="saveEstimateCaseName(this)">保存</button>
-      </div>
-      <div id="estimate-case-name-msg" style="font-size:12px;margin-top:8px;"></div>
+      <input type="text" id="estimate-case-name-input" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" style="margin-bottom:0;" />
     </div>
     <div class="input-card">
       <div class="section-label">お客様情報</div>
@@ -1353,6 +1349,16 @@
         <span class="field-key">材料費小計</span>
         <span class="field-val" id="estimate-material-subtotal" style="text-align:right;flex:1;">¥0</span>
       </div>
+    </div>
+
+    <!-- 残課題⑥(工程E2): フォーム全体(案件名・お客様情報・自社情報の備考・金額入力)を
+         まとめて保存するボタン。「金額入力」カードの外に独立して置くのは、このカードが
+         「金額入力に関する操作」という意味に閉じており、画面全体の保存という別の関心事を
+         混ぜ込むと不自然になるため。「見積書を生成」より前(上)に置くことで、保存してから
+         生成する・生成だけでも保存される、という順序性を示す。 -->
+    <div class="input-card">
+      <button class="btn-primary" style="width:100%;" onclick="saveEstimateForm(this)">入力内容を保存</button>
+      <div id="estimate-form-save-msg" style="font-size:12px;margin-top:8px;"></div>
     </div>
 
     <div class="input-card">
@@ -5250,74 +5256,99 @@ function showEstimateForm() {
   estimateFormCaseId = currentCartCaseId;
 }
 
-// 見積書画面から案件名(customerName)を保存する。案件詳細のsaveCaseName()と
-// 役割は同じ(PATCH { customerName })だが、対象の入力欄・caseIdの取得元が違う
-// ため別関数にしている(case-name-inputは案件詳細のカードにしか存在せず、
-// この画面からはcurrentCartCaseId経由で対象を決める)。
+// 見積書フォーム画面(案件名・お客様情報・自社情報の備考・金額入力)をまとめて保存する
+// 核処理。UIには一切触れない(btn・msgElを持たない)。saveEstimateForm()(「入力内容を
+// 保存」ボタン)とgenerateEstimateSheet()(「見積書を生成」)の両方から呼ばれ、
+// この2つはエラー時の見せ方が異なる(前者は明示的にmsgElへ表示、後者は基本的に
+// 静かに無視しCASE_ARCHIVEDだけalert)ため、その判断材料をerr.codeに載せて呼び出し側
+// に委ねる(ensureCartCase()がerr.code = 'case_limit_exceeded'を使う既存の慣習に揃える)。
+// generateEstimateSheet()は既に自前のwithButtonGuard(btn, ...)で全体を包んでいるため、
+// ここでsaveEstimateForm(btn)を直接呼ぶと、渡したbtnが既にdisabledな状態で
+// withButtonGuard()の「if (btn && btn.disabled) return;」に引っかかり、保存処理が
+// 静かにスキップされてしまう。そのためこの核処理を独立させ、どちらの呼び出し元も
+// 自分のwithButtonGuardの中からこちらだけを呼ぶ形にしている。
 //
-// 【フィードバックの出し分け】空欄チェック・成功・通信エラー等の「この欄の
-// 保存操作としてよく起きる結果」はestimate-case-name-msgに出す。文言・色の
-// 付け方(var(--error)/var(--success))はattachCurrentSearchToCase()の
-// case-attach-msg(同じ「案件名を入力してください」チェックと「保存しました」
-// 成功表示を持つ既存の兄弟パターン)にそのまま揃えている。
-// 一方CASE_ARCHIVEDだけはestimate-form-error(画面上部の大きい通知)に出す。
-// これは案件全体が編集不能になったという、この欄だけの問題ではない重大な
-// 状態変化であり、saveCaseName()も同じ理由でこちらを使っているため揃えた。
+// 【!currentCartCaseIdをexecuteCartItemReplace()と同じくthrowで扱う理由】ここで
+// 黙ってnullを返すと、呼び出し元(特にsaveEstimateForm())は例外が飛んでこないため
+// 成功したとみなし「保存しました」を表示してしまう。保存していないのに保存したと
+// 表示される状態は、残課題⑥で直そうとしている問題そのものを再発させることになる。
+// executeCartItemReplace()が!currentCartCaseIdのときclearReplaceMode()+showError()で
+// 明示的にエラーにしているのに揃え、ここではerr.code = 'no_case'を付けてthrowし、
+// 呼び出し元それぞれに扱いを委ねる。
 //
-// 保存後にcartCaseとcurrentCaseDetailData(開いていれば)の両方を更新するのは
-// saveCaseName()と同じ理由: 他の画面に古い案件名が残らないようにするため。
-//
-// isCaseArchivedError()のガードは、この画面がアーカイブ済み案件を対象にする
-// 経路が無い(previewArchivedEstimate()は別の閲覧専用パスで、estimate-form-area
-// を開かない)ため現状は到達しない。それでもsaveCaseName()と同じ理由(工程P4の
-// 方針: 到達不能を理由に生のエラーコードを画面に出す状態を作らない)でガードを残す。
-async function saveEstimateCaseName(btn) {
-  const input = document.getElementById('estimate-case-name-input');
-  const newName = input.value.trim();
-  const msgEl = document.getElementById('estimate-case-name-msg');
+// 【案件名・宛名の空欄ガードを設けない理由】この保存は「下書きの保存」であり、
+// 完成品を確定させる操作ではない。サーバーは空文字をそのまま受け入れ、カートが
+// 自動作成する下書き案件もcustomerName: ''なので、空欄はもともと正常な状態。
+// 必須チェックはgenerateEstimateSheet()側(宛名)にのみ残す。
+async function persistEstimateForm() {
+  if (!currentCartCaseId) {
+    const err = new Error('対象の案件が見つかりません。カートを開き直してください。');
+    err.code = 'no_case';
+    throw err;
+  }
+
+  const customerName = document.getElementById('estimate-case-name-input').value.trim();
+  const clientName = document.getElementById('client-name').value.trim();
+  const clientSite = document.getElementById('client-site').value.trim();
+  const laborPrice = Number(document.getElementById('price-labor').value || 0);
+  const visitPrice = Number(document.getElementById('price-visit').value || 0);
+  const bizNote = document.getElementById('biz-note').value.trim();
+
+  const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      estimateFormSave: {
+        customerName,
+        estimateMeta: { clientName, clientSite, laborPrice, visitPrice, bizNote }
+      }
+    })
+  });
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const err = new Error((data && data.error) || '保存に失敗しました');
+    if (response.status === 401) err.code = 'session_expired';
+    else if (isCaseArchivedError(data)) err.code = 'case_archived';
+    throw err;
+  }
+
+  cartCase = data.case;
+  if (currentCaseDetailData && currentCaseDetailData.id === currentCartCaseId) {
+    currentCaseDetailData = data.case;
+  }
+  return data.case;
+}
+
+// 「入力内容を保存」ボタン用。フィードバックの出し分けはD3時代のsaveEstimateCaseName()
+// と揃えている(成功・通信エラー等の「よく起きる結果」はestimate-form-save-msgに、
+// CASE_ARCHIVEDだけはestimate-form-error(画面上部の大きい通知)に出す。案件全体が
+// 編集不能になったという、この欄だけの問題ではない重大な状態変化のため)。
+// !currentCartCaseIdのチェックはここには置かない(persistEstimateForm()側でthrowする
+// ため、ここでも早期returnすると同じ判定が2箇所に分散し、片方だけ直し忘れる余地が
+// 生まれる)。
+async function saveEstimateForm(btn) {
+  const msgEl = document.getElementById('estimate-form-save-msg');
   const errorEl = document.getElementById('estimate-form-error');
   hideError(errorEl);
   msgEl.textContent = '';
 
-  // 空欄のまま保存すると案件名が空になり、案件一覧で識別できなくなる。
-  // attachCurrentSearchToCase()の空欄チェックと同じ文言・同じ扱い(D2の宛名
-  // チェックと同様、フォーカスを空欄自体に戻す)。
-  if (!newName) {
-    msgEl.textContent = '案件名を入力してください';
-    msgEl.style.color = 'var(--error)';
-    input.focus();
-    return;
-  }
-  if (!currentCartCaseId) return;
-
   await withButtonGuard(btn, async () => {
     try {
-      const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerName: newName })
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          handleSessionExpired();
-          return;
-        }
-        if (isCaseArchivedError(data)) {
-          renderCaseArchivedNotice(errorEl);
-          return;
-        }
-        throw new Error(data.error || '案件名の保存に失敗しました');
-      }
-
-      cartCase = data.case;
-      if (currentCaseDetailData && currentCaseDetailData.id === currentCartCaseId) {
-        currentCaseDetailData = data.case;
-      }
+      await persistEstimateForm();
       msgEl.textContent = '保存しました';
       msgEl.style.color = 'var(--success)';
     } catch (err) {
+      if (err.code === 'session_expired') {
+        handleSessionExpired();
+        return;
+      }
+      if (err.code === 'case_archived') {
+        renderCaseArchivedNotice(errorEl);
+        return;
+      }
+      // no_caseもここに含まれる。executeCartItemReplace()と同じ文言(err.message)を
+      // そのまま表示するため、専用の分岐は設けない。
       msgEl.textContent = err.message || '通信エラーが発生しました';
       msgEl.style.color = 'var(--error)';
     }
@@ -5337,7 +5368,7 @@ function closeEstimateSheet() {
 // openCaseDetail()が既に取得済みのため、再フェッチせずそのまま使う。
 // setActiveCase()は呼ばない＝currentCartCaseIdを書き換えない（このアーカイブ済み
 // 案件がカート対象になることはない。以後の「カートに追加」は従来どおり現在
-// アクティブな案件に対して行われる）。saveEstimateMeta()も呼ばない＝一切書き込まない。
+// アクティブな案件に対して行われる）。persistEstimateForm()も呼ばない＝一切書き込まない。
 //
 // issueDateは案件のcreatedAtを使う。ここは「PDF保存／印刷」も使える閲覧経路のため、
 // 今日の日付にすると、数年前の金額のまま今日付けの見積書が出力されてしまい、
@@ -5543,7 +5574,6 @@ async function generateEstimateSheet(btn) {
   const clientSite = document.getElementById('client-site').value.trim();
   const bizName = companyInfo?.name || '（屋号未設定）';
   const bizTel = companyInfo?.tel || '';
-  const bizNote = document.getElementById('biz-note').value.trim();
 
   const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
@@ -5554,8 +5584,8 @@ async function generateEstimateSheet(btn) {
 
   const todayStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  // clientName/clientSite/bizNoteは上で既に.trim()||'お客様'等が解決済みの変数
-  // （saveEstimateMeta()・テキストコピー用に必要）なので、buildEstimateSheetHTML()には
+  // clientName/clientSiteは上で既に.trim()済みの変数(window._lastEstimateTextの
+  // テキストコピー用テンプレートで使う)なので、buildEstimateSheetHTML()には
   // フォールバック未適用の生の値を別途読み直して渡す。呼び出し側でフォールバックを
   // 二重に持たないため。
   document.getElementById('estimate-sheet').innerHTML = buildEstimateSheetHTML({
@@ -5603,38 +5633,24 @@ ${bizName}${bizTel ? ' / TEL: ' + bizTel : ''}
 記載の器具型番・金額は現時点の参考情報です。正式な発注前に最終確認のうえ確定いたしますので、あらかじめご了承ください。
 `.trim();
 
-  // お客様名・工事場所・施工費・出張費・備考を案件に保存し、次回開いたときも引き継ぐ
-  await saveEstimateMeta({ clientName, clientSite, laborPrice, visitPrice, bizNote });
-  }, '生成中...');
-}
-
-async function saveEstimateMeta(meta) {
-  if (!currentCartCaseId) return;
+  // 案件名・お客様名・工事場所・施工費・出張費・備考を案件に保存し、次回開いたときも
+  // 引き継ぐ。エラー処理は従来のsaveEstimateMeta()と同じ「基本的に静かに無視、
+  // CASE_ARCHIVEDだけalert」を維持する(見積書自体は既に生成・表示済みのため、
+  // 裏側の保存失敗をこの場で騒ぎ立てても直前に見せた結果は変わらない)。
+  // no_case(persistEstimateForm()がcurrentCartCaseId無しでthrowするコード)は、
+  // この関数の冒頭(カート空チェック)で必ず先に弾かれるため到達しない
+  // (currentCartCaseIdとcartCaseは既存の全リセット箇所で常にセットでnull化される
+  // 設計のため、currentCartCaseIdが無いのにcartCase.cartItemsが非空という
+  // 不整合状態は作られない)。
   try {
-    const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ estimateMeta: meta })
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      cartCase = data.case;
-      return;
-    }
-
-    // 見積書自体は既に生成・表示済みのため、保存失敗は基本的に静かに無視する
-    // (一時的な通信エラー等でこの保存だけ失敗しても、直前に見せた見積書の内容
-    // 自体は正しいまま)。ただしCASE_ARCHIVEDだけは例外にする。黙って無視すると
-    // 「保存したつもりが実は保存されていない」まま気づかれず、次回この案件を
-    // 開いたときにお客様名等を入力し直す羽目になるため、この場合だけ知らせる。
-    const data = await response.json().catch(() => null);
-    if (isCaseArchivedError(data)) {
+    await persistEstimateForm();
+  } catch (err) {
+    if (err.code === 'case_archived') {
       alert('この案件はアーカイブ済みのため、お客様名・工事場所等の入力内容は保存されませんでした。見積書自体は問題なく生成されています。');
     }
-  } catch (err) {
-    // 通信エラー等。見積書自体は生成済みのため、静かに無視する。
+    // session_expired・no_case・その他は静かに無視する(従来通り)。
   }
+  }, '生成中...');
 }
 
 function copyEstimateText() {

@@ -55,7 +55,8 @@ test('isFeatureRestrictedError(): error === feature_restricted を判定する',
 
 // 【CASE_ARCHIVEDを適用した7箇所】isCaseArchivedError()を経由してrenderCaseArchivedNotice()を
 // 呼んでいることを確認する。適用しなかった3箇所(handleImportFileの2経路・
-// saveEstimateMeta)は対象がアーカイブ済みになりえない/意図的な静かな失敗のため対象外。
+// generateEstimateSheet()のcatchブロック)は対象がアーカイブ済みになりえない/
+// 意図的な静かな失敗のため対象外。
 const patchGuardedFunctions = [
   { name: 'saveCaseName', pattern: /async function saveCaseName\(btn, caseId\) \{/ },
   { name: 'changeCaseStatus', pattern: /async function changeCaseStatus\(btn, newStatus\) \{/ },
@@ -92,13 +93,23 @@ test('duplicateCurrentCase(): feature_restrictedのときrenderUpgradeCta()を�
   assert.ok(body.includes('renderUpgradeCta('), 'renderUpgradeCta()の呼び出しが無い');
 });
 
-test('saveEstimateMeta(): CASE_ARCHIVEDのときだけ例外的にalert()で知らせる(他の失敗は静かに無視する既存方針を維持)', () => {
-  const body = extractFunctionBody(INDEX_HTML, /async function saveEstimateMeta\(meta\) \{/);
-  assert.ok(body.includes('isCaseArchivedError(data)'), 'isCaseArchivedError(data)の呼び出しが無い');
+// 【工程E2で対象をsaveEstimateMeta()からgenerateEstimateSheet()へ変更】
+// 見積書生成に伴う保存(旧saveEstimateMeta()、現persistEstimateForm())は
+// 「案件名・お客様名・工事場所・施工費・出張費・備考をまとめて保存する」形に
+// 統合された。persistEstimateForm()自体はエラー時にerr.codeを付けてthrowする
+// だけで、CASE_ARCHIVEDのときだけalert()するという判断はしない(saveEstimateForm()
+// と挙動を分けるため、UI側の判断は呼び出し元に委ねる設計。詳細はpersistEstimateForm()
+// のコメント参照)。この「CASE_ARCHIVEDのときだけalert、他は静かに無視」という
+// 振る舞いは、実際にはgenerateEstimateSheet()末尾のtry/catchが担っているため、
+// 固定対象もそちらに変更する。
+test('generateEstimateSheet(): persistEstimateForm()失敗時、CASE_ARCHIVEDのときだけ例外的にalert()で知らせる(他の失敗は静かに無視する既存方針を維持)', () => {
+  const generateEstimateSheetBody = extractFunctionBody(INDEX_HTML, /async function generateEstimateSheet\(btn\) \{/);
+  const catchBody = extractFunctionBody(generateEstimateSheetBody, /catch \(err\) \{/);
+  assert.ok(catchBody.includes("err.code === 'case_archived'"), "err.code === 'case_archived' の判定が見つからない");
   assert.match(
-    body,
-    /isCaseArchivedError\(data\)\)\s*\{[\s\S]*?alert\(/,
-    'CASE_ARCHIVEDのときにalert()を呼んでいない(保存失敗が利用者に伝わらない)'
+    catchBody,
+    /err\.code === 'case_archived'\)\s*\{[\s\S]*?alert\(/,
+    'case_archivedのときにalert()を呼んでいない(保存失敗が利用者に伝わらない)'
   );
 });
 
