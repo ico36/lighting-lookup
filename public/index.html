@@ -1591,7 +1591,7 @@
          入っても見え方への影響は無い(表示する経路が無いため)。 -->
     <details style="margin-top:24px;">
       <summary style="cursor:pointer;">
-        <div class="section-label" style="display:inline-block;margin-bottom:0;">過去の案件を検索（完了・失注案件）</div>
+        <div class="section-label" style="display:inline-block;margin-bottom:0;">アーカイブ検索</div>
       </summary>
       <!-- 工程P3-3時点でこの要素を描画するJSは無い(searchArchivedCasesUI()から
            data.campaign参照を撤去したため)。アーカイブ検索自体は全プラン開放済みで
@@ -3501,7 +3501,7 @@ async function deleteCaseHandler(btn, caseId) {
   }, '削除中...');
 }
 
-// ----- 過去の案件を検索（完了・失注案件、アーカイブ済み） -----
+// ----- アーカイブ検索（アーカイブ済み案件の検索。手動アーカイブ対象は完了・失注案件） -----
 
 async function searchArchivedCasesUI(btn) {
   const fromEl = document.getElementById('archive-search-from');
