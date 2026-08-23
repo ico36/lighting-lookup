@@ -1044,6 +1044,11 @@
     font-size: 16px;
     flex-shrink: 0;
   }
+  /* P5-2: 案件一覧ページャの前後ボタン(.modal-closeを転用)が端でdisabledになったときの見た目。
+     disabledかどうかで見た目を変える条件をCSS側の1箇所に集約する(JS側でopacityを都度
+     インラインで足す設計にすると、disabled属性の有無とopacityの有無という2つの条件を
+     毎回の描画で揃える必要が出て、食い違いを作れる形になるため)。 */
+  .modal-close:disabled { opacity: 0.4; cursor: default; }
 
   .price-highlight {
     background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(124,58,237,0.1));
@@ -1576,7 +1581,13 @@
         <button class="btn-secondary" style="flex:1;" onclick="closeNewCaseForm()">キャンセル</button>
       </div>
     </div>
+    <!-- P5-2: 案件名の絞り込み。inputのたびにonCaseListFilterInput()がrenderCasesList()を
+         呼び、casesCache(全件)から都度絞り込む。検索ボタンは置かない(サーバー往復が無いため)。
+         正規化はtrim()とtoLowerCase()のみ(renderCasesList()側で実施)。 -->
+    <input type="text" id="case-list-filter-input" class="stacked-input" placeholder="案件名で絞り込み" oninput="onCaseListFilterInput()" />
     <div id="cases-list-body"></div>
+    <!-- P5-2: ページャ。総ページ数1のときはrenderCasesPager()がdisplay:noneにする。 -->
+    <div id="cases-list-pager" style="display:none;justify-content:center;align-items:center;gap:12px;margin-top:14px;"></div>
 
     <!-- P5-1: アーカイブ検索セクション(section-label・archive-search-campaign-banner・
          日付input2つ・検索ボタン・archive-search-results)を<details>で折りたたむ。
@@ -2914,7 +2925,17 @@ function renderEstimateCompanyDisplay() {
 
 // ===== 案件管理（案件の作成・一覧・ステータス変更・検索履歴の紐づけ） =====
 
+// P5-2: 案件一覧1ページあたりの件数。実測値(1行約80px、スマホ実機で一覧に使える
+// 高さは約300px)からは1画面に収まらないが、指の一振りで下端に届く範囲として8件と
+// した。5件だとライト(保存上限5件)でページャが一度も出ず、10件だとスクロールが
+// 2〜3画面ぶんになるため、その中間。
+const CASES_PER_PAGE = 8;
+
 let casesCache = [];
+let caseFilterQuery = ''; // 案件名の絞り込み文字列。#case-list-filter-inputの.valueが
+                            // 唯一の真で、この変数はoninputのたびにコピーしているだけ
+                            // (renderCasesList()側からDOMへ書き戻すことはしない)
+let casesCurrentPage = 1; // 案件一覧ページャの現在ページ(1始まり)
 let currentCaseDetailId = null;
 let currentCaseDetailData = null;
 let openCasesForAttach = [];
@@ -2975,14 +2996,57 @@ async function loadCasesList() {
   }
 }
 
+// P5-2: 案件名の絞り込み欄(#case-list-filter-input)のoninputから呼ぶ。DOMの.valueが
+// 唯一の真で、caseFilterQueryはそのコピー(逆方向の書き戻しはしない。詳細はcaseFilterQuery
+// 宣言のコメント参照)。絞り込み条件が変わったら常に1ページ目に戻す(件数比較のような
+// 複雑な判定はせず、inputイベントのたびに単純にリセットする)。
+function onCaseListFilterInput() {
+  caseFilterQuery = document.getElementById('case-list-filter-input').value;
+  casesCurrentPage = 1;
+  renderCasesList();
+}
+
 function renderCasesList() {
   const bodyEl = document.getElementById('cases-list-body');
+  const pagerEl = document.getElementById('cases-list-pager');
+
+  // 案件を1件も保存していない場合の空表示。絞り込み結果が0件のときの空表示
+  // (下の分岐)とは文言が異なるため、混同しないよう別の早期returnにしている。
   if (casesCache.length === 0) {
     bodyEl.innerHTML = `<div style="color:var(--text2);font-size:14px;text-align:center;padding:20px 0;">案件はまだありません</div>`;
+    if (pagerEl) pagerEl.style.display = 'none';
     return;
   }
 
-  bodyEl.innerHTML = casesCache.map(c => `
+  // 正規化はtrim()とtoLowerCase()のみ(全角半角・かなカナの変換はしない方針)。
+  // 案件名は日本語主体で大文字小文字の出番自体が少なく、toLowerCase()は
+  // 英字混じりの案件名に対する保険という位置づけ。
+  const query = caseFilterQuery.trim().toLowerCase();
+  const filtered = query
+    ? casesCache.filter(c => (c.customerName || '').toLowerCase().includes(query))
+    : casesCache;
+
+  // 案件はあるが、絞り込み条件に一致する案件が無い場合の空表示。
+  if (filtered.length === 0) {
+    bodyEl.innerHTML = `<div style="color:var(--text2);font-size:14px;text-align:center;padding:20px 0;">一致する案件がありません</div>`;
+    if (pagerEl) pagerEl.style.display = 'none';
+    return;
+  }
+
+  // filteredが0件ならこの手前で必ずreturnしているため、ここでのtotalPagesが
+  // 0になることはない。Math.max(1, ...)は現状効かない保険で、上のreturnを
+  // 将来消したときのための備え。
+  const totalPages = Math.max(1, Math.ceil(filtered.length / CASES_PER_PAGE));
+  // 絞り込み変更時はonCaseListFilterInput()が毎回1ページ目に戻すため通常は
+  // 起きないが、モーダルを開き直した際にcasesCacheがサーバー側の変化で減り、
+  // 保持していたcasesCurrentPageが範囲外になるケースへの保険。
+  if (casesCurrentPage > totalPages) casesCurrentPage = totalPages;
+  if (casesCurrentPage < 1) casesCurrentPage = 1;
+
+  const startIdx = (casesCurrentPage - 1) * CASES_PER_PAGE;
+  const pageItems = filtered.slice(startIdx, startIdx + CASES_PER_PAGE);
+
+  bodyEl.innerHTML = pageItems.map(c => `
     <div style="display:flex;justify-content:space-between;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;" onclick="openCaseDetail('${c.id}')">
       <div>
         <div style="font-weight:600;">${escapeHtml(c.customerName) || '（無題の案件）'}</div>
@@ -2991,6 +3055,38 @@ function renderCasesList() {
       <span class="tag ${caseStatusTagClass(c.status)}">${c.status}</span>
     </div>
   `).join('');
+
+  renderCasesPager(totalPages);
+}
+
+// P5-2: ページャの描画。totalPagesが1以下なら非表示にする(ページャ自体を出さない)。
+// 前後ボタンは.modal-close(円形のアイコンボタン)を転用し、端ではdisabled属性を付ける。
+// disabled時の見た目(opacity)はCSS側の.modal-close:disabled(1047行付近)に集約してあり、
+// ここでインラインstyleは足さない。
+function renderCasesPager(totalPages) {
+  const pagerEl = document.getElementById('cases-list-pager');
+  if (!pagerEl) return;
+
+  if (totalPages <= 1) {
+    pagerEl.style.display = 'none';
+    pagerEl.innerHTML = '';
+    return;
+  }
+
+  pagerEl.style.display = 'flex';
+  pagerEl.innerHTML = `
+    <button class="modal-close" ${casesCurrentPage <= 1 ? 'disabled' : ''} onclick="changeCasesPage(-1)">‹</button>
+    <span style="font-size:13px;color:var(--text2);">${casesCurrentPage}/${totalPages}</span>
+    <button class="modal-close" ${casesCurrentPage >= totalPages ? 'disabled' : ''} onclick="changeCasesPage(1)">›</button>
+  `;
+}
+
+// P5-2: ページャの前後ボタンのonclickから呼ぶ。境界のボタンはdisabled属性が付いており
+// ネイティブのdisabledボタンはclickイベント自体が発火しないため、ここでの上下限チェックは
+// 行わない(renderCasesList()側のtotalPagesによる丸め処理が最終的な保険になる)。
+function changeCasesPage(delta) {
+  casesCurrentPage += delta;
+  renderCasesList();
 }
 
 async function submitNewCase(btn) {
