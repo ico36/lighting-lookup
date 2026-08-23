@@ -1578,20 +1578,35 @@
     </div>
     <div id="cases-list-body"></div>
 
-    <div class="section-label" style="margin-top:24px;">過去の案件を検索（完了・失注案件）</div>
-    <!-- 工程P3-3時点でこの要素を描画するJSは無い(searchArchivedCasesUI()から
-         data.campaign参照を撤去したため)。アーカイブ検索自体は全プラン開放済みで
-         このバナーの出番は無くなったが、lib/featureCampaigns.jsのキャンペーン機構
-         (endsAt/allowedPlans)自体は将来の期間限定告知(材料屋発注機能等)に転用する
-         想定のため、DOM要素は残してある。次に使うときは、この要素のid/styleを
-         そのまま流用してよい。 -->
-    <div id="archive-search-campaign-banner" style="display:none;font-size:12px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6;"></div>
-    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-      <input type="date" id="archive-search-from" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
-      <input type="date" id="archive-search-to" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
-      <button class="btn-secondary" onclick="searchArchivedCasesUI(this)">検索</button>
-    </div>
-    <div id="archive-search-results"></div>
+    <!-- P5-1: アーカイブ検索セクション(section-label・archive-search-campaign-banner・
+         日付input2つ・検索ボタン・archive-search-results)を<details>で折りたたむ。
+         中身は既存のまま移しただけでidの追加・削除は無い。書き方はP2
+         (renderCaseDetail()内、3211行付近のカート内容展開)に揃え、summaryの中に
+         section-labelを置く。open属性は付けず常に閉じた状態で開始し、toggle
+         イベントリスナーは追加しない(P2と同じく開閉状態をJS側で保持しない)。
+         searchArchivedCasesUI()の実行タイミングは変更しない(openCasesModal()が
+         毎回呼ぶ現状のまま。closeCasesModal()が状態をリセットしないため、初回のみ
+         実行にすると前回の日付条件が残ったまま折りたたまれ、絞り込み中であることに
+         利用者が気づけなくなるため)。archive-search-campaign-bannerがdetails内側に
+         入っても見え方への影響は無い(表示する経路が無いため)。 -->
+    <details style="margin-top:24px;">
+      <summary style="cursor:pointer;">
+        <div class="section-label" style="display:inline-block;margin-bottom:0;">過去の案件を検索（完了・失注案件）</div>
+      </summary>
+      <!-- 工程P3-3時点でこの要素を描画するJSは無い(searchArchivedCasesUI()から
+           data.campaign参照を撤去したため)。アーカイブ検索自体は全プラン開放済みで
+           このバナーの出番は無くなったが、lib/featureCampaigns.jsのキャンペーン機構
+           (endsAt/allowedPlans)自体は将来の期間限定告知(材料屋発注機能等)に転用する
+           想定のため、DOM要素は残してある。次に使うときは、この要素のid/styleを
+           そのまま流用してよい。 -->
+      <div id="archive-search-campaign-banner" style="display:none;font-size:12px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6;margin-top:12px;"></div>
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;margin-top:12px;">
+        <input type="date" id="archive-search-from" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
+        <input type="date" id="archive-search-to" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
+        <button class="btn-secondary" onclick="searchArchivedCasesUI(this)">検索</button>
+      </div>
+      <div id="archive-search-results"></div>
+    </details>
   </div>
 </div>
 
