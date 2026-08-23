@@ -133,6 +133,34 @@ test('showEstimateForm(): updateEstimatePreview()の呼び出しはif ブロッ�
   );
 });
 
+// メッセージ(estimate-form-error・estimate-form-save-msg)のクリアは、6欄の書き戻しとは
+// 逆に「常に実行される」ことを固定する。メッセージは直前の操作結果を伝える一時的な表示
+// であり、入力値のような保護すべき情報ではないため、estimateFormCaseIdガードの外に
+// 置いて同じ案件で開き直したときも含めて毎回クリアする(showEstimateForm()のコメント参照)。
+test('showEstimateForm(): estimate-form-error・estimate-form-save-msgのクリアはif ブロックの外側にある(毎回実行される)', () => {
+  const ifBody = extractFunctionBody(showEstimateFormBody, /if \(estimateFormCaseId !== currentCartCaseId\) \{/);
+
+  assert.ok(
+    showEstimateFormBody.includes("hideError(document.getElementById('estimate-form-error'));"),
+    'estimate-form-errorをhideError()でクリアする処理がshowEstimateForm()の中に見つからない'
+  );
+  assert.ok(
+    !ifBody.includes("hideError(document.getElementById('estimate-form-error'));"),
+    'estimate-form-errorのクリアがif ブロックの内側に紛れ込んでいる' +
+      '(内側にあると、同じ案件で開き直したときにクリアされず、古いエラーが残る)'
+  );
+
+  assert.ok(
+    showEstimateFormBody.includes("document.getElementById('estimate-form-save-msg').textContent = '';"),
+    'estimate-form-save-msgのクリアがshowEstimateForm()の中に見つからない'
+  );
+  assert.ok(
+    !ifBody.includes("document.getElementById('estimate-form-save-msg').textContent = '';"),
+    'estimate-form-save-msgのクリアがif ブロックの内側に紛れ込んでいる' +
+      '(内側にあると、同じ案件で開き直したときにクリアされず、古い「保存しました」が残る)'
+  );
+});
+
 // `let estimateFormCaseId = null;`(3672行目の初期宣言)は「リセット代入」ではないため、
 // 直前が`let `ではないものだけを数える(負の後読み)。宣言行を除外しないと、単純な部分
 // 文字列一致では総数が4件(宣言1+リセット3)になってしまう。

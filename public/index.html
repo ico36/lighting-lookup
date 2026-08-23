@@ -5206,6 +5206,14 @@ function showEstimateForm() {
     warningEl.style.display = 'none';
   }
 
+  // メッセージ(estimate-form-error・estimate-form-save-msg)は直前の操作結果を伝える
+  // 一時的な表示であり、入力値のような保護すべき情報ではない。そのため下のestimateFormCaseId
+  // ガードの外に置き、同じ案件で開き直したときも含めて毎回クリアする(6欄の書き戻しは
+  // 「未保存の入力を守る」ために同一案件ならスキップするが、メッセージはそれとは目的が
+  // 異なり、古い操作結果を持ち越す理由が無い)。
+  hideError(document.getElementById('estimate-form-error'));
+  document.getElementById('estimate-form-save-msg').textContent = '';
+
   // 案件名(customerName)・お客様名・工事場所・施工費・出張費・備考の書き戻しは、
   // estimateFormCaseId(前回この関数がフォームに反映した案件のID)がcurrentCartCaseId
   // (これから開こうとしている案件のID)と一致する間はスキップする。この関数は
