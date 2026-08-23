@@ -1823,13 +1823,38 @@ async function withButtonGuard(btn, fn, loadingText) {
   }
 }
 
+// エラー要素を表示し、見える位置までスクロールする。画面下部のボタンを押したときに
+// 画面上部のエラーが見えず、何も起きなかったように見えるのを防ぐ(見積書画面の
+// 「見積書を生成」ボタンと、案件詳細モーダルの「アーカイブする」「完全に削除」ボタンで
+// 実際に起きていた症状)。
+//
+// showError()・renderCaseArchivedNotice()・duplicateCurrentCase()のfeature_restricted
+// ケースが、それぞれ中身(textContentかinnerHTMLか)を書き込んだ直後に呼ぶ。中身の
+// 書き込み方が呼び出し元ごとに違う(生のメッセージだけか、ボタンを含むHTMLか)ため
+// showError()自体には寄せず、表示処理だけを切り出して3箇所が共有する形にした。
+//
+// scrollIntoView()はネストしたスクロールコンテナ(モーダル内の.modal-sheet等)も
+// 自動的に扱うため、通常ページとモーダルの両方に同じコードで効く。block:'center'
+// にしているのは、'start'だとエラーが画面上端に来て固定ヘッダー(z-index:10)に
+// 隠れる可能性があるため(quota-limit-noticeの前例と同じ理由)。
+//
+// 【なぜここでスクロールする方針にしたか】エラーを表示したのに画面外で見えないなら
+// 責務を果たしていない、という考え方。呼び出し元ごとにスクロールを書く方式だと、
+// 新しいエラー表示を足した人が書き忘れる余地がある(実際にsaveEstimateForm()の
+// CASE_ARCHIVED経路がその例だった)。
+function revealErrorEl(el) {
+  if (!el) return;
+  el.style.display = 'block';
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 // 専用のエラー表示エリアにメッセージを出す/消す共通ヘルパー。
 // alert()の代わりに使い、各所で重複していた
 // errorEl.textContent=...; errorEl.style.display='block'; を集約する。
 function showError(el, message) {
   if (!el) return;
   el.textContent = message;
-  el.style.display = 'block';
+  revealErrorEl(el);
 }
 
 function hideError(el) {
@@ -2089,7 +2114,7 @@ function renderCaseArchivedNotice(errorEl) {
   errorEl.innerHTML =
     'この案件はアーカイブ済みのため編集できません。案件一覧から他の案件を選ぶか、新しい案件を作成してください。' +
     '<button type="button" class="detail-link-btn" style="margin:6px 0 0;" onclick="openCasesModal()">📋 案件一覧を開く</button>';
-  errorEl.style.display = 'block';
+  revealErrorEl(errorEl);
 }
 
 // api/cases/[id].jsのGET・api/cases/index.jsのduplicateFromが返す403
@@ -3903,7 +3928,7 @@ async function duplicateCurrentCase(btn, caseId) {
           errorEl.innerHTML =
             '<div style="margin-bottom:8px;">この案件の複製は上位プランでご利用いただけます。</div>' +
             '<div id="case-detail-duplicate-upgrade-cta"></div>';
-          errorEl.style.display = 'block';
+          revealErrorEl(errorEl);
           renderUpgradeCta('case-detail-duplicate-upgrade-cta');
           return;
         }
