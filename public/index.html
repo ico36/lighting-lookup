@@ -1847,6 +1847,7 @@ document.getElementById('header-menu-actions').addEventListener('click', functio
     currentCartCaseId = null;
     localStorage.removeItem('cart_case_id');
     cartCase = null;
+    estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
   }
 }
 
@@ -3435,6 +3436,7 @@ async function archiveCaseHandler(btn, caseId) {
         currentCartCaseId = null;
         localStorage.removeItem('cart_case_id');
         cartCase = null;
+        estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
         renderCartItems();
         updateCartBadge();
       }
@@ -3661,6 +3663,13 @@ async function attachCurrentSearchToCase(btn) {
 let currentCartCaseId = localStorage.getItem('cart_case_id') || null;
 let cartCase = null;
 let replacingItemId = null; // 「再検索して差し替え」対象のitemId。R2で消費・クリアする
+
+// showEstimateForm()が最後に書き戻した際のcurrentCartCaseId。「今フォームのDOM
+// (案件名・client-name等)がどの案件の内容を映しているか」を表す。showEstimateForm()
+// はこれとcurrentCartCaseIdが一致する間、書き戻しをスキップする(保存前の未保存入力を
+// 消さないため)。不一致なら必ず書き戻す(前の案件の入力がDOMに残ったまま別案件の
+// フォームとして見えてしまうのを防ぐため)。詳細はshowEstimateForm()のコメント参照。
+let estimateFormCaseId = null;
 
 // 差し替えモードを終了する。replacingItemIdをクリアするだけでなく、検索結果を
 // 再描画して候補のボタンを「🛒 カートに追加」に、バナーを非表示に戻す。再描画せず
@@ -3967,6 +3976,7 @@ async function refreshCartCase() {
       currentCartCaseId = null;
       localStorage.removeItem('cart_case_id');
       cartCase = null;
+      estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
       renderCartItems();
       updateCartBadge();
       return;
@@ -5061,30 +5071,54 @@ function showEstimateForm() {
     warningEl.style.display = 'none';
   }
 
-  // 案件名(customerName)も他の欄と同じくcartCaseから書き戻す。
-  // 【client-name等と同じ制約】この関数はopenEstimateFromCaseDetail()・
-  // openEstimateFromCart()から呼ばれ、どちらも「フォームを開き直す」経路のため、
-  // 案件名を編集して保存ボタンを押す前に、カートモーダル内の「見積書を作成」
-  // (openEstimateFromCart())やヘッダーの案件一覧から同じ案件を開き直す
-  // (openEstimateFromCaseDetail())を経由すると、未保存の入力がここで
-  // cartCase.customerNameに上書きされる。これはclient-name・client-site・
-  // biz-noteが元から持っている制約と同じで、今回新たに導入したものではない
-  // (closeCartModal()がこの関数を呼ばずrenderEstimateCartItems()/
-  // updateEstimatePreview()だけを呼ぶのは、まさにこの上書きを避けるため)。
-  document.getElementById('estimate-case-name-input').value = (cartCase && cartCase.customerName) || '';
+  // 案件名(customerName)・お客様名・工事場所・施工費・出張費・備考の書き戻しは、
+  // estimateFormCaseId(前回この関数がフォームに反映した案件のID)がcurrentCartCaseId
+  // (これから開こうとしている案件のID)と一致する間はスキップする。この関数は
+  // openEstimateFromCaseDetail()・openEstimateFromCart()の両方から「フォームを
+  // 開き直す」ために呼ばれるため、一致時にもここを無条件に実行すると、案件名や
+  // client-name等を編集して保存ボタン(またはgenerateEstimateSheet())を押す前に
+  // 同じ案件のフォームを開き直しただけで、未保存の入力がcartCase(サーバー保存済みの
+  // 値)で上書きされてしまう。同一案件を開き直しただけなら、DOMに残っている入力を
+  // そのまま尊重してよい。
+  //
+  // 逆に不一致(＝別の案件を開こうとしている)なら、DOMに残っているのは前の案件の
+  // 入力なので、それが新しい案件のフォームに残ったまま見えてしまわないよう、
+  // 必ず書き戻す。
+  //
+  // 【「フォームが表示中か」を条件に含めない理由】renderResult()は検索結果を
+  // 再描画するたびにestimate-form-areaを非表示にする(4898行)。もし「表示中か」も
+  // 条件に含めると、フォームに入力 → 新規検索(renderResult()でフォームが非表示に
+  // なる) → カートから見積書を作成(openEstimateFromCart())、という最も守りたい
+  // 経路が「非表示を経由した」という理由だけでスキップされず、入力が消えたままに
+  // なってしまう。estimateFormCaseIdとcurrentCartCaseIdの一致判定だけで十分なのは、
+  // 6欄への書き込みがこの関数一箇所に閉じているため(下記参照)。
+  //
+  // 【この設計の前提】client-name・client-site・price-labor・price-visit・biz-note・
+  // estimate-case-name-inputの6欄への.value書き込みは、リポジトリ全体でこの関数
+  // 一箇所に閉じている(previewArchivedEstimate()はこれらの欄に触れず、
+  // buildEstimateSheetHTML()へ値を渡すだけ。handleImportFile()・doLogout()も
+  // 触れない)。今後どこかにこの6欄への書き込みを追加する場合は、この判定が
+  // 前提にしている「非表示の間に他所が書き込まない」が崩れないか見直すこと。
+  if (estimateFormCaseId !== currentCartCaseId) {
+    document.getElementById('estimate-case-name-input').value = (cartCase && cartCase.customerName) || '';
 
-  // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考を引き継ぐ
-  const meta = (cartCase && cartCase.estimateMeta) || {};
-  document.getElementById('client-name').value = meta.clientName || '';
-  document.getElementById('client-site').value = meta.clientSite || '';
-  document.getElementById('price-labor').value = meta.laborPrice || '';
-  document.getElementById('price-visit').value = meta.visitPrice || '';
-  document.getElementById('biz-note').value = meta.bizNote || '';
+    // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考を引き継ぐ
+    const meta = (cartCase && cartCase.estimateMeta) || {};
+    document.getElementById('client-name').value = meta.clientName || '';
+    document.getElementById('client-site').value = meta.clientSite || '';
+    document.getElementById('price-labor').value = meta.laborPrice || '';
+    document.getElementById('price-visit').value = meta.visitPrice || '';
+    document.getElementById('biz-note').value = meta.bizNote || '';
+  }
 
   updateEstimatePreview();
   document.getElementById('estimate-form-area').style.display = 'block';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   document.getElementById('estimate-form-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // 「今フォームのDOMがどの案件の内容を映しているか」を更新する。次回この関数が
+  // 呼ばれたときの一致判定はこの値を基準にする。
+  estimateFormCaseId = currentCartCaseId;
 }
 
 // 見積書画面から案件名(customerName)を保存する。案件詳細のsaveCaseName()と
