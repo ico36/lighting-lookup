@@ -80,17 +80,26 @@ test('persistEstimateForm(): 案件名・お客様名・工事場所・施工費
 
 // ===== 2. persistEstimateForm(): estimateFormSaveキーでPATCHを送っていること =====
 
+// estimateMetaのオブジェクトリテラル全体を1つの文字列で完全一致させると、フィールドが
+// 1つ増えるたびに(並び順・スペースの書き方が変わっただけでも)このテストが落ちる。
+// ここで固定したいのは「estimateFormSaveキーで送っていること」と「必要なフィールドが
+// 含まれていること」であって、リテラル全体の形ではないため、各識別子の有無を個別に確認する。
 test('persistEstimateForm(): estimateFormSaveキーでcustomerNameとestimateMetaをまとめて送っている', () => {
   assert.ok(
     persistEstimateFormBody.includes('estimateFormSave: {'),
     'PATCHのbodyにestimateFormSaveキーが見つからない(サーバー側E1のcontractと不一致の疑い)'
   );
   assert.ok(
-    persistEstimateFormBody.includes(
-      'estimateMeta: { clientName, clientSite, laborPrice, visitPrice, bizNote }'
-    ),
-    'estimateMetaの中身(5フィールド)が見つからない'
+    persistEstimateFormBody.includes('estimateMeta: {'),
+    'estimateMetaキーが見つからない'
   );
+  const ESTIMATE_META_FIELDS = ['clientName', 'clientSite', 'laborPrice', 'visitPrice', 'bizNote', 'extraItems'];
+  for (const field of ESTIMATE_META_FIELDS) {
+    assert.ok(
+      persistEstimateFormBody.includes(field),
+      `estimateMetaの中身にフィールドが見つからない: ${field}`
+    );
+  }
 });
 
 // ===== 4. persistEstimateForm(): currentCartCaseId無しでerr.code = 'no_case'をthrowすること =====

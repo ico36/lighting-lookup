@@ -178,9 +178,14 @@
       flex-basis: calc(50% - 5px);
     }
 
-    /* モーダルの閉じるボタン・カート内アイテムの削除ボタンはタップ領域が
-       28px前後と小さくタップしづらいため拡大する */
+    /* モーダルの閉じるボタン・カート内アイテムの削除ボタン・見積書フォームの
+       費用項目削除ボタンはタップ領域が28px前後と小さくタップしづらいため拡大する */
     .modal-close {
+      width: 40px;
+      height: 40px;
+      font-size: 18px;
+    }
+    .extra-item-remove {
       width: 40px;
       height: 40px;
       font-size: 18px;
@@ -1050,6 +1055,23 @@
      毎回の描画で揃える必要が出て、食い違いを作れる形になるため)。 */
   .modal-close:disabled { opacity: 0.4; cursor: default; }
 
+  /* 見積書フォームの費用項目(extraItems)行の削除ボタン。.modal-closeと見た目は
+     同一だが専用クラスとして新設する(.sheet-close-btnを.sheet-action-btnに統一した
+     ときと同じ理由で、「モーダルを閉じる」用途のクラスを別の関心事(行の削除)に
+     転用しない)。タップ領域の拡大は上のmax-width:767pxブロックで.modal-closeと
+     揃えて指定する。 */
+  .extra-item-remove {
+    background: var(--surface2);
+    border: none;
+    color: var(--text2);
+    border-radius: 99px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
   .price-highlight {
     background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(124,58,237,0.1));
     border: 1px solid rgba(79,142,247,0.3);
@@ -1371,6 +1393,14 @@
         <span class="field-key">出張費</span>
         <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
       </div>
+      <!-- 任意の費用項目(extraItems)。値引きは項目種別を分けず、マイナス金額の項目として
+           同じ配列に乗せる(lib/cases.js normalizeExtraItems()参照)。行はidを振らず、
+           #estimate-extra-items配下の.extra-item-rowをDOM順に列挙して読む
+           (readExtraItemsFromDOM()参照)。金額欄に min="0" は付けない(施工費/出張費と
+           違いマイナスを許容するため、カートのunitPrice入力のmin="0"をコピーしない
+           よう注意)。 -->
+      <div id="estimate-extra-items"></div>
+      <button type="button" class="detail-link-btn" onclick="addExtraItemRow()">＋ 費用項目を追加</button>
       <div class="total-line" id="estimate-preview" style="margin-top:12px;font-size:14px;">
         <span>合計（税込）</span>
         <span class="total-amount" id="estimate-preview-amount">¥0</span>
@@ -5250,21 +5280,21 @@ function showEstimateForm() {
 
   // メッセージ(estimate-form-error・estimate-form-save-msg)は直前の操作結果を伝える
   // 一時的な表示であり、入力値のような保護すべき情報ではない。そのため下のestimateFormCaseId
-  // ガードの外に置き、同じ案件で開き直したときも含めて毎回クリアする(6欄の書き戻しは
-  // 「未保存の入力を守る」ために同一案件ならスキップするが、メッセージはそれとは目的が
-  // 異なり、古い操作結果を持ち越す理由が無い)。
+  // ガードの外に置き、同じ案件で開き直したときも含めて毎回クリアする(6欄+extraItemsの
+  // 書き戻しは「未保存の入力を守る」ために同一案件ならスキップするが、メッセージは
+  // それとは目的が異なり、古い操作結果を持ち越す理由が無い)。
   hideError(document.getElementById('estimate-form-error'));
   document.getElementById('estimate-form-save-msg').textContent = '';
 
-  // 案件名(customerName)・お客様名・工事場所・施工費・出張費・備考の書き戻しは、
-  // estimateFormCaseId(前回この関数がフォームに反映した案件のID)がcurrentCartCaseId
-  // (これから開こうとしている案件のID)と一致する間はスキップする。この関数は
-  // openEstimateFromCaseDetail()・openEstimateFromCart()の両方から「フォームを
-  // 開き直す」ために呼ばれるため、一致時にもここを無条件に実行すると、案件名や
-  // client-name等を編集して保存ボタン(またはgenerateEstimateSheet())を押す前に
-  // 同じ案件のフォームを開き直しただけで、未保存の入力がcartCase(サーバー保存済みの
-  // 値)で上書きされてしまう。同一案件を開き直しただけなら、DOMに残っている入力を
-  // そのまま尊重してよい。
+  // 案件名(customerName)・お客様名・工事場所・施工費・出張費・備考・任意の費用項目
+  // (extraItems)の書き戻しは、estimateFormCaseId(前回この関数がフォームに反映した
+  // 案件のID)がcurrentCartCaseId(これから開こうとしている案件のID)と一致する間は
+  // スキップする。この関数はopenEstimateFromCaseDetail()・openEstimateFromCart()の
+  // 両方から「フォームを開き直す」ために呼ばれるため、一致時にもここを無条件に
+  // 実行すると、案件名やclient-name等を編集して保存ボタン(またはgenerateEstimateSheet())
+  // を押す前に同じ案件のフォームを開き直しただけで、未保存の入力がcartCase(サーバー
+  // 保存済みの値)で上書きされてしまう。同一案件を開き直しただけなら、DOMに残っている
+  // 入力をそのまま尊重してよい。
   //
   // 逆に不一致(＝別の案件を開こうとしている)なら、DOMに残っているのは前の案件の
   // 入力なので、それが新しい案件のフォームに残ったまま見えてしまわないよう、
@@ -5276,24 +5306,26 @@ function showEstimateForm() {
   // なる) → カートから見積書を作成(openEstimateFromCart())、という最も守りたい
   // 経路が「非表示を経由した」という理由だけでスキップされず、入力が消えたままに
   // なってしまう。estimateFormCaseIdとcurrentCartCaseIdの一致判定だけで十分なのは、
-  // 6欄への書き込みがこの関数一箇所に閉じているため(下記参照)。
+  // 6欄+extraItemsへの書き込みがこの関数一箇所に閉じているため(下記参照)。
   //
   // 【この設計の前提】client-name・client-site・price-labor・price-visit・biz-note・
-  // estimate-case-name-inputの6欄への.value書き込みは、リポジトリ全体でこの関数
-  // 一箇所に閉じている(previewArchivedEstimate()はこれらの欄に触れず、
-  // buildEstimateSheetHTML()へ値を渡すだけ。handleImportFile()・doLogout()も
-  // 触れない)。今後どこかにこの6欄への書き込みを追加する場合は、この判定が
-  // 前提にしている「非表示の間に他所が書き込まない」が崩れないか見直すこと。
+  // estimate-case-name-inputの6欄への.value書き込みと、extraItemsの行の再構築
+  // (renderExtraItemRows())は、リポジトリ全体でこの関数一箇所に閉じている
+  // (previewArchivedEstimate()はこれらの欄に触れず、buildEstimateSheetHTML()へ値を
+  // 渡すだけ。handleImportFile()・doLogout()も触れない)。今後どこかにこれらへの
+  // 書き込みを追加する場合は、この判定が前提にしている「非表示の間に他所が
+  // 書き込まない」が崩れないか見直すこと。
   if (estimateFormCaseId !== currentCartCaseId) {
     document.getElementById('estimate-case-name-input').value = (cartCase && cartCase.customerName) || '';
 
-    // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考を引き継ぐ
+    // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考・任意の費用項目を引き継ぐ
     const meta = (cartCase && cartCase.estimateMeta) || {};
     document.getElementById('client-name').value = meta.clientName || '';
     document.getElementById('client-site').value = meta.clientSite || '';
     document.getElementById('price-labor').value = meta.laborPrice || '';
     document.getElementById('price-visit').value = meta.visitPrice || '';
     document.getElementById('biz-note').value = meta.bizNote || '';
+    renderExtraItemRows(meta.extraItems || []);
   }
 
   updateEstimatePreview();
@@ -5343,6 +5375,7 @@ async function persistEstimateForm() {
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
   const bizNote = document.getElementById('biz-note').value.trim();
+  const extraItems = readExtraItemsFromDOM();
 
   const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
     method: 'PATCH',
@@ -5350,7 +5383,7 @@ async function persistEstimateForm() {
     body: JSON.stringify({
       estimateFormSave: {
         customerName,
-        estimateMeta: { clientName, clientSite, laborPrice, visitPrice, bizNote }
+        estimateMeta: { clientName, clientSite, laborPrice, visitPrice, bizNote, extraItems }
       }
     })
   });
@@ -5481,11 +5514,84 @@ function cartMaterialSubtotal() {
   return items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
 }
 
+// 見積書フォームの任意の費用項目(extraItems)行1つぶんのHTML。renderExtraItemRows()
+// (保存済みの内容で丸ごと描画し直す)とaddExtraItemRow()(空行を1行足す)の両方から
+// 使う共通テンプレート。labelはescapeHtml()してvalue属性に埋め込む(保存済みの値には
+// "や<等が含まれうるため)。amountは0のとき空欄にする(price-labor/price-visitの
+// 書き戻しがmeta.laborPrice || ''で0を空欄にしているのと同じ扱い。マイナス値は
+// ||で潰れず正しく表示される)。
+function createExtraItemRowHTML(label, amount) {
+  return `
+    <div class="extra-item-row" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+      <input type="text" class="stacked-input extra-item-label" placeholder="項目名（例：値引き）"
+             maxlength="50" style="flex:1;margin-bottom:0;" value="${escapeHtml(label)}"
+             oninput="updateEstimatePreview()" />
+      <div class="yen-prefix" style="flex:0 0 108px;">
+        <span>¥</span>
+        <input type="number" class="num-input extra-item-amount" placeholder="0"
+               value="${amount || ''}" oninput="updateEstimatePreview()" />
+      </div>
+      <button type="button" class="extra-item-remove" onclick="removeExtraItemRow(this)">✕</button>
+    </div>
+  `;
+}
+
+// 保存済みのextraItemsで#estimate-extra-itemsを丸ごと描画し直す。showEstimateForm()の
+// estimateFormCaseIdガードの内側からのみ呼ぶ(未保存の入力を案件切り替え以外で
+// 消さないため)。
+function renderExtraItemRows(items) {
+  const container = document.getElementById('estimate-extra-items');
+  if (!container) return;
+  container.innerHTML = (items || []).map(item => createExtraItemRowHTML(item.label, item.amount)).join('');
+}
+
+// ＋ボタン用。空行を1行足し、項目名の入力欄にフォーカスする(押した直後に文字入力を
+// 始めるのが自然な流れのため)。スマホでソフトキーボードの出現が煩わしい場合は
+// 実機確認のうえフォーカスを外す判断もありうる。
+function addExtraItemRow() {
+  const container = document.getElementById('estimate-extra-items');
+  if (!container) return;
+  container.insertAdjacentHTML('beforeend', createExtraItemRowHTML('', ''));
+  const rows = container.querySelectorAll('.extra-item-label');
+  const lastLabelInput = rows[rows.length - 1];
+  if (lastLabelInput) lastLabelInput.focus();
+}
+
+// ✕ボタン用。取り消し不能な操作ではない(入力途中の1行が消えるだけ)ため確認
+// ダイアログは出さない。
+function removeExtraItemRow(btn) {
+  const row = btn.closest('.extra-item-row');
+  if (row) row.remove();
+  updateEstimatePreview();
+}
+
+// #estimate-extra-items配下の行をDOM順に列挙して{label, amount}の配列にする。行に
+// idは振らない(追加・削除のたびに採番がずれる/衝突する管理を避けるため)。
+// persistEstimateForm()・generateEstimateSheet()・updateEstimatePreview()の3箇所が
+// 同じ読み取りロジックを別々に持つ二重管理(estimateMetaの他フィールドで既に
+// 起きている構図)を避けるためここに集約する。
+//
+// 【空行を除外する理由】項目名が空・金額が0の行は「＋を押したが未入力のまま」の
+// 状態であり、これを送信すると見積書に空欄のラベル・¥0の行が印刷されてしまう。
+// 項目名だけ・金額だけが入力済みの行は実際に利用者が入力した情報を持つため除外しない
+// (label === '' && amount === 0 の両方が空のときだけ除外する)。
+function readExtraItemsFromDOM() {
+  const container = document.getElementById('estimate-extra-items');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.extra-item-row'))
+    .map(row => ({
+      label: row.querySelector('.extra-item-label').value.trim(),
+      amount: Number(row.querySelector('.extra-item-amount').value || 0),
+    }))
+    .filter(item => !(item.label === '' && item.amount === 0));
+}
+
 function updateEstimatePreview() {
   const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
-  const subtotal = materialSubtotal + laborPrice + visitPrice;
+  const extraItemsTotal = readExtraItemsFromDOM().reduce((sum, item) => sum + item.amount, 0);
+  const subtotal = materialSubtotal + laborPrice + visitPrice + extraItemsTotal;
   const tax = Math.round(subtotal * 0.1);
   const total = subtotal + tax;
 
