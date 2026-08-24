@@ -5473,6 +5473,7 @@ function previewArchivedEstimate(caseId) {
     clientSite: c.estimateMeta?.clientSite,
     laborPrice: c.estimateMeta?.laborPrice,
     visitPrice: c.estimateMeta?.visitPrice,
+    extraItems: c.estimateMeta?.extraItems,
     bizNote: c.estimateMeta?.bizNote,
     companyInfo,
     issueDate,
@@ -5505,8 +5506,13 @@ function closeArchivedEstimatePreview(caseId) {
   openCaseDetail(caseId);
 }
 
+// マイナス値(値引きのextraItems行等)は符号を¥マークの前に出す(¥-1,000ではなく-¥1,000)。
+// toLocaleString()に直接符号付きの数値を渡すと¥マークの後ろに符号が付いてしまうため、
+// 符号と絶対値を分けて組み立てる。正の値・0は従来通りの見た目のまま変わらない。
 function yen(n) {
-  return '¥' + Number(n || 0).toLocaleString('ja-JP');
+  const value = Number(n || 0);
+  const sign = value < 0 ? '-' : '';
+  return sign + '¥' + Math.abs(value).toLocaleString('ja-JP');
 }
 
 function cartMaterialSubtotal() {
@@ -5608,13 +5614,14 @@ function updateEstimatePreview() {
 // 構造的に保証する。issueDateは呼び出し側で計算して渡す（ここでは new Date() を呼ばない）。
 // 「見積書に表示する日付」という意味の中立的な名前で、何の日付にするか（今日か、
 // 案件の作成日か等）は呼び出し側が決める。
-function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, bizNote, companyInfo, issueDate }) {
+function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, extraItems, bizNote, companyInfo, issueDate }) {
   // laborPrice/visitPriceが空文字・undefinedだと以降の加算がNaNに化けるため、
   // clientNameと同じ理屈で数値も冒頭で正規化する。itemsが配列でない場合も空配列に倒す。
-  // 以降はこの正規化後の値(labor/visit/list)だけを参照し、生の引数は直接使わない。
+  // 以降はこの正規化後の値(labor/visit/list/extra)だけを参照し、生の引数は直接使わない。
   const labor = Number(laborPrice) || 0;
   const visit = Number(visitPrice) || 0;
   const list = Array.isArray(items) ? items : [];
+  const extra = Array.isArray(extraItems) ? extraItems : [];
 
   const displayClientName = String(clientName || '').trim() || 'お客様';
   const displayClientSite = String(clientSite || '').trim();
@@ -5627,8 +5634,9 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
     ? `<img src="${companyInfo.logoUrl}" alt="ロゴ" style="max-height:40px;max-width:180px;object-fit:contain;margin-bottom:6px;" />`
     : '';
 
+  const extraTotal = extra.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   const materialSubtotal = list.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
-  const subtotal = materialSubtotal + labor + visit;
+  const subtotal = materialSubtotal + labor + visit + extraTotal;
   const tax = Math.round(subtotal * 0.1);
   const total = subtotal + tax;
 
@@ -5639,6 +5647,19 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
         <div class="sheet-item-name">${escapeHtml(item.manufacturer)} ${escapeHtml(item.name)}${item.modelNumber ? '（' + escapeHtml(item.modelNumber) + '）' : ''}</div>
       </td>
       <td class="num-cell">${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円</td>
+    </tr>
+  `).join('');
+
+  // extraItems(任意の費用項目)は施工費/出張費と違い、金額の符号に関わらず必ず表示する
+  // (出張費の`visit > 0`と同じ書き方をすると、マイナスの値引き行が消えてしまうため)。
+  // labelが空の行(金額だけ入力された行)はescapeHtml(item.label || '（項目名未設定）')の
+  // 順で処理する。escapeHtml(x) || fallbackという書き方(escapeHtml()が空文字を返す前提に
+  // 寄りかかる、既存3箇所にある慣習)を新しいコードで増やさないため、フォールバックは
+  // escapeHtml()に渡す前に確定させる。
+  const extraItemRowsHTML = extra.map(item => `
+    <tr>
+      <td><div class="sheet-item-name">${escapeHtml(item.label || '（項目名未設定）')}</div></td>
+      <td class="num-cell">${yen(item.amount)}</td>
     </tr>
   `).join('');
 
@@ -5677,6 +5698,7 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
           <td><div class="sheet-item-name">出張費</div></td>
           <td class="num-cell">${yen(visit)}</td>
         </tr>` : ''}
+        ${extraItemRowsHTML}
       </tbody>
     </table>
 
@@ -5734,7 +5756,11 @@ async function generateEstimateSheet(btn) {
   const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
-  const subtotal = materialSubtotal + laborPrice + visitPrice;
+  // persistEstimateForm()が送るestimateMeta.extraItemsと同じ値にするため、同じ
+  // readExtraItemsFromDOM()を呼ぶ(独自に読み直すと空行の除外条件が二重管理になる)。
+  const extraItems = readExtraItemsFromDOM();
+  const extraItemsTotal = extraItems.reduce((sum, item) => sum + item.amount, 0);
+  const subtotal = materialSubtotal + laborPrice + visitPrice + extraItemsTotal;
   const tax = Math.round(subtotal * 0.1);
   const total = subtotal + tax;
 
@@ -5750,6 +5776,7 @@ async function generateEstimateSheet(btn) {
     clientSite: document.getElementById('client-site').value,
     laborPrice,
     visitPrice,
+    extraItems,
     bizNote: document.getElementById('biz-note').value,
     companyInfo,
     issueDate: todayStr,
@@ -5771,6 +5798,12 @@ async function generateEstimateSheet(btn) {
     `・${item.manufacturer || ''} ${item.name || ''}${item.modelNumber ? '（' + item.modelNumber + '）' : ''}：${item.unitPrice.toLocaleString('ja-JP')}円 × ${item.quantity}台 = ${(item.unitPrice * item.quantity).toLocaleString('ja-JP')}円`
   ).join('\n');
 
+  // HTML版のextraItemRowsHTMLと同じく、金額の符号に関わらず必ず表示する
+  // (出張費の`visitPrice > 0`と同じ書き方はしない)。テキストなのでescapeHtml()は不要。
+  const extraItemsText = extraItems.length
+    ? extraItems.map(item => `${item.label || '（項目名未設定）'}：${yen(item.amount)}`).join('\n') + '\n'
+    : '';
+
   window._lastEstimateText = `
 御見積書（${todayStr}）
 ━━━━━━━━━━━━━━
@@ -5780,7 +5813,7 @@ ${clientSite ? '工事場所：' + clientSite + '\n' : ''}
 ${itemsText}
 施工費：${yen(laborPrice)}
 ${visitPrice > 0 ? '出張費：' + yen(visitPrice) + '\n' : ''}
-小計：${yen(subtotal)}
+${extraItemsText}小計：${yen(subtotal)}
 消費税（10%）：${yen(tax)}
 合計：${yen(total)}
 ━━━━━━━━━━━━━━
