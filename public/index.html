@@ -1834,9 +1834,9 @@ async function withButtonGuard(btn, fn, loadingText) {
 // showError()自体には寄せず、表示処理だけを切り出して3箇所が共有する形にした。
 //
 // scrollIntoView()はネストしたスクロールコンテナ(モーダル内の.modal-sheet等)も
-// 自動的に扱うため、通常ページとモーダルの両方に同じコードで効く。block:'center'
-// にしているのは、'start'だとエラーが画面上端に来て固定ヘッダー(z-index:10)に
-// 隠れる可能性があるため(quota-limit-noticeの前例と同じ理由)。
+// 自動的に扱う。block:'nearest'は既に画面内にあるときはスクロールさせないため。
+// 上方向に動く場合は到達点が'start'と同じになるため、固定ヘッダー(z-index:10)に
+// 重なる可能性は残る。
 //
 // 【なぜここでスクロールする方針にしたか】エラーを表示したのに画面外で見えないなら
 // 責務を果たしていない、という考え方。呼び出し元ごとにスクロールを書く方式だと、
@@ -1845,7 +1845,8 @@ async function withButtonGuard(btn, fn, loadingText) {
 function revealErrorEl(el) {
   if (!el) return;
   el.style.display = 'block';
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // 既に画面内に見えている場合はスクロールさせない（center は無条件に動くため）
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // 専用のエラー表示エリアにメッセージを出す/消す共通ヘルパー。
