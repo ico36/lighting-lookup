@@ -284,6 +284,7 @@ test('PATCH { estimateFormSave: { customerName, estimateMeta } }: 両方同時�
     laborPrice: 5000,
     visitPrice: 1000,
     bizNote: '備考テキスト',
+    extraItems: [],
   });
 });
 
@@ -302,7 +303,7 @@ test('PATCH { estimateFormSave: { customerName } }: customerNameのみ指定時�
   assert.equal(res.body.case.customerName, '名前だけ変更様');
   assert.deepEqual(
     res.body.case.estimateMeta,
-    { clientName: '', clientSite: '', laborPrice: 0, visitPrice: 0, bizNote: '' },
+    { clientName: '', clientSite: '', laborPrice: 0, visitPrice: 0, bizNote: '', extraItems: [] },
     'estimateMetaを指定していないのに変化している'
   );
 });
