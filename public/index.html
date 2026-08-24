@@ -1385,13 +1385,17 @@
 
     <div class="input-card">
       <div class="section-label">金額入力</div>
+      <!-- flex:6/4はインライン上書き(CSSルール本体は変更しない)。.estimate-form-row
+           .field-keyのmin-width:90pxは材料費小計の行にも効いており、そちらは金額入力行
+           ではないため巻き込みたくない。extraItemsの追加行(flex:6/4)と金額欄の左右を
+           縦に揃えるための変更。 -->
       <div class="estimate-form-row">
-        <span class="field-key">施工費</span>
-        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
+        <span class="field-key" style="flex:6;">施工費</span>
+        <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
       </div>
       <div class="estimate-form-row">
-        <span class="field-key">出張費</span>
-        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
+        <span class="field-key" style="flex:6;">出張費</span>
+        <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
       </div>
       <!-- 任意の費用項目(extraItems)。値引きは項目種別を分けず、マイナス金額の項目として
            同じ配列に乗せる(lib/cases.js normalizeExtraItems()参照)。行はidを振らず、
