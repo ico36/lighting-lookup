@@ -1854,7 +1854,10 @@ function revealErrorEl(el) {
       // 高さを実行時に測るのは、PC幅ではCSS(padding+中身の高さ)だけから
       // ヘッダーの実際の高さを確定できないため(モバイル幅は.hamburger-btnの
       // 固定サイズから計算できるが、PC幅はボタン群の行の高さに依存する)。
-      el.style.scrollMarginTop = `${headerEl.getBoundingClientRect().height + 8}px`;
+      // window.innerHeight * 0.2ぶん上乗せしているのは、エラーがヘッダーの
+      // すぐ下に貼りつかないよう余白を持たせるため。画面高さに対する比率なので
+      // PC・スマホのどちらでも同じ見え方になる。
+      el.style.scrollMarginTop = `${headerEl.getBoundingClientRect().height + window.innerHeight * 0.2}px`;
     }
   }
 
