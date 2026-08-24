@@ -1845,6 +1845,19 @@ async function withButtonGuard(btn, fn, loadingText) {
 function revealErrorEl(el) {
   if (!el) return;
   el.style.display = 'block';
+
+  // モーダル内は固定ヘッダーが無いため対象外(el.closest('.modal-overlay')が
+  // nullのときだけ、ページ本体のエラーとしてscroll-margin-topを設定する)。
+  if (!el.closest('.modal-overlay')) {
+    const headerEl = document.querySelector('header');
+    if (headerEl) {
+      // 高さを実行時に測るのは、PC幅ではCSS(padding+中身の高さ)だけから
+      // ヘッダーの実際の高さを確定できないため(モバイル幅は.hamburger-btnの
+      // 固定サイズから計算できるが、PC幅はボタン群の行の高さに依存する)。
+      el.style.scrollMarginTop = `${headerEl.getBoundingClientRect().height + 8}px`;
+    }
+  }
+
   // 既に画面内に見えている場合はスクロールさせない（center は無条件に動くため）
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
