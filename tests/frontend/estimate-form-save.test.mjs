@@ -25,6 +25,26 @@
 //
 // スクロール挙動(revealErrorEl()のblockやscroll-margin-top)もE2の範囲外(別コミット)
 // のため対象外。
+//
+// 【R3(extraItems)で追加した2項目】persistEstimateForm()・generateEstimateSheet()が
+// 共通の読み取りヘルパーreadExtraItemsFromDOM()を呼んでいることを固定する(下記
+// 「readExtraItemsFromDOM()を呼ぶ」の2テスト)。空行の除外条件をこの2箇所が別々に
+// 持つ二重管理を再発させないための固定。
+//
+// 【R3(extraItems)で見送った候補とその理由】
+// - createExtraItemRowHTML()のflex:6/flex:4という具体的な幅比率の固定: この機能は
+//   108px固定→130px固定→flex:6/4と短期間に3回幅の配分が変わっており、UIの微調整が
+//   今後も起こりやすい実装詳細。ここを固定すると、次に比率を調整するたびにテストの
+//   修正が必要になり、テストの維持コストが実際に守りたい価値(見た目の破綻防止)を
+//   上回ると判断した。
+// - .extra-item-rowの折り返し・モバイル幅での見た目: このファイルの方式(文字列読み+
+//   波括弧カウント)はDOMレイアウト計算を伴わないため、実際の折り返し・幅の見た目は
+//   そもそも検証できない。
+// - updateEstimatePreview()の合計金額計算(materialSubtotal + laborPrice + visitPrice +
+//   extraItemsTotal)にextraItemsが含まれること: readExtraItemsFromDOM()を呼んでいる
+//   こと自体は他の2箇所と同じパターンで固定できるが、計算式そのものの文字列一致は
+//   壊れやすく、実際の計算結果(動的な値)はこの方式(実行せずソースを読むだけ)では
+//   検証できない。観点の目安にも明示されていなかったため優先度は低いと判断した。
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -189,5 +209,28 @@ test('saveEstimateCaseName()のボタン・関数定義、estimate-case-name-msg
   assert.ok(
     !INDEX_HTML.includes('estimate-case-name-msg'),
     'estimate-case-name-msg(撤去済みのメッセージ要素)への参照が復活している'
+  );
+});
+
+// ===== 12. persistEstimateForm(): readExtraItemsFromDOM()を呼ぶこと =====
+
+test('persistEstimateForm(): readExtraItemsFromDOM()を呼び、extraItemsとしてestimateMetaに含める', () => {
+  assert.ok(
+    persistEstimateFormBody.includes('readExtraItemsFromDOM()'),
+    'readExtraItemsFromDOM()の呼び出しが見つからない(独自に読み直すと空行の除外条件が二重管理になる)'
+  );
+});
+
+// ===== 13. generateEstimateSheet(): 同じreadExtraItemsFromDOM()を呼ぶこと =====
+//
+// 【この固定の意図】persistEstimateForm()とgenerateEstimateSheet()が別々に空行の
+// 除外ロジックを持つと、estimateMetaの他フィールド(laborPrice/visitPriceの`>= 0`
+// 検証)で既に起きている二重管理の構図をextraItemsでも再発させることになる。
+// readExtraItemsFromDOM()という同じ関数を両方が呼んでいることを固定する。
+
+test('generateEstimateSheet(): readExtraItemsFromDOM()を呼び、persistEstimateForm()と同じ読み取りロジックを使う', () => {
+  assert.ok(
+    generateEstimateSheetBody.includes('readExtraItemsFromDOM()'),
+    'readExtraItemsFromDOM()の呼び出しが見つからない(persistEstimateForm()と別のロジックで読み直している疑い)'
   );
 });

@@ -375,3 +375,198 @@ test('PATCH { estimateFormSave, customerName } 同時送信 → estimateFormSave
     'customerName単体分岐に流れてしまっている(順序が逆)'
   );
 });
+
+// ----- extraItems(残課題: 見積書フォームの任意の費用項目。R3) -----
+// lib/cases.js の normalizeExtraItems() の検証(label50文字切り詰め・amountのマイナス
+// 許容・不正値の0フォールバック・配列でない入力/非オブジェクト要素の扱い)と、
+// applyEstimateMeta()・restoreCaseFromImport()の両方がそこを通ることを固定する。
+// normalizeExtraItems()自体はexportされていない(lib/cases.jsの既存の慣習として、
+// lib層の検証ロジックはAPIハンドラ経由のみでテストしており、直接importする専用の
+// unitテストファイルは無い)ため、このファイルの慣習(APIハンドラを叩く)に揃える。
+//
+// 【見送った候補とその理由】
+// - 「配列でない入力」と「配列内の非オブジェクト要素」は当初別々の候補だったが、
+//   1つのテストにまとめた(下記「配列でない入力は[]、配列内の非オブジェクト要素は
+//   除外される」)。どちらも「不正な形の入力を安全側に倒す」という同じ関心事のため、
+//   分ける実益が薄い。
+// - applyEstimateMeta()・restoreCaseFromImport()双方の本体が`normalizeExtraItems(`を
+//   呼んでいることをソース文字列で確認する構造テストは見送った。下記の「同じ入力が
+//   同じ結果に正規化される」テスト(挙動の一致)のほうが目的として強く、両方は不要。
+//   ソース文字列での固定は実装の書き方そのものを縛るため壊れやすいうえ、たとえ
+//   誰かが将来normalizeExtraItems()を呼ばずに別の同等ロジックを書いたとしても、
+//   結果が一致している限り実害は無い(挙動テストなら検出できないが、それでよい)。
+// - 旧データ互換(estimateMetaはあるがextraItemsキーが無いレコード)のテストは見送った。
+//   フェイクRedis(tests/support/fakes/redis.mjs)への直接注入という、このリポジトリに
+//   前例のない手法の導入が必要になり、コストに見合わない。この互換性は
+//   normalizeCase()の既存の仕組み(cartItems等でも使っている「配列であることだけ
+//   保証する」パターン)にそのまま乗っているだけで、extraItems固有の新しいリスクは
+//   低いと判断した。
+
+test('PATCH { estimateFormSave: { estimateMeta: { extraItems } } }: labelは50文字に切り詰められる', async () => {
+  const created = await createNormalCase('label切り詰めテスト様');
+  setPlan('light');
+
+  const longLabel = 'あ'.repeat(60);
+  const req = fakeReq(
+    { estimateFormSave: { estimateMeta: { extraItems: [{ label: longLabel, amount: 1000 }] } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.estimateMeta.extraItems.length, 1);
+  assert.equal(
+    res.body.case.estimateMeta.extraItems[0].label,
+    longLabel.slice(0, 50),
+    'labelが50文字に切り詰められていない'
+  );
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { extraItems } } }: amountはマイナスを許容する(値引き)', async () => {
+  const created = await createNormalCase('マイナス許容テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { estimateFormSave: { estimateMeta: { extraItems: [{ label: '値引き', amount: -3000 }] } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(
+    res.body.case.estimateMeta.extraItems,
+    [{ label: '値引き', amount: -3000 }],
+    'マイナスのamountが0以上に補正されてしまっている(laborPrice/visitPriceの>= 0ガードをコピーしていないか)'
+  );
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { extraItems } } }: amountが不正値のときは0にフォールバックし、行(label)は残る', async () => {
+  const created = await createNormalCase('不正値テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { estimateFormSave: { estimateMeta: { extraItems: [{ label: '謎の項目', amount: 'abc' }] } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(
+    res.body.case.estimateMeta.extraItems,
+    [{ label: '謎の項目', amount: 0 }],
+    '不正なamountで行ごと消えてしまっている(labelが入力済みの行は残すべき)'
+  );
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { extraItems } } }: 配列でない入力は[]、配列内の非オブジェクト要素は除外される', async () => {
+  const created = await createNormalCase('配列以外テスト様');
+  setPlan('light');
+
+  const reqNotArray = fakeReq(
+    { estimateFormSave: { estimateMeta: { extraItems: 'not-an-array' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const resNotArray = fakeRes();
+  await handler(reqNotArray, resNotArray);
+  assert.equal(resNotArray.statusCode, 200);
+  assert.deepEqual(resNotArray.body.case.estimateMeta.extraItems, [], '配列でない入力が[]になっていない');
+
+  const reqMixed = fakeReq(
+    {
+      estimateFormSave: {
+        estimateMeta: { extraItems: [null, 'x', 123, { label: '正常項目', amount: 500 }] },
+      },
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const resMixed = fakeRes();
+  await handler(reqMixed, resMixed);
+  assert.equal(resMixed.statusCode, 200);
+  assert.deepEqual(
+    resMixed.body.case.estimateMeta.extraItems,
+    [{ label: '正常項目', amount: 500 }],
+    '配列内の非オブジェクト要素(null・文字列・数値)が除外されていない、または正常な要素まで消えている'
+  );
+});
+
+// テストデータ(label・amountとも最初から正規化済みの値)のため、このテスト単体では
+// normalizeExtraItems()を通しているかは検出できない(その役目は下の「同じ結果に
+// 正規化される」テスト(L-6)が担う)。ここでの役目はrestoreImport経由でextraItemsが
+// 保存されるという基本動作の確認。
+test('PATCH { restoreImport: { estimateMeta } }: extraItemsを含むestimateMetaがそのまま復元される', async () => {
+  const created = await createNormalCase('復元テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    {
+      restoreImport: {
+        estimateMeta: {
+          clientName: '復元太郎',
+          extraItems: [
+            { label: '値引き', amount: -2000 },
+            { label: '駐車場代', amount: 500 },
+          ],
+        },
+      },
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.estimateMeta.clientName, '復元太郎');
+  assert.deepEqual(res.body.case.estimateMeta.extraItems, [
+    { label: '値引き', amount: -2000 },
+    { label: '駐車場代', amount: 500 },
+  ]);
+});
+
+// 【この固定の意図】applyEstimateMeta()(estimateFormSave/estimateMetaアクション経由)と
+// restoreCaseFromImport()(restoreImportアクション経由)は、estimateMeta導入時から
+// 別々に「同じ検証ロジックを持つ」という二重管理の構図があった(L1のコミットコメント
+// 参照)。extraItemsではnormalizeExtraItems()に検証を集約して両方から呼ぶ設計にしたが、
+// この集約が実際に効いていること(=どちらの経路を通っても結果が一致すること)を
+// 同じ壊れた入力を両経路に送って確認する。将来どちらか一方だけ直し忘れる/別ロジックを
+// 書いてしまう事故があれば、この結果不一致で検出できる。
+test('estimateMeta更新(applyEstimateMeta())とrestoreImport(restoreCaseFromImport())で、同じextraItems入力が同じ結果に正規化される', async () => {
+  const rawExtraItems = [
+    { label: 'あ'.repeat(60), amount: -1500 }, // 50文字切り詰め + マイナス許容
+    null, // 非オブジェクト要素は除外
+    { label: '正常項目', amount: 'abc' }, // 不正amountは0にフォールバック
+  ];
+  const expected = [
+    { label: 'あ'.repeat(50), amount: -1500 },
+    { label: '正常項目', amount: 0 },
+  ];
+
+  const viaEstimateMeta = await createNormalCase('経路比較A様');
+  setPlan('light');
+  const req1 = fakeReq(
+    { estimateFormSave: { estimateMeta: { extraItems: rawExtraItems } } },
+    { method: 'PATCH', query: { id: viaEstimateMeta.id } }
+  );
+  const res1 = fakeRes();
+  await handler(req1, res1);
+
+  const viaRestoreImport = await createNormalCase('経路比較B様');
+  const req2 = fakeReq(
+    { restoreImport: { estimateMeta: { extraItems: rawExtraItems } } },
+    { method: 'PATCH', query: { id: viaRestoreImport.id } }
+  );
+  const res2 = fakeRes();
+  await handler(req2, res2);
+
+  assert.equal(res1.statusCode, 200);
+  assert.equal(res2.statusCode, 200);
+  assert.deepEqual(res1.body.case.estimateMeta.extraItems, expected, 'estimateMeta経路の正規化結果が期待と異なる');
+  assert.deepEqual(res2.body.case.estimateMeta.extraItems, expected, 'restoreImport経路の正規化結果が期待と異なる');
+  assert.deepEqual(
+    res1.body.case.estimateMeta.extraItems,
+    res2.body.case.estimateMeta.extraItems,
+    '2つの経路で正規化結果が食い違っている(二重管理の再発の疑い)'
+  );
+});
