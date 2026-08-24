@@ -190,6 +190,12 @@
       height: 40px;
       font-size: 18px;
     }
+    /* .remove-btn-spacer(施工費/出張費の行末に置く見えないスペーサー)も同じ幅で
+       追従させる。.extra-item-removeのサイズが変わるブレークポイントと同じ場所に
+       書くことで、片方だけ直し忘れる事故を避ける。 */
+    .remove-btn-spacer {
+      width: 40px;
+    }
 
     /* 「写真を撮る」「ギャラリーから選ぶ」の2ボタンは横並びだと375px幅で
        窮屈になるため縦積みにする */
@@ -1072,6 +1078,21 @@
     flex-shrink: 0;
   }
 
+  /* 施工費/出張費の行(.estimate-form-row)の末尾に置く、.extra-item-removeと同じ幅の
+     見えないスペーサー。目的は「4行の金額欄(施工費・出張費・追加した費用項目)を
+     縦に揃える」こと。追加行だけ[項目名][金額][✕ボタン]の3要素構成で、施工費/出張費は
+     [項目名][金額]の2要素構成のため、ボタン幅ぶんだけ金額欄の位置がずれる。
+     display:noneではなくvisibility:hiddenにするのは、display:noneだとflex
+     レイアウトから要素ごと消えて幅を確保できないため。ボタンの意味を持たせる
+     必要が無いので<button>ではなく<span>にする。幅はモバイル(767px以下)で
+     .extra-item-removeが40pxになるのに合わせ、上のmax-width:767pxブロックで
+     追従させる。 */
+  .remove-btn-spacer {
+    width: 28px;
+    flex-shrink: 0;
+    visibility: hidden;
+  }
+
   .price-highlight {
     background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(124,58,237,0.1));
     border: 1px solid rgba(79,142,247,0.3);
@@ -1385,17 +1406,26 @@
 
     <div class="input-card">
       <div class="section-label">金額入力</div>
-      <!-- flex:6/4はインライン上書き(CSSルール本体は変更しない)。.estimate-form-row
-           .field-keyのmin-width:90pxは材料費小計の行にも効いており、そちらは金額入力行
-           ではないため巻き込みたくない。extraItemsの追加行(flex:6/4)と金額欄の左右を
-           縦に揃えるための変更。 -->
+      <!-- flex:6/4・font-size/color・末尾のスペーサーはすべてインライン上書き(CSSルール
+           本体は変更しない)。.estimate-form-row .field-keyのmin-width:90px・font-size:
+           12px・color:var(--text2)は材料費小計の行にも効いており、そちらは金額入力行
+           ではないため巻き込みたくない。目的はどれも同じで、施工費・出張費・追加した
+           費用項目(extraItems)の4行の金額欄を縦に揃え、見た目の強さも揃えること。
+           - flex:6/4: 追加行(createExtraItemRowHTML())と同じ比率にする
+           - font-size:14px;color:var(--text);: 隣の追加項目の入力欄(.stacked-input)と
+             同じ見た目にする。ここだけ12px・グレーで弱く見えていたため
+           - 末尾の.remove-btn-spacer: 追加行は[項目名][金額][✕ボタン]の3要素構成だが
+             こちらは[項目名][金額]の2要素構成のため、ボタン幅ぶん金額欄の位置がずれる。
+             見えないスペーサーで幅だけ合わせる -->
       <div class="estimate-form-row">
-        <span class="field-key" style="flex:6;">施工費</span>
+        <span class="field-key" style="flex:6;font-size:14px;color:var(--text);">施工費</span>
         <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
+        <span class="remove-btn-spacer"></span>
       </div>
       <div class="estimate-form-row">
-        <span class="field-key" style="flex:6;">出張費</span>
+        <span class="field-key" style="flex:6;font-size:14px;color:var(--text);">出張費</span>
         <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
+        <span class="remove-btn-spacer"></span>
       </div>
       <!-- 任意の費用項目(extraItems)。値引きは項目種別を分けず、マイナス金額の項目として
            同じ配列に乗せる(lib/cases.js normalizeExtraItems()参照)。行はidを振らず、
@@ -5535,8 +5565,10 @@ function createExtraItemRowHTML(label, amount) {
   // .sheet-tableのth width指定を参照)に揃え、項目名flex:6・金額側(.yen-prefix)flex:4
   // にする。固定幅(130px)にしていた前バージョンはプレースホルダ「項目名（例：値引き）」
   // すら入りきらず、金額は数千万円台(11桁程度)まで見込んでも4側で十分収まる。
+  // gap:10pxは施工費/出張費の行(.estimate-form-row、CSS本体のgap:10px)に揃えたもの
+  // (以前は8pxで、金額欄の位置が縦にわずかにずれる一因になっていた)。
   return `
-    <div class="extra-item-row" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+    <div class="extra-item-row" style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
       <input type="text" class="stacked-input extra-item-label" placeholder="項目名（例：値引き）"
              maxlength="50" style="flex:6;margin-bottom:0;" value="${escapeHtml(label)}"
              oninput="updateEstimatePreview()" />
