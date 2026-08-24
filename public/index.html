@@ -5527,16 +5527,16 @@ function cartMaterialSubtotal() {
 // 書き戻しがmeta.laborPrice || ''で0を空欄にしているのと同じ扱い。マイナス値は
 // ||で潰れず正しく表示される)。
 function createExtraItemRowHTML(label, amount) {
-  // 施工費/出張費の行(項目名90px固定・金額側がflex:1で残り全部)とは逆に、項目名を
-  // 130px固定・金額側をflex:1にする。項目名がラベル(span)ではなく可変長のinputで
-  // 「駐車場代」程度の文字数を要することが多いため、90pxに揃えると窮屈になる。
-  // 少し広めの固定幅を取り、金額欄の右端を他の行と揃えることを優先する。
+  // 見積書の品名・内容(60%)と金額(40%)の比率(buildEstimateSheetHTML()の
+  // .sheet-tableのth width指定を参照)に揃え、項目名flex:6・金額側(.yen-prefix)flex:4
+  // にする。固定幅(130px)にしていた前バージョンはプレースホルダ「項目名（例：値引き）」
+  // すら入りきらず、金額は数千万円台(11桁程度)まで見込んでも4側で十分収まる。
   return `
     <div class="extra-item-row" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
       <input type="text" class="stacked-input extra-item-label" placeholder="項目名（例：値引き）"
-             maxlength="50" style="flex:0 0 130px;margin-bottom:0;" value="${escapeHtml(label)}"
+             maxlength="50" style="flex:6;margin-bottom:0;" value="${escapeHtml(label)}"
              oninput="updateEstimatePreview()" />
-      <div class="yen-prefix" style="flex:1;">
+      <div class="yen-prefix" style="flex:4;">
         <span>¥</span>
         <input type="number" class="num-input extra-item-amount" placeholder="0"
                value="${amount || ''}" oninput="updateEstimatePreview()" />
