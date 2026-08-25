@@ -4273,7 +4273,19 @@ async function handleImportFile(input) {
 }
 
 async function refreshCartCase() {
-  if (!currentCartCaseId) {
+  // 呼び出した瞬間のcurrentCartCaseIdをtargetCaseIdとして固定する。この関数は
+  // await(通信)を挟むため、応答が返ってくるまでの間にcurrentCartCaseIdが
+  // 別の案件へ切り替わることがある(例: このGETがまだ通信中のうちに、利用者が
+  // 別の案件の「見積書を作成/編集」を押してsetActiveCase()が別のcurrentCartCaseId
+  // を設定する)。応答を受け取った後にcurrentCartCaseIdを読み直すと、既に別の
+  // 案件に切り替わった後の状態を、古い(targetCaseId宛の)応答で上書きしてしまう
+  // (実際にこの経路でnoteFormCaseIdが誤って一致してしまい、切り替え後もnote-input
+  // が古い案件の値のまま残り、それが新しい案件へ誤保存される事故が起きた)。
+  // 以後は必ずtargetCaseIdを基準にし、応答が返った時点でcurrentCartCaseIdと
+  // 食い違っていたら(＝待っている間に案件が切り替わっていたら)、この応答はもう
+  // 「現在アクティブな案件」のものではないので何も書き換えずに抜ける。
+  const targetCaseId = currentCartCaseId;
+  if (!targetCaseId) {
     cartCase = null;
     renderCartItems();
     updateCartBadge();
@@ -4281,8 +4293,10 @@ async function refreshCartCase() {
   }
 
   try {
-    const response = await authFetch(`/api/cases/${currentCartCaseId}`);
+    const response = await authFetch(`/api/cases/${targetCaseId}`);
     const data = await response.json();
+
+    if (targetCaseId !== currentCartCaseId) return; // 待っている間に案件が切り替わっていた
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -4303,15 +4317,16 @@ async function refreshCartCase() {
     cartCase = data.case;
 
     // 案件に保存済みの追加キーワードをnote-inputへ引き継ぐ。noteFormCaseIdと
-    // currentCartCaseIdが一致する間(＝同じ案件のままrefreshCartCase()が呼ばれた
+    // targetCaseIdが一致する間(＝同じ案件のままrefreshCartCase()が呼ばれた
     // 場合。openCartModal()等)は書き戻しをスキップする。入力中(まだblurしていない)
     // の追加キーワードを上書きしてしまわないため(estimateFormCaseIdと同じ考え方)。
-    if (noteFormCaseId !== currentCartCaseId) {
+    if (noteFormCaseId !== targetCaseId) {
       const noteInput = document.getElementById('note-input');
       if (noteInput) noteInput.value = cartCase.additionalKeyword || '';
-      noteFormCaseId = currentCartCaseId;
+      noteFormCaseId = targetCaseId;
     }
   } catch (err) {
+    if (targetCaseId !== currentCartCaseId) return;
     cartCase = null;
   }
   renderCartItems();
@@ -4327,21 +4342,33 @@ async function refreshCartCase() {
 // 違い、検索の補助情報という位置づけのため、失敗を利用者の作業を止めてまで
 // 知らせる必要は無いと判断。ただしデバッグ用にconsole.errorへは残す)。
 async function saveAdditionalKeywordOnBlur() {
-  if (!currentCartCaseId) return;
+  // refreshCartCase()と同じ理由でtargetCaseIdを固定する。noteInput.valueも
+  // ここで(awaitの前に)読み切っておくことで、「どの値を」「どの案件へ」保存
+  // しようとしているかの2つを、通信中にcurrentCartCaseIdが変わっても揺らがない
+  // 形で固定する。応答が返った時点でcurrentCartCaseIdと食い違っていたら(＝保存中に
+  // 案件が切り替わっていたら)、この保存結果は「現在アクティブな案件」の状態
+  // ではないため、cartCase/noteFormCaseIdを書き換えずに抜ける。ここを怠ると、
+  // 切り替え後の案件が「(古い案件の値のまま)自分の値として引き継ぎ済み」と
+  // 誤認され、次にnote-inputからフォーカスが外れたときに古い値がそのまま
+  // 新しい案件へ誤って保存されてしまう(実際に発生した事故)。
+  const targetCaseId = currentCartCaseId;
+  if (!targetCaseId) return;
 
   const noteInput = document.getElementById('note-input');
   if (!noteInput) return;
   const value = noteInput.value.trim();
 
-  if (cartCase && cartCase.id === currentCartCaseId && (cartCase.additionalKeyword || '') === value) return;
+  if (cartCase && cartCase.id === targetCaseId && (cartCase.additionalKeyword || '') === value) return;
 
   try {
-    const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
+    const response = await authFetch(`/api/cases/${targetCaseId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ additionalKeyword: value })
     });
     const data = await response.json().catch(() => null);
+
+    if (targetCaseId !== currentCartCaseId) return; // 保存中に案件が切り替わっていた
 
     if (!response.ok) {
       if (response.status === 401) {
@@ -4354,8 +4381,8 @@ async function saveAdditionalKeywordOnBlur() {
     }
 
     cartCase = data.case;
-    noteFormCaseId = currentCartCaseId;
-    if (currentCaseDetailData && currentCaseDetailData.id === currentCartCaseId) {
+    noteFormCaseId = targetCaseId;
+    if (currentCaseDetailData && currentCaseDetailData.id === targetCaseId) {
       currentCaseDetailData = data.case;
     }
   } catch (err) {
