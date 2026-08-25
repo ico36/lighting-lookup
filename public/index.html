@@ -700,6 +700,28 @@
   .estimate-form-row .field-key {
     min-width: 90px;
   }
+  /* 施工費・出張費と任意費用項目で金額欄を同じ列に固定する。Flexboxでは、枠線付きの
+     テキスト入力欄と枠線なしのラベルで最小幅の扱いが異なり、同じflex:6/4でも金額欄の
+     実測幅がずれることがある。3列Grid（項目名/金額/削除ボタンまたはスペーサー）に
+     統一し、金額欄を必ず第2列に置く。minmax(0, ...)にして入力欄の既定最小幅が列配分を
+     押し広げないようにする。 */
+  .estimate-price-row {
+    display: grid;
+    grid-template-columns: minmax(0, 6fr) minmax(0, 4fr) 28px;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .estimate-price-row > .field-key,
+  .estimate-price-row > .stacked-input,
+  .estimate-price-row > .yen-prefix {
+    min-width: 0;
+  }
+  @media (max-width: 767px) {
+    .estimate-price-row {
+      grid-template-columns: minmax(0, 6fr) minmax(0, 4fr) 40px;
+    }
+  }
   .num-input {
     background: var(--bg);
     border: 1px solid var(--border);
@@ -1411,26 +1433,24 @@
            12px・color:var(--text2)は材料費小計の行にも効いており、そちらは金額入力行
            ではないため巻き込みたくない。目的はどれも同じで、施工費・出張費・追加した
            費用項目(extraItems)の4行の金額欄を縦に揃え、見た目の強さも揃えること。
-           - flex:6/4: 追加行(createExtraItemRowHTML())と同じ比率にする
+           - 3列Grid: 施工費・出張費と追加行で同じ列定義を使い、金額欄を第2列に固定する
            - font-size:14px;color:var(--text);: 隣の追加項目の入力欄(.stacked-input)と
              同じ見た目にする。ここだけ12px・グレーで弱く見えていたため
            - padding-left:15px: .extra-item-labelが継承する.stacked-inputのpadding-left
              (14px)+border(1px)の合計。ラベル(span、枠無し)は左端から文字が始まるが、
              追加行の項目名(input、枠あり)は内側から始まるため、そのままだと文字の頭が
              ずれる。この値で文字の開始位置を揃える
-           - box-sizing:border-box: padding-leftをflex:6の幅に含める。追加行と同じ
-             6:4配分を保ち、金額欄の左端を揃える
            - 末尾の.remove-btn-spacer: 追加行は[項目名][金額][✕ボタン]の3要素構成だが
              こちらは[項目名][金額]の2要素構成のため、ボタン幅ぶん金額欄の位置がずれる。
              見えないスペーサーで幅だけ合わせる -->
-      <div class="estimate-form-row">
-        <span class="field-key" style="flex:6;box-sizing:border-box;font-size:14px;color:var(--text);padding-left:15px;">施工費</span>
-        <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
+      <div class="estimate-price-row">
+        <span class="field-key" style="font-size:14px;color:var(--text);padding-left:15px;">施工費</span>
+        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
         <span class="remove-btn-spacer"></span>
       </div>
-      <div class="estimate-form-row">
-        <span class="field-key" style="flex:6;box-sizing:border-box;font-size:14px;color:var(--text);padding-left:15px;">出張費</span>
-        <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
+      <div class="estimate-price-row">
+        <span class="field-key" style="font-size:14px;color:var(--text);padding-left:15px;">出張費</span>
+        <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
         <span class="remove-btn-spacer"></span>
       </div>
       <!-- 任意の費用項目(extraItems)。値引きは項目種別を分けず、マイナス金額の項目として
@@ -5568,17 +5588,16 @@ function cartMaterialSubtotal() {
 // ||で潰れず正しく表示される)。
 function createExtraItemRowHTML(label, amount) {
   // 見積書の品名・内容(60%)と金額(40%)の比率(buildEstimateSheetHTML()の
-  // .sheet-tableのth width指定を参照)に揃え、項目名flex:6・金額側(.yen-prefix)flex:4
-  // にする。固定幅(130px)にしていた前バージョンはプレースホルダ「項目名（例：値引き）」
+  // .sheet-tableのth width指定を参照)に揃え、.estimate-price-rowの共通3列Gridで
+  // 項目名を第1列・金額側(.yen-prefix)を第2列にする。固定幅(130px)にしていた前バージョンはプレースホルダ「項目名（例：値引き）」
   // すら入りきらず、金額は数千万円台(11桁程度)まで見込んでも4側で十分収まる。
-  // gap:10pxは施工費/出張費の行(.estimate-form-row、CSS本体のgap:10px)に揃えたもの
-  // (以前は8pxで、金額欄の位置が縦にわずかにずれる一因になっていた)。
+  // 第3列は削除ボタンで、施工費/出張費のスペーサーと同じ幅にする。
   return `
-    <div class="extra-item-row" style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+    <div class="estimate-price-row extra-item-row">
       <input type="text" class="stacked-input extra-item-label" placeholder="項目名（例：値引き）"
-             maxlength="50" style="flex:6;margin-bottom:0;" value="${escapeHtml(label)}"
+             maxlength="50" style="margin-bottom:0;" value="${escapeHtml(label)}"
              oninput="updateEstimatePreview()" />
-      <div class="yen-prefix" style="flex:4;">
+      <div class="yen-prefix">
         <span>¥</span>
         <input type="number" class="num-input extra-item-amount" placeholder="0"
                value="${amount || ''}" oninput="updateEstimatePreview()" />
