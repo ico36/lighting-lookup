@@ -1418,16 +1418,18 @@
              (14px)+border(1px)の合計。ラベル(span、枠無し)は左端から文字が始まるが、
              追加行の項目名(input、枠あり)は内側から始まるため、そのままだと文字の頭が
              ずれる。この値で文字の開始位置を揃える
+           - box-sizing:border-box: padding-leftをflex:6の幅に含める。追加行と同じ
+             6:4配分を保ち、金額欄の左端を揃える
            - 末尾の.remove-btn-spacer: 追加行は[項目名][金額][✕ボタン]の3要素構成だが
              こちらは[項目名][金額]の2要素構成のため、ボタン幅ぶん金額欄の位置がずれる。
              見えないスペーサーで幅だけ合わせる -->
       <div class="estimate-form-row">
-        <span class="field-key" style="flex:6;font-size:14px;color:var(--text);padding-left:15px;">施工費</span>
+        <span class="field-key" style="flex:6;box-sizing:border-box;font-size:14px;color:var(--text);padding-left:15px;">施工費</span>
         <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
         <span class="remove-btn-spacer"></span>
       </div>
       <div class="estimate-form-row">
-        <span class="field-key" style="flex:6;font-size:14px;color:var(--text);padding-left:15px;">出張費</span>
+        <span class="field-key" style="flex:6;box-sizing:border-box;font-size:14px;color:var(--text);padding-left:15px;">出張費</span>
         <div class="yen-prefix" style="flex:4;"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
         <span class="remove-btn-spacer"></span>
       </div>
