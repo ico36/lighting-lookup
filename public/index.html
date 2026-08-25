@@ -227,6 +227,23 @@
     margin-bottom: 12px;
   }
 
+  /* 検索フォーム・見積りフォームそれぞれの先頭に置く大見出し(「■器具検索」等)。
+     カード内の.section-labelより一段階大きく、複数の.input-cardをまたいで
+     セクションをまとめる役割のため独立したクラスにする。 */
+  .form-section-heading {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0 0 14px;
+  }
+
+  /* 検索フォームと見積りフォームの間に置く区切り線 */
+  .form-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 28px 0 20px;
+  }
+
   .model-input-wrap {
     display: flex;
     gap: 10px;
@@ -1322,6 +1339,8 @@
 
 <main id="app-main" style="display:none;">
 
+  <div class="form-section-heading">■器具検索</div>
+
   <div class="input-card">
     <div class="section-label">型番で検索</div>
     <div class="model-input-wrap">
@@ -1371,8 +1390,9 @@
   </div>
 
   <div class="input-card">
-    <div class="section-label">現場メモ（任意）</div>
-    <textarea class="note-input" id="note-input" placeholder="設置場所、取り付け方法、お客さんの要望など"></textarea>
+    <div class="section-label">追加キーワード（任意）</div>
+    <textarea class="note-input" id="note-input" placeholder="例：防水対応が必要／屋外用／明るさ重視／色温度は電球色希望　など" onblur="saveAdditionalKeywordOnBlur()"></textarea>
+    <div style="font-size:12px;color:var(--text2);margin-top:6px;">設置場所や希望条件を入力すると、検索結果の精度が上がります</div>
   </div>
 
   <div id="result-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:16px;"></div>
@@ -1381,6 +1401,8 @@
   </div>
 
   <div id="estimate-form-area" style="display:none;">
+    <hr class="form-divider">
+    <div class="form-section-heading">■見積り内容</div>
     <div id="estimate-form-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:14px;"></div>
     <div id="duplicated-from-warning" class="warning-note" style="display:none;"></div>
     <div class="input-card">
@@ -1570,7 +1592,7 @@
       <div class="help-section" id="help-sec-1">
         <div class="help-section-title">1. 器具を調べる（型番入力・写真検索）</div>
         <p>型番がわかる場合は「型番で検索」欄に品番を入力して「調べる」を押してください。型番が読み取れない・わからない場合は、写真から調べることもできます。型番ラベルのアップ、器具全体がわかる写真など、角度の違う写真を複数枚（最大5枚）アップロードすると精度が上がります。</p>
-        <p>「現場メモ」には設置場所や取り付け方法、お客様の要望などを自由に書き込めます（任意）。</p>
+        <p>「追加キーワード」には設置場所や希望条件（防水対応、屋外用、明るさ重視など）を自由に書き込めます（任意）。入力すると検索結果の精度が上がります。</p>
       </div>
       <div class="help-section" id="help-sec-2">
         <div class="help-section-title">2. 後継品候補・アップグレード提案の見方</div>
@@ -2012,6 +2034,7 @@ document.getElementById('header-menu-actions').addEventListener('click', functio
     localStorage.removeItem('cart_case_id');
     cartCase = null;
     estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
+    noteFormCaseId = null; // note-inputが映していた案件も失われるためクリアする
   }
 }
 
@@ -3704,6 +3727,7 @@ async function archiveCaseHandler(btn, caseId) {
         localStorage.removeItem('cart_case_id');
         cartCase = null;
         estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
+        noteFormCaseId = null; // note-inputが映していた案件も失われるためクリアする
         renderCartItems();
         updateCartBadge();
       }
@@ -3915,7 +3939,16 @@ async function attachCurrentSearchToCase(btn) {
       // これをしないと、直後に候補を「カートに追加」した際、対象がここで
       // 選んだ案件とズレて別の(重複した)案件が作られてしまう。
       if (caseId !== currentCartCaseId) {
+        // setActiveCase()→refreshCartCase()は案件切り替えの一環として、
+        // note-inputを切り替え先の案件の保存済みadditionalKeywordで上書きする
+        // (新規案件なら空)。しかしここは「たった今この検索に使った追加キーワードを
+        // 案件へ保存する」操作の最中なので、切り替えで消してしまわず、切り替え後に
+        // 書き戻した上でこの案件の値として保存する。
+        const noteBeforeSwitch = document.getElementById('note-input').value;
         await setActiveCase(caseId);
+        document.getElementById('note-input').value = noteBeforeSwitch;
+        noteFormCaseId = caseId;
+        await saveAdditionalKeywordOnBlur();
       }
       await loadOpenCasesForAttach();
     } catch (err) {
@@ -3937,6 +3970,13 @@ let replacingItemId = null; // 「再検索して差し替え」対象のitemId�
 // 消さないため)。不一致なら必ず書き戻す(前の案件の入力がDOMに残ったまま別案件の
 // フォームとして見えてしまうのを防ぐため)。詳細はshowEstimateForm()のコメント参照。
 let estimateFormCaseId = null;
+
+// refreshCartCase()が最後にnote-inputへ書き戻した際のcurrentCartCaseId。
+// estimateFormCaseIdと同じ考え方で、「今note-inputが映している案件ID」を表す。
+// これとcurrentCartCaseIdが一致する間はrefreshCartCase()内での書き戻しをスキップする
+// (openCartModal()等、同じ案件のままrefreshCartCase()が呼ばれる経路で、入力中の
+// 追加キーワードがフォーカスを離れる前に上書きされてしまうのを防ぐため)。
+let noteFormCaseId = null;
 
 // 差し替えモードを終了する。replacingItemIdをクリアするだけでなく、検索結果を
 // 再描画して候補のボタンを「🛒 カートに追加」に、バナーを非表示に戻す。再描画せず
@@ -3981,6 +4021,16 @@ async function ensureCartCase() {
 
   currentCartCaseId = data.case.id;
   localStorage.setItem('cart_case_id', currentCartCaseId);
+
+  // 今note-inputに入っている値(この下書き案件のきっかけになった検索で使った
+  // 追加キーワード)をこの案件の値として保存する。ここでnoteFormCaseIdを
+  // 更新しておかないと、この後どこかでrefreshCartCase()が呼ばれた際(例:
+  // カートを開く)、noteFormCaseIdがまだこの新規案件を指していないために
+  // 「案件切り替え」とみなされ、案件作成前の下書き入力が保存前に空文字で
+  // 上書きされてしまう。
+  noteFormCaseId = currentCartCaseId;
+  await saveAdditionalKeywordOnBlur();
+
   return currentCartCaseId;
 }
 
@@ -4244,17 +4294,73 @@ async function refreshCartCase() {
       localStorage.removeItem('cart_case_id');
       cartCase = null;
       estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
+      noteFormCaseId = null; // note-inputが映していた案件も失われるためクリアする
       renderCartItems();
       updateCartBadge();
       return;
     }
 
     cartCase = data.case;
+
+    // 案件に保存済みの追加キーワードをnote-inputへ引き継ぐ。noteFormCaseIdと
+    // currentCartCaseIdが一致する間(＝同じ案件のままrefreshCartCase()が呼ばれた
+    // 場合。openCartModal()等)は書き戻しをスキップする。入力中(まだblurしていない)
+    // の追加キーワードを上書きしてしまわないため(estimateFormCaseIdと同じ考え方)。
+    if (noteFormCaseId !== currentCartCaseId) {
+      const noteInput = document.getElementById('note-input');
+      if (noteInput) noteInput.value = cartCase.additionalKeyword || '';
+      noteFormCaseId = currentCartCaseId;
+    }
   } catch (err) {
     cartCase = null;
   }
   renderCartItems();
   updateCartBadge();
+}
+
+// note-input(追加キーワード欄)からフォーカスが外れるたびに呼ばれる。現在アクティブな
+// 案件(currentCartCaseId)が無ければ保存先が無いので何もしない(検索しただけでまだ
+// どの案件にも紐付いていない状態。このとき入力した値はそのままリクエストには使われるが、
+// 案件が紐付くまでは保存されない。案件に紐付いた後の入力からサーバーへの保存が始まる)。
+// 値がcartCaseに保存済みの内容と同じ場合はリクエストを送らない(blurのたびに毎回
+// 通信が飛ぶのを避ける)。保存に失敗してもUIには出さない(見積書フォームの保存とは
+// 違い、検索の補助情報という位置づけのため、失敗を利用者の作業を止めてまで
+// 知らせる必要は無いと判断。ただしデバッグ用にconsole.errorへは残す)。
+async function saveAdditionalKeywordOnBlur() {
+  if (!currentCartCaseId) return;
+
+  const noteInput = document.getElementById('note-input');
+  if (!noteInput) return;
+  const value = noteInput.value.trim();
+
+  if (cartCase && cartCase.id === currentCartCaseId && (cartCase.additionalKeyword || '') === value) return;
+
+  try {
+    const response = await authFetch(`/api/cases/${currentCartCaseId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ additionalKeyword: value })
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      // CASE_ARCHIVEDを含め、失敗時は静かに諦める(コメント参照)
+      console.error('[saveAdditionalKeywordOnBlur] 保存に失敗しました', data);
+      return;
+    }
+
+    cartCase = data.case;
+    noteFormCaseId = currentCartCaseId;
+    if (currentCaseDetailData && currentCaseDetailData.id === currentCartCaseId) {
+      currentCaseDetailData = data.case;
+    }
+  } catch (err) {
+    console.error('[saveAdditionalKeywordOnBlur] 通信エラー', err);
+  }
 }
 
 function updateCartBadge() {

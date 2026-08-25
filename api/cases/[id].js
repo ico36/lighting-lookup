@@ -18,6 +18,8 @@
 //                                        を別々のリクエストで送ると、並列実行時に後勝ちで
 //                                        片方の更新が消える恐れがあるため、まとめて1回で確定させる
 //   { customerName }                  ... 案件名（案件一覧・案件詳細の表示名）を変更
+//   { additionalKeyword }             ... 検索フォームの「追加キーワード」欄の内容を更新
+//                                        （estimateMetaとは別。検索フォーム側で単独に保存する）
 //   { archive: true }                 ... 手動アーカイブ。status が完了/失注・キャンセルの
 //                                        案件のみ可（それ以外は403 CASE_NOT_ARCHIVABLE）。
 //                                        復元は実装しない。自動アーカイブ(cronによる
@@ -40,6 +42,7 @@ import {
   updateEstimateMeta,
   restoreCaseFromImport,
   updateCaseName,
+  updateAdditionalKeyword,
   updateCaseNameAndEstimateMeta,
   deleteCase,
   archiveCase,
@@ -96,7 +99,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, estimateFormSave, customerName, archive } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, estimateFormSave, customerName, additionalKeyword, archive } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -178,6 +181,11 @@ export default async function handler(req, res) {
 
       if (customerName !== undefined) {
         const updated = await updateCaseName(id, customerName);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (additionalKeyword !== undefined) {
+        const updated = await updateAdditionalKeyword(id, additionalKeyword);
         return res.status(200).json({ case: updated });
       }
 
