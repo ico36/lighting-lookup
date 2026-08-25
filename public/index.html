@@ -4460,6 +4460,7 @@ async function addCandidateToCart(btn, index, errorElId) {
       }
 
       cartCase = data.case;
+      renderCartTargetInfo(); // 検索結果画面の対象案件表示(下書き案件の自動作成含む)を即時反映
       updateCartBadge();
     } catch (err) {
       // 案件数の上限は ensureCartCase() が専用通知に出し済み。ここで汎用の
@@ -4511,19 +4512,41 @@ function closeCartModal() {
   updateEstimatePreview();
 }
 
+// 「対象の案件」表示(案件名・ステータス、または未紐付けメッセージ)を組み立てて、
+// それを表示している全箇所に反映する。表示先は2つ:
+//   #cart-target-info      ... カートモーダルの先頭
+//   #result-cart-target-info ... 検索結果画面、候補一覧のセクション見出し付近
+// 文言・組み立てロジックをここ1箇所に集約することで、2箇所の表示がズレることを防ぐ。
+// 呼び出し側は、どちらか一方(または両方)がまだDOMに無い状態でも安全に呼べる
+// (該当要素が無ければその表示先だけ静かにスキップする)。
+// cartCaseが変わるたびに(refreshCartCase()経由のrenderCartItems()だけでなく、
+// addCandidateToCart()の成功時にも)呼ぶこと。addCandidateToCart()は
+// カート内商品リストの再描画(renderCartItems()本体)までは必要ないため、
+// こちらだけを直接呼んでいる。
+function renderCartTargetInfo() {
+  // 案件名だけをやや目立たせる(太字)。ステータスや「対象の案件：」のラベル部分は
+  // 通常のウェイトのまま、警告色などの強い色は使わない(あくまで現在地の案内であって
+  // 警告ではないため)。textContentではなくinnerHTMLで組み立てるため、
+  // customerName(利用者が自由入力できる値)は必ずescapeHtml()を通す。
+  const html = cartCase
+    ? `対象の案件：<strong>${escapeHtml(cartCase.customerName || '（無題の案件）')}</strong>（${escapeHtml(cartCase.status || '')}）`
+    : '対象の案件はまだありません（候補をカートに追加すると自動作成されます）';
+
+  const modalEl = document.getElementById('cart-target-info');
+  if (modalEl) modalEl.innerHTML = html;
+
+  const resultEl = document.getElementById('result-cart-target-info');
+  if (resultEl) resultEl.innerHTML = html;
+}
+
 function renderCartItems() {
-  const targetInfoEl = document.getElementById('cart-target-info');
+  renderCartTargetInfo();
+
   const bodyEl = document.getElementById('cart-items-body');
   const subtotalEl = document.getElementById('cart-subtotal-amount');
   if (!bodyEl) return;
 
   const items = (cartCase && cartCase.cartItems) || [];
-
-  if (targetInfoEl) {
-    targetInfoEl.textContent = cartCase
-      ? `対象の案件：${cartCase.customerName || '（無題の案件）'}（${cartCase.status}）`
-      : '対象の案件はまだありません（候補をカートに追加すると自動作成されます）';
-  }
 
   bodyEl.innerHTML = items.length
     ? items.map(item => {
@@ -5262,6 +5285,7 @@ function renderResult(r) {
         <span class="result-title">${sectionTitle}</span>
         <div class="status-dot"></div>
       </div>
+      <div id="result-cart-target-info" style="padding:10px 20px;font-size:12px;color:var(--text2);background:var(--surface2);border-bottom:1px solid var(--border);"></div>
       <div class="result-body">
         ${candidatesHTML || `<div style="color:var(--text2);font-size:14px;">${emptyMessage}</div>`}
       </div>
@@ -5307,6 +5331,7 @@ function renderResult(r) {
 
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'none';
+  renderCartTargetInfo(); // 今組み込んだ#result-cart-target-info(中身は空)に対象案件の表示を反映する
   loadOpenCasesForAttach();
 }
 
