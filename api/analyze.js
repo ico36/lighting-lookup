@@ -197,6 +197,18 @@ export default async function handler(req, res) {
       return res.status(429).json(quotaExceededBody(reservation, limits));
     }
 
+    // ANTHROPIC_TIMEOUT_MS: config.maxDuration（60秒）より短い時間でJS側から
+    // 明示的にfetch()を中断させる。Vercelのmaxduration超過はプロセスごと強制終了
+    // されるため、この下のtry/catch（releaseSearch()の呼び出し）に一切到達できず、
+    // reserveSearch()で確保した枠が解放されないまま残ってしまう（実機のタイムアウトで
+    // 検索回数が消費される事故として確認済み）。maxDurationより先にこちら側で
+    // タイムアウトさせれば、必ずcatchブロックを通って枠を解放できる。
+    // 60秒との差(5秒)は、AbortController発火からreleaseSearch()の完了・レスポンス
+    // 送出までの後処理に要する時間の余裕。
+    const ANTHROPIC_TIMEOUT_MS = 55000;
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), ANTHROPIC_TIMEOUT_MS);
+
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -216,7 +228,8 @@ export default async function handler(req, res) {
               name: 'web_search'
             }
           ]
-        })
+        }),
+        signal: abortController.signal
       });
       const data = await response.json();
       if (!response.ok) {
@@ -227,12 +240,21 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ...data, quota: quotaFromReservation(reservation, limits) });
     } catch (err) {
-      // Anthropicへの接続失敗・レスポンスのJSON解析失敗など。確保した枠を戻してから
+      // Anthropicへの接続失敗・レスポンスのJSON解析失敗・上記タイムアウトによる
+      // AbortError(err.name === 'AbortError')など。確保した枠を戻してから
       // 外側のcatchに投げ直す（500レスポンスの生成はそちらに任せる）。
       await releaseSearch({ email, period, counted: reservation.counted });
       throw err;
+    } finally {
+      // fetch()が正常に終わった場合もタイムアウトを解除する（放置しても実害は
+      // 無いが、関数終了まで残り続けるタイマーを明示的に片付ける）。
+      clearTimeout(timeoutId);
     }
   } catch (err) {
+    if (err.name === 'AbortError') {
+      console.error('Anthropic API timeout (>55s)');
+      return res.status(504).json({ error: 'AIの応答に時間がかかりすぎたため中断しました。もう一度お試しください。' });
+    }
     console.error('Server error:', err);
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
