@@ -30,6 +30,17 @@
     padding: 0;
   }
 
+  /* headerと#header-case-barをまとめてstickyさせる外枠。header単体の高さは
+     PC幅(ボタン群の行の高さ)とモバイル幅(ハンバーガーの固定サイズ)で異なり
+     CSSだけからは確定できない(revealErrorEl()のコメント参照)ため、position:sticky
+     は個々の要素ではなくこの外枠1つにだけ持たせ、内側の高さがどう変わっても
+     「2つ合わせて画面上端に固定される」ことだけを保証する。 */
+  #header-sticky-group {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
   header {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
@@ -37,9 +48,26 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
+  }
+
+  /* 対象案件の常時表示バー。#cart-target-info(カートモーダル)・
+     #result-cart-target-info(検索結果画面)と同じトーン(13px・var(--text2)・
+     案件名だけ太字)を踏襲しつつ、header直下に常駐する帯として違和感が無いよう
+     headerと同じ背景色(var(--surface))を敷き、下端に薄い罫線で本文と区切る。
+     縦方向はheaderの16pxより大幅に抑え(6px)、常時表示でも圧迫感を出さない。
+     1行に収まらない案件名は折り返さず省略記号で切る(帯の高さを一定に保つため)。
+     ログイン前は空の帯が見えないよう、ログイン後にheader内の他ボタンと同じ
+     タイミングでdisplay:blockにする(JS側)。 */
+  #header-case-bar {
+    display: none;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 6px 20px;
+    font-size: 13px;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .logo {
@@ -1266,6 +1294,7 @@
 </head>
 <body>
 
+<div id="header-sticky-group">
 <header style="justify-content: space-between;">
   <div style="display: flex; align-items: center; gap: 12px;">
     <div class="logo">照明<span>サーチ</span></div>
@@ -1293,6 +1322,8 @@
     </button>
   </div>
 </header>
+<div id="header-case-bar"></div>
+</div>
 
 <div id="login-gate" style="max-width:400px;margin:60px auto;padding:0 16px;">
   <p style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.7;text-align:center;">
@@ -1961,7 +1992,12 @@ function revealErrorEl(el) {
   // モーダル内は固定ヘッダーが無いため対象外(el.closest('.modal-overlay')が
   // nullのときだけ、ページ本体のエラーとしてscroll-margin-topを設定する)。
   if (!el.closest('.modal-overlay')) {
-    const headerEl = document.querySelector('header');
+    // #header-sticky-group(header本体 + #header-case-bar)を丸ごと測る。
+    // position:stickyなのはこの外枠1つだけなので、実際に画面上端に固定される
+    // 高さはこの外枠のgetBoundingClientRect().heightと一致する
+    // (header単体を測ると、ログイン後に#header-case-barが表示されている分
+    // だけ足りず、その帯にエラーが隠れて見えなくなる)。
+    const headerEl = document.getElementById('header-sticky-group');
     if (headerEl) {
       // 高さを実行時に測るのは、PC幅ではCSS(padding+中身の高さ)だけから
       // ヘッダーの実際の高さを確定できないため(モバイル幅は.hamburger-btnの
@@ -2023,6 +2059,7 @@ document.getElementById('header-menu-actions').addEventListener('click', functio
     document.getElementById('announcements-btn').style.display = 'none';
     document.getElementById('cases-btn').style.display = 'none';
     document.getElementById('cart-btn').style.display = 'none';
+    document.getElementById('header-case-bar').style.display = 'none';
     document.getElementById('hamburger-btn').style.display = 'none';
     closeHeaderMenu();
     document.getElementById('login-email-input').value = ''; // 入力欄をクリア
@@ -2646,6 +2683,7 @@ async function checkCompanyAndRoute() {
     document.getElementById('announcements-btn').style.display = 'block';
     document.getElementById('cases-btn').style.display = 'block';
     document.getElementById('cart-btn').style.display = 'block';
+    document.getElementById('header-case-bar').style.display = 'block';
     document.getElementById('hamburger-btn').style.display = ''; // CSSのメディアクエリ（PC/モバイル）に表示を委ねる
     refreshCartCase();
     refreshAnnouncementsDot();
@@ -4502,11 +4540,12 @@ function closeCartModal() {
 }
 
 // 「対象の案件」表示(案件名・ステータス、または未紐付けメッセージ)を組み立てて、
-// それを表示している全箇所に反映する。表示先は2つ:
-//   #cart-target-info      ... カートモーダルの先頭
+// それを表示している全箇所に反映する。表示先は3つ:
+//   #cart-target-info        ... カートモーダルの先頭
 //   #result-cart-target-info ... 検索結果画面、候補一覧のセクション見出し付近
-// 文言・組み立てロジックをここ1箇所に集約することで、2箇所の表示がズレることを防ぐ。
-// 呼び出し側は、どちらか一方(または両方)がまだDOMに無い状態でも安全に呼べる
+//   #header-case-bar         ... headerの直下に常駐する帯(画面をまたいで常時表示)
+// 文言・組み立てロジックをここ1箇所に集約することで、3箇所の表示がズレることを防ぐ。
+// 呼び出し側は、いずれか(または全て)がまだDOMに無い状態でも安全に呼べる
 // (該当要素が無ければその表示先だけ静かにスキップする)。
 // cartCaseが変わるたびに(refreshCartCase()経由のrenderCartItems()だけでなく、
 // addCandidateToCart()の成功時にも)呼ぶこと。addCandidateToCart()は
@@ -4526,6 +4565,9 @@ function renderCartTargetInfo() {
 
   const resultEl = document.getElementById('result-cart-target-info');
   if (resultEl) resultEl.innerHTML = html;
+
+  const headerEl = document.getElementById('header-case-bar');
+  if (headerEl) headerEl.innerHTML = html;
 }
 
 function renderCartItems() {
