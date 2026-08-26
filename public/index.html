@@ -5214,6 +5214,37 @@ let lastResult = null;
 
 function renderResult(r) {
   lastResult = r;
+
+  // 照明器具として確認できなかった場合は、取付方式・ステータス・候補一覧など
+  // 通常の判定結果を一切出さず、専用の簡潔なメッセージ画面に切り替える
+  // (SYSTEM_PROMPTの指示により、is_lighting_fixture:falseのときmounting_type・
+  // status・current_product_info・alternative_models・successor_models・
+  // order_textはnullになっている前提。それらを読みに行く通常経路には進まない)。
+  if (r.is_lighting_fixture === false) {
+    lastResult._candidates = [];
+    document.getElementById('result-content').innerHTML = `
+      <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。</div>
+      <div class="result-card">
+        <div class="result-header">
+          <span class="result-title">調査結果</span>
+        </div>
+        <div class="result-body">
+          <div class="field-row">
+            <span class="field-key">入力型番</span>
+            <span class="field-val mono">${escapeHtml(r.original_model) || '—'}</span>
+          </div>
+          <div style="margin-top:12px;font-size:14px;color:var(--text2);line-height:1.7;">
+            💡 ${escapeHtml(r.fixture_check_note) || '入力された内容は照明器具として確認できませんでした。型番や写真をご確認のうえ、再度お試しください。'}
+          </div>
+        </div>
+      </div>
+    `;
+    document.getElementById('estimate-form-area').style.display = 'none';
+    document.getElementById('estimate-sheet-area').style.display = 'none';
+    renderCartTargetInfo();
+    return;
+  }
+
   const confidenceLabel = r.confidence === 'high' ? '確度：高' : r.confidence === 'medium' ? '確度：中' : '確度：低';
   const confidenceTag = r.confidence === 'high' ? 'tag-green' : r.confidence === 'medium' ? 'tag-yellow' : 'tag-blue';
   const statusTag = r.status === '廃番' ? 'tag-yellow' : r.status === '現行品' ? 'tag-green' : 'tag-blue';
