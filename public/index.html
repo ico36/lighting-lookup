@@ -2035,6 +2035,7 @@ document.getElementById('header-menu-actions').addEventListener('click', functio
     cartCase = null;
     estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
     noteFormCaseId = null; // note-inputが映していた案件も失われるためクリアする
+    resultFormCaseId = null; // 検索結果エリアが映していた案件も失われるためクリアする
   }
 }
 
@@ -3728,6 +3729,7 @@ async function archiveCaseHandler(btn, caseId) {
         cartCase = null;
         estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
         noteFormCaseId = null; // note-inputが映していた案件も失われるためクリアする
+        resultFormCaseId = null; // 検索結果エリアが映していた案件も失われるためクリアする
         renderCartItems();
         updateCartBadge();
       }
@@ -3944,11 +3946,22 @@ async function attachCurrentSearchToCase(btn) {
         // (新規案件なら空)。しかしここは「たった今この検索に使った追加キーワードを
         // 案件へ保存する」操作の最中なので、切り替えで消してしまわず、切り替え後に
         // 書き戻した上でこの案件の値として保存する。
+        // 検索結果エリアも同じ理由で退避・復元する。setActiveCase()→refreshCartCase()
+        // は切り替え先の案件の保存済みlastSearchResultで検索結果エリアを復元(無ければ
+        // 空に)してしまうため、何もしなければ「たった今この検索を保存した」直後に
+        // 画面から検索結果が消えてしまう(または別案件の古い検索結果に置き換わってしまう)。
         const noteBeforeSwitch = document.getElementById('note-input').value;
+        const resultBeforeSwitch = lastResult;
         await setActiveCase(caseId);
         document.getElementById('note-input').value = noteBeforeSwitch;
         noteFormCaseId = caseId;
         await saveAdditionalKeywordOnBlur();
+        if (resultBeforeSwitch) {
+          document.getElementById('result-area').style.display = 'block';
+          renderResult(resultBeforeSwitch);
+          resultFormCaseId = caseId;
+          await saveLastSearchResultToCase(caseId, resultBeforeSwitch);
+        }
       }
       await loadOpenCasesForAttach();
     } catch (err) {
@@ -3977,6 +3990,14 @@ let estimateFormCaseId = null;
 // (openCartModal()等、同じ案件のままrefreshCartCase()が呼ばれる経路で、入力中の
 // 追加キーワードがフォーカスを離れる前に上書きされてしまうのを防ぐため)。
 let noteFormCaseId = null;
+
+// 「今検索結果エリア(#result-content・lastResult)が映している案件ID」を表す。
+// noteFormCaseIdと同じ考え方。doSearch()は検索が成功した直後、この時点の
+// currentCartCaseId(未紐付けならnull)へ即座に合わせる(サーバーへの保存の成否とは
+// 独立。画面に既に表示されている内容が「その状態を反映済み」であることに変わりは
+// ないため)。refreshCartCase()はこれとcurrentCartCaseIdが食い違う場合(＝案件が
+// 切り替わった場合)だけ、保存済みの検索結果で画面を復元する。
+let resultFormCaseId = null;
 
 // 差し替えモードを終了する。replacingItemIdをクリアするだけでなく、検索結果を
 // 再描画して候補のボタンを「🛒 カートに追加」に、バナーを非表示に戻す。再描画せず
@@ -4030,6 +4051,15 @@ async function ensureCartCase() {
   // 上書きされてしまう。
   noteFormCaseId = currentCartCaseId;
   await saveAdditionalKeywordOnBlur();
+
+  // 検索結果エリアも同じ理由でresultFormCaseIdを更新しておく。この新規案件は
+  // 今表示されている検索結果がきっかけで作られたものであり、その検索結果は
+  // 既にこの案件の状態を反映済みとみなしてよい(サーバーへの保存はここでは
+  // 行わない。「案件が既にアクティブな状態での検索」だけを自動保存対象とする
+  // 方針のため。更新しておかないと、この後refreshCartCase()が呼ばれた際に
+  // 「案件切り替え」とみなされ、まだサーバーに何も保存されていないこの案件の
+  // lastSearchResult(null)で、今画面に表示されている検索結果が消されてしまう)。
+  resultFormCaseId = currentCartCaseId;
 
   return currentCartCaseId;
 }
@@ -4309,6 +4339,7 @@ async function refreshCartCase() {
       cartCase = null;
       estimateFormCaseId = null; // フォームが映していた案件も失われるためクリアする
       noteFormCaseId = null; // note-inputが映していた案件も失われるためクリアする
+      resultFormCaseId = null; // 検索結果エリアが映していた案件も失われるためクリアする
       renderCartItems();
       updateCartBadge();
       return;
@@ -4324,6 +4355,24 @@ async function refreshCartCase() {
       const noteInput = document.getElementById('note-input');
       if (noteInput) noteInput.value = cartCase.additionalKeyword || '';
       noteFormCaseId = targetCaseId;
+    }
+
+    // 案件に保存済みの検索結果を検索結果エリアへ復元する。noteFormCaseIdと同じ
+    // 考え方でresultFormCaseIdとtargetCaseIdが一致する間(＝同じ案件のまま
+    // refreshCartCase()が呼ばれた場合)は何もしない。保存済みが無ければ
+    // (未紐付けのまま検索した・まだ一度も検索していない案件)エリアを空にする。
+    if (resultFormCaseId !== targetCaseId) {
+      const resultArea = document.getElementById('result-area');
+      if (cartCase.lastSearchResult) {
+        if (resultArea) resultArea.style.display = 'block';
+        renderResult(cartCase.lastSearchResult);
+      } else {
+        lastResult = null;
+        if (resultArea) resultArea.style.display = 'none';
+        const resultContent = document.getElementById('result-content');
+        if (resultContent) resultContent.innerHTML = '';
+      }
+      resultFormCaseId = targetCaseId;
     }
   } catch (err) {
     if (targetCaseId !== currentCartCaseId) return;
@@ -4387,6 +4436,42 @@ async function saveAdditionalKeywordOnBlur() {
     }
   } catch (err) {
     console.error('[saveAdditionalKeywordOnBlur] 通信エラー', err);
+  }
+}
+
+// 検索結果(lastResult)を指定した案件へ保存する。doSearch()が検索成功直後、
+// 案件が既にアクティブな場合だけ呼ぶ(呼び出し側でcurrentCartCaseIdの有無を
+// 判定済みの前提)。保存は待たずに投げっぱなしで良い(検索完了の体感をこの保存で
+// 遅らせないため。resultFormCaseIdは呼び出し元(doSearch())側で既に更新済み)。
+//
+// refreshCartCase()・saveAdditionalKeywordOnBlur()と同じtargetCaseId方式の
+// stale response guardを持つ: 保存(PATCH)が完了した時点でcurrentCartCaseIdが
+// 呼び出し時のtargetCaseIdと食い違っていたら(＝保存中に案件が切り替わっていたら)、
+// その時点で画面に出ているのはもう別の案件の内容のはずなので、cartCaseを
+// 書き換えない(古い応答で新しい案件の状態を上書きする事故を防ぐ)。
+async function saveLastSearchResultToCase(targetCaseId, resultToSave) {
+  try {
+    const response = await authFetch(`/api/cases/${targetCaseId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lastSearchResult: resultToSave })
+    });
+    const data = await response.json().catch(() => null);
+
+    if (targetCaseId !== currentCartCaseId) return; // 保存中に案件が切り替わっていた
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      console.error('[saveLastSearchResultToCase] 保存に失敗しました', data);
+      return;
+    }
+
+    cartCase = data.case;
+  } catch (err) {
+    console.error('[saveLastSearchResultToCase] 通信エラー', err);
   }
 }
 
@@ -5152,6 +5237,14 @@ async function doSearch() {
       }
 
       renderResult(result);
+
+      // 今表示した検索結果は、案件の有無に関わらず(未紐付けならnullとして)既に
+      // その状態を反映済みとみなす(resultFormCaseIdの役割はrefreshCartCase()の
+      // コメント参照)。案件が既にアクティブな場合だけ、その案件へ自動保存する
+      // (未紐付けの検索は保存しない方針。保存は待たない=検索完了の体感を
+      // 遅らせない。stale response guardはsaveLastSearchResultToCase()側で持つ)。
+      resultFormCaseId = currentCartCaseId;
+      if (currentCartCaseId) saveLastSearchResultToCase(currentCartCaseId, lastResult);
     } catch (err) {
       resultContent.innerHTML = `
         <div class="result-card">

@@ -20,6 +20,10 @@
 //   { customerName }                  ... 案件名（案件一覧・案件詳細の表示名）を変更
 //   { additionalKeyword }             ... 検索フォームの「追加キーワード」欄の内容を更新
 //                                        （estimateMetaとは別。検索フォーム側で単独に保存する）
+//   { lastSearchResult }              ... 直近の検索結果(/api/analyzeのレスポンス)を保存する。
+//                                        案件が既にアクティブな状態で検索したときにフロントが
+//                                        自動送信し、次回この案件を開いたときの検索結果画面の
+//                                        復元に使う。nullを送ると未保存扱いに戻せる
 //   { archive: true }                 ... 手動アーカイブ。status が完了/失注・キャンセルの
 //                                        案件のみ可（それ以外は403 CASE_NOT_ARCHIVABLE）。
 //                                        復元は実装しない。自動アーカイブ(cronによる
@@ -43,6 +47,7 @@ import {
   restoreCaseFromImport,
   updateCaseName,
   updateAdditionalKeyword,
+  updateLastSearchResult,
   updateCaseNameAndEstimateMeta,
   deleteCase,
   archiveCase,
@@ -54,6 +59,10 @@ import { featureRestrictedBody } from '../../lib/responses';
 
 const VALID_STATUSES = Object.values(STATUS);
 const FEATURE_KEY = 'archiveAccess';
+// lastSearchResultの上限。典型的な検索結果(候補数件)は数KB程度で、余裕を持たせても
+// 20KBあれば十分収まる。クライアントが不正/破損した巨大なJSONを送りつけてRedisへの
+// 書き込みを肥大化させることへの防御であり、通常の利用でこの上限に達することは無い。
+const MAX_LAST_SEARCH_RESULT_BYTES = 20000;
 
 export default async function handler(req, res) {
   // 完了/失注へのステータス変更時に、そのときのプランの保持期間(limits.retentionDays)を
@@ -99,7 +108,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, estimateFormSave, customerName, additionalKeyword, archive } = req.body || {};
+    const { status, cartAdd, cartUpdate, cartReplace, cartRemove, estimateMeta, restoreImport, estimateFormSave, customerName, additionalKeyword, lastSearchResult, archive } = req.body || {};
 
     try {
       if (status !== undefined) {
@@ -186,6 +195,29 @@ export default async function handler(req, res) {
 
       if (additionalKeyword !== undefined) {
         const updated = await updateAdditionalKeyword(id, additionalKeyword);
+        return res.status(200).json({ case: updated });
+      }
+
+      if (lastSearchResult !== undefined) {
+        // null(未保存に戻す)以外は object であること。文字列や配列など、
+        // クライアントの不具合で意図しない形が送られてきたら400で弾く
+        // (lib/cases.js側は型を再チェックせず素通しするため、ここで担保する)。
+        if (lastSearchResult !== null && (typeof lastSearchResult !== 'object' || Array.isArray(lastSearchResult))) {
+          return res.status(400).json({
+            error: 'INVALID_REQUEST',
+            message: 'lastSearchResultはオブジェクトまたはnullである必要があります',
+          });
+        }
+        if (lastSearchResult !== null) {
+          const size = Buffer.byteLength(JSON.stringify(lastSearchResult), 'utf8');
+          if (size > MAX_LAST_SEARCH_RESULT_BYTES) {
+            return res.status(400).json({
+              error: 'INVALID_REQUEST',
+              message: `検索結果のデータが大きすぎます（上限${MAX_LAST_SEARCH_RESULT_BYTES}バイト）`,
+            });
+          }
+        }
+        const updated = await updateLastSearchResult(id, lastSearchResult);
         return res.status(200).json({ case: updated });
       }
 
