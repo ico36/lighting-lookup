@@ -3100,7 +3100,6 @@ let caseFilterQuery = ''; // 案件名の絞り込み文字列。#case-list-filt
 let casesCurrentPage = 1; // 案件一覧ページャの現在ページ(1始まり)
 let currentCaseDetailId = null;
 let currentCaseDetailData = null;
-let openCasesForAttach = [];
 // 検索履歴カードの「カートに追加」「型番で再検索」ボタンから参照する。
 // renderCaseDetail()の表示順(新しい順)と揃えたインデックスで保持する。
 let currentCaseDetailSearches = [];
@@ -3833,143 +3832,12 @@ async function searchArchivedCasesUI(btn) {
   });
 }
 
-// ----- 検索結果を案件に保存 -----
-
-// '下書き'（カート追加時に自動作成される案件のデフォルト状態）も含めて一覧化する。
-// ここで'下書き'を除外すると、現在アクティブな案件（カート対象）が選択肢から漏れ、
-// 気づかず別案件を新規作成してしまう原因になる。
-const OPEN_CASE_STATUSES = ['下書き', '承認待ち', '承認済み'];
-
-async function loadOpenCasesForAttach() {
-  try {
-    const response = await authFetch('/api/cases');
-    if (!response.ok) return;
-    const data = await response.json();
-    openCasesForAttach = (data.cases || []).filter(c => OPEN_CASE_STATUSES.includes(c.status));
-  } catch (err) {
-    openCasesForAttach = [];
-  }
-  renderCaseAttachSelect();
-}
-
-function renderCaseAttachSelect() {
-  const select = document.getElementById('case-attach-select');
-  if (!select) return;
-  const options = openCasesForAttach.map(c => `<option value="${c.id}">${escapeHtml(c.customerName) || '（無題の案件）'}・${c.status}</option>`);
-  options.push(`<option value="__new__">＋ 新規案件を作成</option>`);
-  select.innerHTML = options.join('');
-  // 現在アクティブな案件（カートの対象）が選択肢にあれば、それを既定選択にする
-  if (currentCartCaseId && openCasesForAttach.some(c => c.id === currentCartCaseId)) {
-    select.value = currentCartCaseId;
-  }
-  onCaseAttachSelectChange();
-}
-
-function onCaseAttachSelectChange() {
-  const select = document.getElementById('case-attach-select');
-  const wrap = document.getElementById('case-attach-new-wrap');
-  if (!select || !wrap) return;
-  wrap.style.display = select.value === '__new__' ? 'block' : 'none';
-}
-
-async function attachCurrentSearchToCase(btn) {
-  const select = document.getElementById('case-attach-select');
-  const msgEl = document.getElementById('case-attach-msg');
-  if (!select || !lastResult) return;
-
-  msgEl.textContent = '';
-
-  await withButtonGuard(btn, async () => {
-    let caseId = select.value;
-    try {
-      if (caseId === '__new__') {
-        const nameInput = document.getElementById('case-attach-new-name');
-        const name = nameInput.value.trim();
-        if (!name) {
-          msgEl.textContent = '案件名を入力してください';
-          msgEl.style.color = 'var(--error)';
-          return;
-        }
-        const createRes = await authFetch('/api/cases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ customerName: name })
-        });
-        const createData = await createRes.json();
-        if (!createRes.ok) {
-          if (createRes.status === 401) {
-            handleSessionExpired();
-            return;
-          }
-          // 上限到達は画面下部固定の専用通知に集約する。ここで throw すると
-          // limits が文字列に潰れ、工程Eでアップグレード導線を出せなくなる。
-          // 早期returnしてもボタンの状態は withButtonGuard の finally が元に戻す
-          // （すぐ上の401やお客様名未入力の分岐と同じ抜け方）。
-          if (isCaseLimitError(createData)) {
-            showCaseLimitNotice(createData.limits);
-            return;
-          }
-          throw new Error(createData.message || createData.error || '案件の作成に失敗しました');
-        }
-        caseId = createData.case.id;
-      }
-
-      const searchRes = await authFetch(`/api/cases/${caseId}/searches`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: lastResult.original_model,
-          manufacturer: lastResult.manufacturer,
-          name: lastResult.product_name,
-          status: lastResult.status,
-          note: lastResult.caution || ''
-        })
-      });
-      const searchData = await searchRes.json();
-      if (!searchRes.ok) {
-        if (searchRes.status === 401) {
-          handleSessionExpired();
-          return;
-        }
-        throw new Error(searchData.error || '保存に失敗しました');
-      }
-
-      msgEl.textContent = '保存しました';
-      msgEl.style.color = 'var(--success)';
-
-      // この検索を保存した案件を「現在アクティブな案件」にも合わせる。
-      // これをしないと、直後に候補を「カートに追加」した際、対象がここで
-      // 選んだ案件とズレて別の(重複した)案件が作られてしまう。
-      if (caseId !== currentCartCaseId) {
-        // setActiveCase()→refreshCartCase()は案件切り替えの一環として、
-        // note-inputを切り替え先の案件の保存済みadditionalKeywordで上書きする
-        // (新規案件なら空)。しかしここは「たった今この検索に使った追加キーワードを
-        // 案件へ保存する」操作の最中なので、切り替えで消してしまわず、切り替え後に
-        // 書き戻した上でこの案件の値として保存する。
-        // 検索結果エリアも同じ理由で退避・復元する。setActiveCase()→refreshCartCase()
-        // は切り替え先の案件の保存済みlastSearchResultで検索結果エリアを復元(無ければ
-        // 空に)してしまうため、何もしなければ「たった今この検索を保存した」直後に
-        // 画面から検索結果が消えてしまう(または別案件の古い検索結果に置き換わってしまう)。
-        const noteBeforeSwitch = document.getElementById('note-input').value;
-        const resultBeforeSwitch = lastResult;
-        await setActiveCase(caseId);
-        document.getElementById('note-input').value = noteBeforeSwitch;
-        noteFormCaseId = caseId;
-        await saveAdditionalKeywordOnBlur();
-        if (resultBeforeSwitch) {
-          document.getElementById('result-area').style.display = 'block';
-          renderResult(resultBeforeSwitch);
-          resultFormCaseId = caseId;
-          await saveLastSearchResultToCase(caseId, resultBeforeSwitch);
-        }
-      }
-      await loadOpenCasesForAttach();
-    } catch (err) {
-      msgEl.textContent = err.message || '通信エラーが発生しました';
-      msgEl.style.color = 'var(--error)';
-    }
-  }, '保存中...');
-}
+// 「この検索を案件に保存」機能(旧attachCurrentSearchToCase()、案件一覧から選んで
+// 手動保存するUI)は、案件が既にアクティブな状態での検索の自動保存(検索結果
+// 本体・検索履歴の両方)に置き換えたため削除した。トレードオフとして、案件に
+// 未紐付けのまま検索した結果を、あとから特定の既存案件へカートに入れずに
+// 紐付ける操作はできなくなった(setAsCartTarget()で切り替えると、その未保存の
+// 検索結果は復元対象が無いため画面から消える)。
 
 // ===== カート機能（検索候補→カート→見積書） =====
 
@@ -4472,6 +4340,42 @@ async function saveLastSearchResultToCase(targetCaseId, resultToSave) {
     cartCase = data.case;
   } catch (err) {
     console.error('[saveLastSearchResultToCase] 通信エラー', err);
+  }
+}
+
+// 検索結果を案件の検索履歴(case:{caseId}:searches、案件詳細モーダルの「検索履歴」
+// 一覧に表示される追記型ログ)へ1件追加する。doSearch()が検索成功直後、案件が
+// 既にアクティブな場合だけ呼ぶ(呼び出し側でcurrentCartCaseIdの有無を判定済みの
+// 前提)。保存するフィールドはこれまで手動の「この検索を案件に保存」ボタン
+// (廃止済み)が送っていたものと同じ(model・manufacturer・name・status・note)。
+// 件数の上限(直近12件)・古い履歴の削除はサーバー側(lib/cases.jsのaddSearchToCase()、
+// LTRIM)で行うため、ここでは考慮不要。
+// saveLastSearchResultToCase()と違い、この呼び出しはcartCase等の共有状態を
+// 書き換えないため、stale response guardは不要(応答を待つ間にcurrentCartCaseIdが
+// 変わっていても、POST先は呼び出し時に固定したtargetCaseIdのままで問題ない)。
+async function saveSearchToHistory(targetCaseId, result) {
+  try {
+    const response = await authFetch(`/api/cases/${targetCaseId}/searches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: result.original_model,
+        manufacturer: result.manufacturer,
+        name: result.product_name,
+        status: result.status,
+        note: result.caution || ''
+      })
+    });
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      const data = await response.json().catch(() => null);
+      console.error('[saveSearchToHistory] 保存に失敗しました', data);
+    }
+  } catch (err) {
+    console.error('[saveSearchToHistory] 通信エラー', err);
   }
 }
 
@@ -5244,7 +5148,10 @@ async function doSearch() {
       // (未紐付けの検索は保存しない方針。保存は待たない=検索完了の体感を
       // 遅らせない。stale response guardはsaveLastSearchResultToCase()側で持つ)。
       resultFormCaseId = currentCartCaseId;
-      if (currentCartCaseId) saveLastSearchResultToCase(currentCartCaseId, lastResult);
+      if (currentCartCaseId) {
+        saveLastSearchResultToCase(currentCartCaseId, lastResult);
+        saveSearchToHistory(currentCartCaseId, lastResult); // 検索履歴(案件詳細の「検索履歴」一覧)への自動追記
+      }
     } catch (err) {
       resultContent.innerHTML = `
         <div class="result-card">
@@ -5406,26 +5313,11 @@ function renderResult(r) {
       </div>
     </div>
     ` : ''}
-
-    <div class="result-card">
-      <div class="result-header">
-        <span class="result-title">この検索を案件に保存</span>
-      </div>
-      <div class="result-body">
-        <select id="case-attach-select" onchange="onCaseAttachSelectChange()" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;font-family:inherit;"></select>
-        <div id="case-attach-new-wrap" style="display:none;margin-top:10px;">
-          <input type="text" id="case-attach-new-name" class="stacked-input" placeholder="案件名（例：山田様リビング照明交換）" style="margin-bottom:0;" />
-        </div>
-        <button class="btn-secondary" style="width:100%;margin-top:10px;" onclick="attachCurrentSearchToCase(this)">この案件に保存</button>
-        <div id="case-attach-msg" style="font-size:12px;margin-top:8px;"></div>
-      </div>
-    </div>
   `;
 
   document.getElementById('estimate-form-area').style.display = 'none';
   document.getElementById('estimate-sheet-area').style.display = 'none';
   renderCartTargetInfo(); // 今組み込んだ#result-cart-target-info(中身は空)に対象案件の表示を反映する
-  loadOpenCasesForAttach();
 }
 
 const detailCache = {};
