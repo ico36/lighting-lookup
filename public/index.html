@@ -1642,7 +1642,7 @@
       <div class="help-section" id="help-sec-5">
         <div class="help-section-title">5. 案件管理（ステータス・履歴・アーカイブ検索）</div>
         <p>ヘッダーの「📋 案件」ボタンから、これまでに検索・見積作成した案件の一覧を確認できます。各案件のステータス（下書き・承認待ち・承認済み・完了・失注／キャンセル）は案件詳細の画面からいつでも変更できます。案件ごとに、これまでの型番検索履歴も確認できます。</p>
-        <p>検索履歴の各項目には「🛒 カートに追加」「🔄 型番で再検索」の2つのボタンがあります。「🛒 カートに追加」は履歴に保存されている型番・メーカー・製品名でそのままカートに追加します（価格は保存されていないため単価は¥0から始まり、見積書生成前に入力が必要です）。「🔄 型番で再検索」はその型番で改めて検索を行い、最新の価格・在庫・後継品情報を取得してからカートに追加できます。時間が経った案件ほど情報が古くなっている可能性があるため、内容に不安があるときは再検索をおすすめします。</p>
+        <p>検索履歴の各項目には「🛒 カートに追加」「🔄 型番で再検索」の2つのボタンがあります。「🛒 カートに追加」は履歴に保存されている型番・メーカー・製品名でそのままカートに追加します（価格は保存されていないため単価は¥0から始まり、見積書生成前に入力が必要です）。「🔄 型番で再検索」はその型番で改めて検索を行い、最新の価格・在庫・後継品情報を取得してからカートに追加できます（検索回数を1回消費します）。時間が経った案件ほど情報が古くなっている可能性があるため、内容に不安があるときは再検索をおすすめします。</p>
         <p>完了・失注などでアーカイブされた過去の案件は、日付範囲を指定して検索できます。</p>
         <p>案件が不要になった場合は、案件詳細画面下部の「🗑 この案件を完全に削除」から削除できます。案件・カート内容・見積り設定・検索履歴もすべて削除され、元に戻すことはできません。実行前に確認画面が表示されますが、誤って削除しないよう注意してください。</p>
       </div>
@@ -3493,7 +3493,7 @@ function renderCaseDetail(c, searches) {
           ${isArchived ? '' : `
           <div style="display:flex;gap:14px;margin-top:6px;">
             <button type="button" class="detail-link-btn" style="margin:0;" onclick="addHistoryToCart(this, ${i})">🛒 カートに追加</button>
-            <button type="button" class="detail-link-btn" style="margin:0;" onclick="reSearchFromHistory(this, ${i})">🔄 型番で再検索</button>
+            <button type="button" class="detail-link-btn" style="margin:0;" onclick="reSearchFromHistory(this, ${i})">🔄 型番で再検索<span class="label-unit" style="font-size:10px;color:var(--text2);">（検索回数1回消費）</span></button>
           </div>`}
         </div>
       `).join('')
@@ -4603,7 +4603,7 @@ function renderCartItems() {
             </div>
             <button class="modal-close" onclick="removeCartItemUI('${item.itemId}')">✕</button>
           </div>
-          ${item.modelNumber ? `<button type="button" class="detail-link-btn" style="margin:8px 0 0;" onclick="startCartItemReplace(this, '${item.itemId}')">🔄 再検索して差し替え</button>` : ''}
+          ${item.modelNumber ? `<button type="button" class="detail-link-btn" style="margin:8px 0 0;" onclick="startCartItemReplace(this, '${item.itemId}')">🔄 再検索して差し替え<span class="label-unit" style="font-size:10px;color:var(--text2);">（検索回数1回消費）</span></button>` : ''}
           ${isZeroPrice ? `<div style="font-size:12px;color:var(--error);margin-top:8px;">⚠️ 単価が未設定です。金額を入力してください</div>` : ''}
           <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
             <div class="yen-prefix" style="flex:1;"><span>¥</span><input type="number" class="num-input" value="${item.unitPrice}" min="0" onchange="updateCartItemUI('${item.itemId}', 'unitPrice', this.value)" /></div>
