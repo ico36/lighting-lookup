@@ -40,7 +40,7 @@ const SYSTEM_PROMPT = `あなたは日本の照明器具の専門家です。電
 後継器・代替品を提案する前に、必ず元の器具の取付方式を判定してください。取付方式は「直付」「埋込」「シーリング」「ペンダント」のいずれか、または判断できない場合は「不明」としてください。
 - 型番プレートが読み取れて型番から取付方式が確定できる場合は、それを最優先の根拠にしてください。
 - 写真のみから見た目で判断する場合は特に誤りやすい点に注意してください。天井に密着して段差が小さい直付器具と、天井に埋め込まれた埋込器具は、角度や距離によって非常に似て見えることがあります。取付面（天井）との境目・出っ張りの有無・枠の形状がはっきり写っている写真を優先し、それでも自信を持って判断できない場合は無理に断定せず「不明」としてください。
-- 「不明」とした場合は、mounting_type_confidence を "low" にし、caution に写真だけでは取付方式を確定できない旨と、追加の写真（取付面がわかるアングル）または型番の確認をお願いする一文を必ず含めてください。
+- 「不明」とした場合は、mounting_type_confidence を "low" にしてください（取付方式が確定できない旨の注意喚起は、この結果を表示する画面側が別途行うため、caution に同趣旨の文言を重ねて書く必要はありません）。
 
 【後継器・代替品の絞り込みルール】
 - successor_models・alternative_models に入れる候補は、判定した取付方式と一致するものだけにしてください。取付方式が異なる器具（例：直付器具に対して埋込器具）を候補に含めてはいけません。
@@ -205,6 +205,18 @@ export default async function handler(req, res) {
       return res.status(429).json(quotaExceededBody(reservation, limits));
     }
 
+    // ANTHROPIC_TIMEOUT_MS: config.maxDuration（60秒）より短い時間でJS側から
+    // 明示的にfetch()を中断させる。Vercelのmaxduration超過はプロセスごと強制終了
+    // されるため、この下のtry/catch（releaseSearch()の呼び出し）に一切到達できず、
+    // reserveSearch()で確保した枠が解放されないまま残ってしまう（実機のタイムアウトで
+    // 検索回数が消費される事故として確認済み）。maxDurationより先にこちら側で
+    // タイムアウトさせれば、必ずcatchブロックを通って枠を解放できる。
+    // 60秒との差(5秒)は、AbortController発火からreleaseSearch()の完了・レスポンス
+    // 送出までの後処理に要する時間の余裕。
+    const ANTHROPIC_TIMEOUT_MS = 55000;
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), ANTHROPIC_TIMEOUT_MS);
+
     try {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -224,7 +236,8 @@ export default async function handler(req, res) {
               name: 'web_search'
             }
           ]
-        })
+        }),
+        signal: abortController.signal
       });
       const data = await response.json();
       if (!response.ok) {
@@ -235,12 +248,21 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ ...data, quota: quotaFromReservation(reservation, limits) });
     } catch (err) {
-      // Anthropicへの接続失敗・レスポンスのJSON解析失敗など。確保した枠を戻してから
+      // Anthropicへの接続失敗・レスポンスのJSON解析失敗・上記タイムアウトによる
+      // AbortError(err.name === 'AbortError')など。確保した枠を戻してから
       // 外側のcatchに投げ直す（500レスポンスの生成はそちらに任せる）。
       await releaseSearch({ email, period, counted: reservation.counted });
       throw err;
+    } finally {
+      // fetch()が正常に終わった場合もタイムアウトを解除する（放置しても実害は
+      // 無いが、関数終了まで残り続けるタイマーを明示的に片付ける）。
+      clearTimeout(timeoutId);
     }
   } catch (err) {
+    if (err.name === 'AbortError') {
+      console.error('Anthropic API timeout (>55s)');
+      return res.status(504).json({ error: 'AIの応答に時間がかかりすぎたため中断しました。もう一度お試しください。' });
+    }
     console.error('Server error:', err);
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }

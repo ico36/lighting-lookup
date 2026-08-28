@@ -5143,13 +5143,21 @@ async function doSearch() {
 
   await withButtonGuard(btn, async () => {
     try {
+      // 送信直前に確定する。応答待ちの間に利用者が画像を追加/削除しても、この
+      // 検索が実際に画像付きだったかの判定はブレない(renderResult()内で
+      // uploadedImagesを直接見ると、案件切り替え時の復元経路(refreshCartCase()が
+      // 過去の検索結果をrenderResult()に渡す)でも実態とズレるため、結果
+      // オブジェクト自身に持たせて運ぶ)。
+      const imagesToSend = uploadedImages.map(img => img.base64);
+      const hadImages = imagesToSend.length > 0;
+
       const response = await fetchWithRetry('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           modelNum,
           note,
-          images: uploadedImages.map(img => img.base64)
+          images: imagesToSend
         })
       });
 
@@ -5181,6 +5189,7 @@ async function doSearch() {
       } catch {
         throw new Error('AI応答の解析に失敗しました。もう一度お試しください。');
       }
+      result._hadImages = hadImages; // lastResult._candidatesと同じ、クライアント側で付加する情報
 
       renderResult(result);
 
@@ -5245,6 +5254,13 @@ function renderResult(r) {
     return;
   }
 
+  // 画像付き検索だったか。doSearch()が送信直前に確定した値をresult._hadImagesとして
+  // 受け取る。この対応以降に保存されたcase.lastSearchResultはRedis側がフィールドを
+  // ホワイトリストでコピーせずオブジェクト全体を素通しする設計のため、案件切り替えに
+  // よる復元でも_hadImagesごと欠落しない。undefinedになるのは、この対応より前に
+  // 保存された既存データを復元した場合のみで、そのケースは意図的に
+  // 「画像なし扱い」で後方互換とする。
+  const hadImages = r._hadImages === true;
   const confidenceLabel = r.confidence === 'high' ? '確度：高' : r.confidence === 'medium' ? '確度：中' : '確度：低';
   const confidenceTag = r.confidence === 'high' ? 'tag-green' : r.confidence === 'medium' ? 'tag-yellow' : 'tag-blue';
   const statusTag = r.status === '廃番' ? 'tag-yellow' : r.status === '現行品' ? 'tag-green' : 'tag-blue';
@@ -5348,7 +5364,9 @@ function renderResult(r) {
       </div>
       ${r.mounting_type_confidence === 'low' ? `
       <div style="margin:0 16px 16px;padding:10px 12px;background:#fff3cd;border:1px solid #ffe08a;border-radius:8px;font-size:13px;color:#7a5c00;line-height:1.6;">
-        ⚠️ 写真だけでは取付方式を確定できませんでした。候補には取付方式が異なる器具が含まれる可能性があります。発注前に取付面の写真を追加するか、型番で再確認してください。
+        ⚠️ ${hadImages
+          ? '写真だけでは取付方式を確定できませんでした。候補には取付方式が異なる器具が含まれる可能性があります。発注前に取付面の写真を追加するか、型番で再確認してください。'
+          : '型番だけでは取付方式を確定できませんでした。候補には取付方式が異なる器具が含まれる可能性があります。発注前に、取付面がわかる写真を追加して再検索するか、型番を改めてご確認ください。'}
       </div>
       ` : ''}
     </div>
