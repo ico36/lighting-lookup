@@ -2123,6 +2123,14 @@ function hasCountableQuota() {
   return !!quota && quota.unlimited === false;
 }
 
+// 検索回数を消費する操作(再検索して差し替え・型番で再検索)の前に確認ダイアログを
+// 出すべきか。quota.unlimited === true(管理者・無制限プラン)のときだけ確認不要。
+// quotaがまだ取得できていない(null。ログイン直後で/api/company等の応答を待って
+// いる間など)場合は、無制限かどうか判断できないため安全側(確認を出す)に倒す。
+function needsQuotaConfirm() {
+  return !(quota && quota.unlimited === true);
+}
+
 // 残り回数はサーバーが計算した remaining をそのまま使う（0未満にならないことも
 // buildQuota() 側で担保済み）。ここで limit - used を再計算すると、上限の数え方が
 // サーバーとフロントの2箇所に散る。
@@ -3692,6 +3700,10 @@ async function reSearchFromHistory(btn, index) {
   const search = currentCaseDetailSearches[index];
   if (!search || !currentCaseDetailId) return;
 
+  // withButtonGuard()より前に確認する(startCartItemReplace()と同じ配置)。
+  // キャンセル時はsetActiveCase()等のどの状態も変わらずに戻れる。
+  if (needsQuotaConfirm() && !confirm('検索回数を1回消費して再検索します。よろしいですか？')) return;
+
   await withButtonGuard(btn, async () => {
     // 再検索結果をこの案件のカートに追加できるよう、先にカート対象をこの案件にする
     await setActiveCase(currentCaseDetailId);
@@ -4691,6 +4703,17 @@ async function startCartItemReplace(btn, itemId) {
   // ボタンを出す条件(item.modelNumberが空なら出さない)と二重の防御。
   // renderCartItems()の再描画が間に合わずボタンが古いDOMに残っていた場合に備える。
   if (!item || !item.modelNumber) return;
+
+  // 検索回数の消費(と、単価が入っている場合はそのリセット)を、状態を何も
+  // 変更していない時点で確認する。withButtonGuard()より前に置くことで、
+  // キャンセル時はreplacingItemId等のどの状態も変わらずに戻れる
+  // (archiveCaseHandler()・changeCaseStatus()と同じ配置)。
+  if (needsQuotaConfirm()) {
+    const message = item.unitPrice > 0
+      ? `検索回数を1回消費します。また、差し替えると現在の単価（¥${item.unitPrice.toLocaleString('ja-JP')}）はリセットされます。よろしいですか？`
+      : '検索回数を1回消費して再検索します。よろしいですか？';
+    if (!confirm(message)) return;
+  }
 
   await withButtonGuard(btn, async () => {
     replacingItemId = itemId;
