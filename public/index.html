@@ -5564,10 +5564,9 @@ function renderDetailModal(d, fallback) {
       ※ 価格・仕様はAIによるWeb検索結果に基づく目安です。実際の価格・仕様は販売店・メーカー公式情報で最終確認してください。${d.price_estimate?.source_note ? ' ' + escapeHtml(d.price_estimate.source_note) : ''}
     </div>
 
-    <div style="margin-top:16px;">
-      ${replacingItemId
-        ? `<button class="btn-secondary" style="width:100%;" onclick="executeCartItemReplace(this, currentDetailIndex, 'detail-modal-error')">🔁 この器具に差し替える</button>`
-        : `<button class="btn-secondary" style="width:100%;" onclick="addCandidateToCart(this, currentDetailIndex, 'detail-modal-error')">🛒 カートに追加</button>`}
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      ${replacingItemId ? `<button class="btn-secondary" style="flex:1;" onclick="executeCartItemReplace(this, currentDetailIndex, 'detail-modal-error')"><span class="label-unit">🔁 この器具に</span><span class="label-unit">差し替える</span></button>` : ''}
+      <button class="btn-secondary" style="flex:1;" onclick="addCandidateToCart(this, currentDetailIndex, 'detail-modal-error')"><span class="label-unit">🛒 カートに</span><span class="label-unit">追加</span></button>
     </div>
   `;
 }
