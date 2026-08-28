@@ -1628,7 +1628,7 @@
       <div class="help-section" id="help-sec-2">
         <div class="help-section-title">2. 後継品候補・アップグレード提案の見方</div>
         <p>「調べる」を押すとAIが型番・写真から器具を特定し、現行品か廃番かを判定します。結果には確度（高・中・低）が表示されるので、確度が低いときは写真や型番を追加して再確認してください。</p>
-        <p>現行品と判定された場合はその器具自体の情報が、廃番と判定された場合は後継器・互換品の候補が一覧表示されます。各候補の「📋 詳細・市場価格を見る」から仕様や参考価格を確認できます。写真だけでは取付方式（直付・埋込・シーリング・ペンダントなど）が確定できなかった場合は注意書きが表示されるので、必ず確認してください。</p>
+        <p>現行品と判定された場合はその器具自体の情報が、廃番と判定された場合は後継器・互換品の候補が一覧表示されます。各候補の「📋 詳細・市場価格」から仕様や参考価格を確認できます。写真だけでは取付方式（直付・埋込・シーリング・ペンダントなど）が確定できなかった場合は注意書きが表示されるので、必ず確認してください。</p>
       </div>
       <div class="help-section" id="help-sec-3">
         <div class="help-section-title">3. カートに入れて見積書を作る</div>
@@ -5339,10 +5339,9 @@ function renderResult(r) {
         <div style="font-size:13px;color:var(--text);margin-bottom:4px;">${escapeHtml(s.name)}</div>
         ${s.note ? `<div style="font-size:12px;color:var(--text2);margin-top:4px;">💡 ${escapeHtml(s.note)}</div>` : ''}
         <div style="display:flex;gap:16px;margin-top:6px;flex-wrap:wrap;">
-          <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格を見る →</button>
-          ${replacingItemId
-            ? `<button type="button" class="detail-link-btn" style="margin:0;" onclick="executeCartItemReplace(this, ${i}, 'result-error')">🔁 この器具に差し替える</button>`
-            : `<button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i}, 'result-error')">🛒 カートに追加</button>`}
+          <button type="button" class="detail-link-btn" style="margin:0;" onclick="openDetailModal(${i})">📋 詳細・市場価格</button>
+          ${replacingItemId ? `<button type="button" class="detail-link-btn" style="margin:0;" onclick="executeCartItemReplace(this, ${i}, 'result-error')">🔁 この器具に差し替える</button>` : ''}
+          <button type="button" class="detail-link-btn" style="margin:0;" onclick="addCandidateToCart(this, ${i}, 'result-error')">🛒 カートに追加</button>
         </div>
       </div>
     </div>
