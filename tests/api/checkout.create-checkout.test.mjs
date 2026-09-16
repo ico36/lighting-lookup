@@ -166,6 +166,47 @@ test('配線確認: get-signup-plans はライトのcouponEligibleがfalse、sta
   assert.equal(standard.couponEligible, true); // 既定のfakeクーポンはavailable:true
 });
 
+test('get-signup-plans: standard/proのdiscountedAmountはpercentOffを反映した値、lightはnull', async () => {
+  // 既定のfakeクーポン(stripe.mjs)はpercent_off:50。
+  // standard定価8800円→4400円、pro定価19800円→9900円のどちらも割り切れる。
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+
+  const light = res.body.plans.find((p) => p.plan === 'light');
+  const standard = res.body.plans.find((p) => p.plan === 'standard');
+  const pro = res.body.plans.find((p) => p.plan === 'pro');
+
+  assert.equal(light.discountedAmount, null);
+  assert.equal(standard.discountedAmount, 4400);
+  assert.equal(pro.discountedAmount, 9900);
+});
+
+test('get-signup-plans: 早期割引の枠切れならstandard/proのdiscountedAmountもnull', async () => {
+  fakeStripe.__setHandler('coupons.retrieve', async () => ({
+    valid: true,
+    percent_off: 50,
+    duration_in_months: 6,
+    max_redemptions: 10,
+    times_redeemed: 10, // 枠切れ
+  }));
+
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+
+  const standard = res.body.plans.find((p) => p.plan === 'standard');
+  const pro = res.body.plans.find((p) => p.plan === 'pro');
+  assert.equal(standard.couponEligible, false);
+  assert.equal(standard.discountedAmount, null);
+  assert.equal(pro.couponEligible, false);
+  assert.equal(pro.discountedAmount, null);
+});
+
 test('get-signup-plans: VERCEL_ENV=production ではsignupLocked:trueを返し、pricesを取得しない', async () => {
   process.env.VERCEL_ENV = 'production';
 

@@ -2793,12 +2793,23 @@ async function loadSignupPlans() {
 
 // 候補カード。数値・プラン名はすべてdata由来で、ここには一切書かない
 // (formatMoney/formatLimit/escapeHtmlはアップグレードモーダルと共用)。
+//
+// plan.discountedAmountがある場合は割引後の金額を主表示にし、定価は取り消し線で
+// 従属的に併記する。discountedAmountがnull(couponEligible:falseか、割引額が
+// 割り切れずサーバー側がフォールバックした場合)は定価のみを出す。
 function renderSignupPlans(data) {
-  document.getElementById('signup-plans').innerHTML = data.plans.map((plan, index) => `
+  document.getElementById('signup-plans').innerHTML = data.plans.map((plan, index) => {
+    const listPrice = escapeHtml(formatMoney(plan.priceLabel.unitAmount, plan.priceLabel.currency));
+    const priceHtml = plan.discountedAmount != null
+      ? `<span style="text-decoration:line-through;color:var(--text2);margin-right:6px;">${listPrice}</span>` +
+        `${escapeHtml(formatMoney(plan.discountedAmount, plan.priceLabel.currency))} / 月`
+      : `${listPrice} / 月`;
+
+    return `
     <button type="button" class="plan-card" id="signup-plan-card-${index}" onclick="selectSignupPlan(${index})">
       <div class="plan-card-head">
         <span class="plan-card-name">${escapeHtml(plan.displayName || plan.plan)}</span>
-        <span class="plan-card-price">${escapeHtml(formatMoney(plan.priceLabel.unitAmount, plan.priceLabel.currency))} / 月</span>
+        <span class="plan-card-price">${priceHtml}</span>
       </div>
       <div class="plan-card-limits">
         検索回数 ${escapeHtml(formatLimit(plan.limits.searchLimit, '回/月'))}<br>
@@ -2807,7 +2818,8 @@ function renderSignupPlans(data) {
       </div>
       ${plan.couponEligible ? '<span class="plan-card-coupon">早期割引対象</span>' : ''}
     </button>
-  `).join('');
+  `;
+  }).join('');
 }
 
 // メールアドレスの簡易チェック。type="email"のネイティブ検証に加えて空欄も弾く
@@ -2836,32 +2848,40 @@ function selectSignupPlan(index) {
 }
 
 // 確認ステップ。ここを通さずに申し込みを実行しない。
+//
+// 金額はplan.discountedAmount(サーバーが計算済みの割引後初回金額)があればそれを
+// 主表示にする。無い場合(couponEligible:falseか、サーバー側が割り切れずnullに
+// フォールバックした場合)は定価のみを「本日のお支払い」として出し、割引の行自体を
+// 出さない(不確かな割引情報を見せないため)。
 function showSignupConfirm() {
   const plan = selectedSignupPlan;
   if (!plan) return;
 
   const name = escapeHtml(plan.displayName || plan.plan);
-  const monthly = escapeHtml(formatMoney(plan.priceLabel.unitAmount, plan.priceLabel.currency));
-
-  // 割引の内容(percentOff/durationInMonths)はStripeのクーポンから取った値をそのまま使う。
-  // durationInMonthsが無いクーポン(forever/once)は期間を書けないので率だけ伝える
-  // (showUpgradeConfirmと同じ考え方)。
+  const listPrice = escapeHtml(formatMoney(plan.priceLabel.unitAmount, plan.priceLabel.currency));
   const coupon = signupPlansData?.coupon || null;
-  const percentOff = plan.couponEligible && coupon?.percentOff ? coupon.percentOff : null;
-  let discountNote = '';
-  if (percentOff && coupon.durationInMonths) {
-    discountNote = `早期割引${escapeHtml(String(percentOff))}%オフを${escapeHtml(String(coupon.durationInMonths))}ヶ月間適用。以降は ${monthly}（税込）/ 月<br>`;
-  } else if (percentOff) {
-    discountNote = `早期割引${escapeHtml(String(percentOff))}%オフ適用<br>`;
+  const percentOff = plan.discountedAmount != null && coupon?.percentOff ? coupon.percentOff : null;
+
+  let amountLine;
+  let durationNote = '';
+  if (percentOff) {
+    const discounted = escapeHtml(formatMoney(plan.discountedAmount, plan.priceLabel.currency));
+    amountLine = `本日のお支払い ${discounted}（早期割引${escapeHtml(String(percentOff))}%オフ適用・税込）`;
+    // durationInMonthsが無いクーポン(forever/once)は期間を書けないため、この行自体を出さない
+    if (coupon.durationInMonths) {
+      durationNote = `早期割引は${escapeHtml(String(coupon.durationInMonths))}ヶ月間、以降は${listPrice}（税込）<br>`;
+    }
+  } else {
+    amountLine = `本日のお支払い ${listPrice}（税込）`;
   }
 
   document.getElementById('signup-step-select').style.display = 'none';
   document.getElementById('signup-title').textContent = 'お申し込み内容の確認';
   document.getElementById('signup-step-confirm').innerHTML = `
     <div style="font-size:14px;">${name} で申し込みます</div>
-    <div class="upgrade-confirm-amount">${monthly}（税込）/ 月</div>
+    <div class="upgrade-confirm-amount">${amountLine}</div>
     <div class="upgrade-note">
-      ${discountNote}
+      ${durationNote}
       「申し込む」を押すとStripeの決済画面に移動します。決済完了後、登録したメールアドレスでログインしてください。
     </div>
     <div style="margin-top:16px;display:flex;gap:8px;">

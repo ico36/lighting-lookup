@@ -555,6 +555,38 @@ function isValidEmailFormat(email) {
 // (別の配列を持つとプランを増減したときに片方だけ直す事故になる)。
 const SIGNUP_PLANS = Object.keys(PRICE_ID_ENV);
 
+/**
+ * 早期割引適用後の初回金額。unitAmount(Priceの定価、最小通貨単位)から
+ * percentOff(%)ぶんを差し引いた額が整数で割り切れる場合だけ返す。
+ *
+ * 【なぜ割り切れない場合はnullにするのか】Stripeが percent_off を実際にいくらへ
+ * 丸めるか(四捨五入/切り捨て/切り上げ)は公式ドキュメントに明記が無く確認できな
+ * かった。割り切れる場合は丸めの余地が無く一意に決まるためどのアルゴリズムでも
+ * 結果は一致するが、割り切れない場合に自前の丸めがStripeの実請求額とズレる
+ * リスクを避けるため、確証が持てる場合だけ値を返し、それ以外は定価表示に
+ * フォールバックする(誤った金額を見せるより、割引額を出さない方が実害が小さい)。
+ * 現行の設定(50%オフ・偶数円のPrice)では常に割り切れるため実害は無い。
+ *
+ * @param {number} unitAmount Priceの定価(最小通貨単位)
+ * @param {number|null} percentOff クーポンの割引率。amount_off方式のクーポン
+ *   (percentOffがnull)には対応しない。
+ * @returns {number|null}
+ */
+function discountedAmountOrNull(unitAmount, percentOff) {
+  if (typeof percentOff !== 'number') return null;
+
+  const rawDiscount = (unitAmount * percentOff) / 100;
+  if (!Number.isInteger(rawDiscount)) {
+    console.warn(
+      '[checkout] 早期割引の割引額が割り切れないため、割引後金額の表示を見送ります' +
+        `(unitAmount=${unitAmount}, percentOff=${percentOff})。定価を表示します。`
+    );
+    return null;
+  }
+
+  return unitAmount - rawDiscount;
+}
+
 // プラン選択モーダル用。ログイン前(未契約)のリクエストなので認証は要求しない。
 // 表示するプラン名・金額・上限値はStripeのPrice/Productから取得し、コード側に
 // プラン名や金額の対応表を持たない(handleGetUpgradeOptionsと同じ方針)。
@@ -586,14 +618,20 @@ async function handleGetSignupPlans(req, res) {
       }
 
       const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
+      // ライトは方針上クーポン対象外。早期割引の存在自体を見せない。
+      const couponEligible = plan !== 'light' && couponState.available;
 
       return {
         plan,
         displayName: planDisplayName(price, plan),
         priceLabel: { unitAmount: price.unit_amount, currency: price.currency },
         limits: planLimitsFromPrice(price),
-        // ライトは方針上クーポン対象外。早期割引の存在自体を見せない。
-        couponEligible: plan !== 'light' && couponState.available,
+        couponEligible,
+        // couponEligibleがfalseの時点でnull。trueでも割り切れなければnullになりうる
+        // (discountedAmountOrNull()参照)。フロントはこの値の有無だけで出し分ける。
+        discountedAmount: couponEligible
+          ? discountedAmountOrNull(price.unit_amount, couponState.percentOff)
+          : null,
       };
     }));
 
