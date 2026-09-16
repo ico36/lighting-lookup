@@ -1329,6 +1329,9 @@
   <p style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.7;text-align:center;">
     電気工事士向けの照明器具型番検索サービスです。型番や写真から現行品・後継品を調べ、発注メモや見積書の作成までサポートします。
   </p>
+  <!-- 決済(Checkout)から戻ってきたときの案内。成功/キャンセルどちらも課金結果に
+       関する情報なのでエラー表示(#login-error、赤)とは分けて、ここに出す。 -->
+  <div id="login-info" style="display:none;color:var(--text);font-size:13px;margin-bottom:14px;line-height:1.6;background:var(--surface2);border-radius:var(--radius);padding:12px 14px;"></div>
   <div class="input-card">
     <div class="section-label">メールアドレスでログイン</div>
     <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
@@ -1339,6 +1342,14 @@
       <button class="btn-primary" id="login-btn" onclick="submitEmail()">ログイン</button>
     </div>
     <div id="login-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
+    <!-- 未契約(NO_CUSTOMER/NO_ACTIVE_SUBSCRIPTION)のログイン失敗時だけ出す申し込み導線。
+         入力済みのメールアドレスを引き継いでプラン選択モーダルを開く。 -->
+    <button type="button" id="login-signup-suggest" onclick="openSignupModal(document.getElementById('login-email-input').value)"
+      style="display:none;width:100%;margin-top:10px;background:none;border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;">申し込みはこちら</button>
+  </div>
+  <div style="text-align:center;margin-top:16px;">
+    <button type="button" onclick="openSignupModal(document.getElementById('login-email-input').value)"
+      style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;font-family:inherit;text-decoration:underline;">新規お申し込み</button>
   </div>
 </div>
 
@@ -1693,6 +1704,11 @@
         <p>下のボタンから解約手続き画面（Stripeの契約管理ページ）に進み、案内に従って手続きを行ってください。</p>
         <button onclick="startCancelSubscription()" style="background: none; border: 1px solid var(--border); color: var(--text2); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">解約手続きへ進む</button>
         <p id="cancel-subscription-error" style="display: none; color: #c0392b; margin-top: 8px;"></p>
+        <!-- 契約情報が見つからなかった(404)ときだけ表示する申し込み導線。
+             startCancelSubscription()のerrorElId既定('cancel-subscription-error')から
+             呼ばれた場合だけ出す(アップグレードモーダルの支払い方法更新からは出さない)。 -->
+        <button type="button" id="cancel-subscription-signup-cta" onclick="openSignupModal()"
+          style="display:none; background: none; border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit; margin-top: 8px;">申し込みはこちら</button>
       </div>
     </div>
   </div>
@@ -1830,6 +1846,35 @@
   </div>
 </div>
 
+<!-- 新規申し込み(未契約者向け)。ログイン画面からのみ開く想定で、他のオーバーレイと
+     同時に開くことは無いため、.modal-overlay既定のz-index:100のまま(#upgrade-overlayの
+     ような個別の重ね順指定は不要)。金額・プラン名・上限値はget-signup-plansの
+     レスポンスから描画し、ここには一切書かない(アップグレードモーダルと同じ方針)。 -->
+<div class="modal-overlay" id="signup-overlay" onclick="if(event.target===this) closeSignupModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title" id="signup-title">新規お申し込み</div>
+      <button class="modal-close" onclick="closeSignupModal()">✕</button>
+    </div>
+
+    <div id="signup-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;"></div>
+
+    <!-- 1. メールアドレス入力とプラン選択 -->
+    <div id="signup-step-select">
+      <!-- 本番(VERCEL_ENV==='production')でロック中はこれを隠し、#signup-lockedだけ出す -->
+      <div id="signup-email-wrap" class="model-input-wrap" style="margin-bottom:14px;">
+        <input type="email" id="signup-email-input" placeholder="メールアドレス" />
+      </div>
+      <div id="signup-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
+      <div id="signup-locked" style="display:none;color:var(--text2);font-size:13px;">現在サービス準備中のため、新規登録は受け付けておりません。</div>
+      <div id="signup-plans"></div>
+    </div>
+
+    <!-- 2. 確認。実際に課金する前に必ずここを通す -->
+    <div id="signup-step-confirm" style="display:none;"></div>
+  </div>
+</div>
+
 <footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
 <!-- 案件の保存件数が上限に達したときの通知。案件の作成は4経路(新規案件フォーム・
@@ -1901,7 +1946,9 @@ async function submitEmail() {
 
   const btn = document.getElementById('login-btn');
   const errorEl = document.getElementById('login-error');
+  const signupSuggestBtn = document.getElementById('login-signup-suggest');
   hideError(errorEl);
+  signupSuggestBtn.style.display = 'none';
 
   await withButtonGuard(btn, async () => {
     try {
@@ -1914,6 +1961,11 @@ async function submitEmail() {
 
       if (!response.ok) {
         showError(errorEl, data.error || 'ログインに失敗しました');
+        // 未契約(顧客なし/有効なサブスクなし)のときだけ申し込みへの導線を出す。
+        // それ以外(レート制限・サーバーエラー等)では出さない。
+        if (data.code === 'NO_CUSTOMER' || data.code === 'NO_ACTIVE_SUBSCRIPTION') {
+          signupSuggestBtn.style.display = 'block';
+        }
         return;
       }
 
@@ -2654,6 +2706,210 @@ function showUpgradeDone(data) {
   hideCaseLimitNotice();
 }
 
+// ===== 新規お申し込み(未契約者向け) =====
+//
+// ログイン画面からのみ開く。未契約のためセッションを持てず、fetch()はauthFetch()を
+// 使わない(get-signup-plans/create-checkoutはどちらも認証不要のaction)。
+// アップグレードモーダルと違って「完了」ステップは無い。Checkoutは外部の決済ページへの
+// 遷移で、成功後の戻り先(?checkout=success)はログイン画面そのものだから。
+
+// signupPlansData は get-signup-plans のレスポンスそのもの({ coupon, plans })。
+// selectedSignupPlan は plans の要素を指す(金額・上限値をここに複製しない)。
+let signupPlansData = null;
+let selectedSignupPlan = null;
+// create-checkout の実行中(Stripeへの外部遷移が起きるまで)はモーダルを閉じさせない。
+let signupInFlight = false;
+
+function openSignupModal(prefillEmail = '') {
+  resetSignupModal();
+  document.getElementById('signup-email-input').value = prefillEmail || '';
+  document.getElementById('signup-overlay').classList.add('open');
+  loadSignupPlans();
+}
+
+// 背景クリックと×の両方がこの関数を通るので、抑止はここ1箇所で足りる
+function closeSignupModal() {
+  if (signupInFlight) return;
+  document.getElementById('signup-overlay').classList.remove('open');
+}
+
+// 開くたびに初期状態へ戻す。前回選んだプランや入力途中のメールアドレスが
+// 残っていると、2回目に開いたときに古い状態が見えてしまう。
+function resetSignupModal() {
+  signupPlansData = null;
+  selectedSignupPlan = null;
+  signupInFlight = false;
+
+  document.getElementById('signup-title').textContent = '新規お申し込み';
+  hideError(document.getElementById('signup-error'));
+  document.getElementById('signup-email-input').value = '';
+  document.getElementById('signup-email-wrap').style.display = '';
+  document.getElementById('signup-locked').style.display = 'none';
+
+  document.getElementById('signup-step-select').style.display = 'block';
+  document.getElementById('signup-step-confirm').style.display = 'none';
+  document.getElementById('signup-step-confirm').innerHTML = '';
+
+  document.getElementById('signup-loading').style.display = 'block';
+  document.getElementById('signup-plans').innerHTML = '';
+}
+
+async function loadSignupPlans() {
+  const errorEl = document.getElementById('signup-error');
+  const loadingEl = document.getElementById('signup-loading');
+
+  try {
+    const response = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get-signup-plans' }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      loadingEl.style.display = 'none';
+      showError(errorEl, data.message || data.error || 'プラン情報の取得に失敗しました');
+      return;
+    }
+
+    loadingEl.style.display = 'none';
+
+    // 本番ロック中は、確認画面に進める材料(メール入力・プラン一覧)自体を出さない。
+    // 実際の申し込み可否の最終防衛線はhandleCreateCheckout側のロックだが、
+    // ここで先に伝えることで「確認画面まで進んでから拒否される」のを避ける。
+    if (data.signupLocked) {
+      document.getElementById('signup-email-wrap').style.display = 'none';
+      document.getElementById('signup-locked').style.display = 'block';
+      return;
+    }
+
+    signupPlansData = data;
+    renderSignupPlans(data);
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+  }
+}
+
+// 候補カード。数値・プラン名はすべてdata由来で、ここには一切書かない
+// (formatMoney/formatLimit/escapeHtmlはアップグレードモーダルと共用)。
+function renderSignupPlans(data) {
+  document.getElementById('signup-plans').innerHTML = data.plans.map((plan, index) => `
+    <button type="button" class="plan-card" id="signup-plan-card-${index}" onclick="selectSignupPlan(${index})">
+      <div class="plan-card-head">
+        <span class="plan-card-name">${escapeHtml(plan.displayName || plan.plan)}</span>
+        <span class="plan-card-price">${escapeHtml(formatMoney(plan.priceLabel.unitAmount, plan.priceLabel.currency))} / 月</span>
+      </div>
+      <div class="plan-card-limits">
+        検索回数 ${escapeHtml(formatLimit(plan.limits.searchLimit, '回/月'))}<br>
+        保存できる案件 ${escapeHtml(formatLimit(plan.limits.caseLimit, '件'))}<br>
+        完了案件の保存期間 ${escapeHtml(formatLimit(plan.limits.retentionDays, '日'))}
+      </div>
+      ${plan.couponEligible ? '<span class="plan-card-coupon">早期割引対象</span>' : ''}
+    </button>
+  `).join('');
+}
+
+// メールアドレスの簡易チェック。type="email"のネイティブ検証に加えて空欄も弾く
+// (checkValidity()は空欄をvalidとみなすため)。厳密な形式検証はcreate-checkout側の
+// isValidEmailFormat()が最終的に行うので、ここは早期に気づかせる程度でよい。
+function isSignupEmailValid() {
+  const input = document.getElementById('signup-email-input');
+  return input.value.trim() !== '' && input.checkValidity();
+}
+
+function selectSignupPlan(index) {
+  if (!signupPlansData || !signupPlansData.plans[index]) return;
+
+  if (!isSignupEmailValid()) {
+    showError(document.getElementById('signup-error'), 'メールアドレスの形式が正しくありません');
+    return;
+  }
+  hideError(document.getElementById('signup-error'));
+
+  selectedSignupPlan = signupPlansData.plans[index];
+  signupPlansData.plans.forEach((_, i) => {
+    document.getElementById(`signup-plan-card-${i}`).classList.toggle('is-selected', i === index);
+  });
+
+  showSignupConfirm();
+}
+
+// 確認ステップ。ここを通さずに申し込みを実行しない。
+function showSignupConfirm() {
+  const plan = selectedSignupPlan;
+  if (!plan) return;
+
+  const name = escapeHtml(plan.displayName || plan.plan);
+  const monthly = escapeHtml(formatMoney(plan.priceLabel.unitAmount, plan.priceLabel.currency));
+
+  // 割引の内容(percentOff/durationInMonths)はStripeのクーポンから取った値をそのまま使う。
+  // durationInMonthsが無いクーポン(forever/once)は期間を書けないので率だけ伝える
+  // (showUpgradeConfirmと同じ考え方)。
+  const coupon = signupPlansData?.coupon || null;
+  const percentOff = plan.couponEligible && coupon?.percentOff ? coupon.percentOff : null;
+  let discountNote = '';
+  if (percentOff && coupon.durationInMonths) {
+    discountNote = `早期割引${escapeHtml(String(percentOff))}%オフを${escapeHtml(String(coupon.durationInMonths))}ヶ月間適用。以降は ${monthly}（税込）/ 月<br>`;
+  } else if (percentOff) {
+    discountNote = `早期割引${escapeHtml(String(percentOff))}%オフ適用<br>`;
+  }
+
+  document.getElementById('signup-step-select').style.display = 'none';
+  document.getElementById('signup-title').textContent = 'お申し込み内容の確認';
+  document.getElementById('signup-step-confirm').innerHTML = `
+    <div style="font-size:14px;">${name} で申し込みます</div>
+    <div class="upgrade-confirm-amount">${monthly}（税込）/ 月</div>
+    <div class="upgrade-note">
+      ${discountNote}
+      「申し込む」を押すとStripeの決済画面に移動します。決済完了後、登録したメールアドレスでログインしてください。
+    </div>
+    <div style="margin-top:16px;display:flex;gap:8px;">
+      <button type="button" class="btn-primary" id="signup-confirm-btn" style="flex:1;"
+        onclick="submitSignup(this)">申し込む</button>
+      <button type="button" class="btn-secondary" style="flex:1;"
+        onclick="backToSignupSelect()">戻る</button>
+    </div>
+  `;
+  document.getElementById('signup-step-confirm').style.display = 'block';
+}
+
+function backToSignupSelect() {
+  document.getElementById('signup-title').textContent = '新規お申し込み';
+  document.getElementById('signup-step-confirm').style.display = 'none';
+  document.getElementById('signup-step-select').style.display = 'block';
+}
+
+async function submitSignup(btn) {
+  const errorEl = document.getElementById('signup-error');
+  hideError(errorEl);
+
+  await withButtonGuard(btn, async () => {
+    signupInFlight = true;
+    try {
+      const email = document.getElementById('signup-email-input').value.trim();
+      const response = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create-checkout', email, plan: selectedSignupPlan.plan }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data.url) {
+        showError(errorEl, data.message || data.error || '決済画面の生成に失敗しました');
+        return;
+      }
+
+      // Stripeの決済画面へ外部遷移する。戻り先は?checkout=success/cancelでログイン画面に戻る。
+      window.location.href = data.url;
+    } catch (err) {
+      showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+    } finally {
+      signupInFlight = false;
+    }
+  }, '処理中...');
+}
+
 // ===== 自社情報（社名・電話番号・登録番号・ロゴ）の保存・再利用 =====
 
 let companyInfo = null;
@@ -2750,7 +3006,9 @@ function scrollToHelpSection(id) {
 // 表示は他と同じ showError/hideError に揃えた（要素が無い場合のガードも入る）。
 async function startCancelSubscription(errorElId = 'cancel-subscription-error') {
   const errorEl = document.getElementById(errorElId);
+  const signupCta = document.getElementById('cancel-subscription-signup-cta');
   hideError(errorEl);
+  if (signupCta) signupCta.style.display = 'none';
 
   try {
     const response = await authFetch('/api/checkout', {
@@ -2761,7 +3019,15 @@ async function startCancelSubscription(errorElId = 'cancel-subscription-error') 
     const data = await response.json();
 
     if (!response.ok || !data.url) {
-      throw new Error(data.error || '解約ページの生成に失敗しました');
+      showError(errorEl, data.error || '解約ページの生成に失敗しました');
+      // このactionの404は「契約情報が見つかりませんでした」を意味する。
+      // ヘルプの解約セクション(既定のerrorElId)からの呼び出しのみ申し込みへの
+      // 導線を出す。アップグレードモーダルの「お支払い方法を更新する」
+      // (errorElId='upgrade-portal-error')は既に有効な契約がある文脈なので出さない。
+      if (response.status === 404 && errorElId === 'cancel-subscription-error' && signupCta) {
+        signupCta.style.display = 'inline-block';
+      }
+      return;
     }
 
     window.location.href = data.url;
@@ -4871,6 +5137,24 @@ window.addEventListener('DOMContentLoaded', () => {
     openHelpModal();
     scrollToHelpSection('help-sec-13');
     urlParams.delete('help');
+    const remaining = urlParams.toString();
+    const cleanUrl = window.location.pathname + (remaining ? `?${remaining}` : '');
+    window.history.replaceState({}, '', cleanUrl);
+  }
+
+  // 新規申し込み(Stripe Checkout)から戻ってきたときの案内。送り元は
+  // api/checkout.js の handleCreateCheckout の success_url/cancel_url
+  // （?checkout=success / ?checkout=cancel）。未契約なのでログイン画面のまま
+  // #login-info に表示する（?help=cancelと同じURL整理のやり方）。
+  const checkoutParam = urlParams.get('checkout');
+  if (checkoutParam === 'success' || checkoutParam === 'cancel') {
+    const loginInfoEl = document.getElementById('login-info');
+    loginInfoEl.textContent = checkoutParam === 'success'
+      ? 'お申し込みありがとうございます。登録したメールアドレスでログインしてください。'
+      : 'お申し込みをキャンセルしました。まだ何も課金されていません。';
+    loginInfoEl.style.display = 'block';
+
+    urlParams.delete('checkout');
     const remaining = urlParams.toString();
     const cleanUrl = window.location.pathname + (remaining ? `?${remaining}` : '');
     window.history.replaceState({}, '', cleanUrl);

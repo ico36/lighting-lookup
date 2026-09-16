@@ -43,6 +43,11 @@ function defaultHandlers() {
     invoices: {
       createPreview: async (params) => defaultPreview(params),
     },
+    checkout: {
+      sessions: {
+        create: async (params) => ({ url: `https://checkout.test/session?params=${encodeURIComponent(JSON.stringify(params))}` }),
+      },
+    },
   };
 }
 
@@ -173,6 +178,11 @@ export default function Stripe() {
     },
     prices: {
       retrieve: (...args) => tracked('prices.retrieve', handlers.prices.retrieve, args),
+    },
+    checkout: {
+      sessions: {
+        create: (...args) => tracked('checkout.sessions.create', handlers.checkout.sessions.create, args),
+      },
     },
     invoices: {
       createPreview: (...args) => tracked('invoices.createPreview', handlers.invoices.createPreview, args),

@@ -102,12 +102,14 @@ export default async function handler(req, res) {
 
     if (!customerFound) {
       return res.status(403).json({
+        code: 'NO_CUSTOMER',
         error: 'このメールアドレスに対応する契約が見つかりませんでした',
       });
     }
 
     if (!active) {
       return res.status(403).json({
+        code: 'NO_ACTIVE_SUBSCRIPTION',
         error: '有効なサブスクリプションが見つかりませんでした。お支払い状況をご確認ください',
       });
     }

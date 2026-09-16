@@ -27,6 +27,7 @@
 
 import Stripe from 'stripe';
 import { requireAuth, requireAuthWithPlan } from './_auth';
+import { isAdminEmail } from '../lib/adminEmails';
 import {
   getStripeCustomerIdByEmail,
   getActiveSubscriptionWithItem,
@@ -66,18 +67,15 @@ const PRICE_ID_ENV = {
 // action ごとのハンドラ。新しいアクションを足すときはここに1行追加する。
 //
 // 【以前はフォールスルーだった】action が未指定でも不明な値でも
-// handleCreateCheckoutSession に落ちる形になっていた。タイプミスした action が
-// 黙って新規登録フローに落ちるのを避けるため、全アクションを明示し、
-// 未知のものは400で弾く。新規登録用のCheckout作成も
-// 'create-checkout-session' という名前を付けた。
+// 新規登録フローに落ちる形になっていた。タイプミスした action が黙って
+// 新規登録フローに落ちるのを避けるため、全アクションを明示し、未知のものは400で弾く。
 //
-// フロント(public/index.html)から /api/checkout を叩いているのは
-// 'create-portal-session' の1箇所だけで、action 無しで呼ぶ経路は存在しないため、
-// この変更による既存導線への影響はない（新規申し込み導線を実装するときに
-// 'create-checkout-session' を指定すること）。
+// 'get-signup-plans' と 'create-checkout' は未契約者(セッションを持てない)向けの
+// 新規申し込み導線用で、この2つだけ requireAuth を要求しない。
 const ACTIONS = {
   'create-portal-session': handleCreatePortalSession,
-  'create-checkout-session': handleCreateCheckoutSession,
+  'get-signup-plans': handleGetSignupPlans,
+  'create-checkout': handleCreateCheckout,
   'get-upgrade-options': handleGetUpgradeOptions,
   'update-plan': handleUpdatePlan,
 };
@@ -549,57 +547,138 @@ async function handleUpdatePlan(req, res) {
   }
 }
 
-async function handleCreateCheckoutSession(req, res) {
-  // ログイン時に入力されたメールアドレスを受け取る
-  const { email } = req.body;
+function isValidEmailFormat(email) {
+  return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
 
-  if (!email) {
-    return res.status(400).json({ error: 'メールアドレスが必要です' });
+// 申し込み可能なプランの一覧。PRICE_ID_ENVのキー(light/standard/pro)と常に一致させる
+// (別の配列を持つとプランを増減したときに片方だけ直す事故になる)。
+const SIGNUP_PLANS = Object.keys(PRICE_ID_ENV);
+
+// プラン選択モーダル用。ログイン前(未契約)のリクエストなので認証は要求しない。
+// 表示するプラン名・金額・上限値はStripeのPrice/Productから取得し、コード側に
+// プラン名や金額の対応表を持たない(handleGetUpgradeOptionsと同じ方針)。
+//
+// 本番(VERCEL_ENV === 'production')ではロック中である旨(signupLocked: true)だけを
+// 返し、Stripeへの問い合わせ(prices.retrieve等)自体を行わない。ここではemailを
+// 受け取っておらず管理者判定もできないため、実際の申し込み可否の最終防衛線は
+// handleCreateCheckout側の管理者ロック(下記)に committed する。ここはモーダルを
+// 開いた時点で「申し込めない」と分からせるためだけの早期リターン。
+async function handleGetSignupPlans(req, res) {
+  if (process.env.VERCEL_ENV === 'production') {
+    return res.status(200).json({
+      signupLocked: true,
+      coupon: { percentOff: null, durationInMonths: null },
+      plans: [],
+    });
   }
-
-  // ==========================================
-  // 【追加】管理者制限（サービス公開前ロック）
-  // ==========================================
-  const adminEmails = (process.env.ADMIN_EMAILS || '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase());
-
-  if (!adminEmails.includes(email.trim().toLowerCase())) {
-    return res.status(403).json({ error: '現在サービス準備中のため、新規登録は受け付けておりません。' });
-  }
-  // ==========================================
 
   try {
-    // サイトのURLを動的に取得（ローカル環境とVercel本番環境の両方に対応）
+    const couponState = await fetchCouponState();
+
+    const plans = await Promise.all(SIGNUP_PLANS.map(async (plan) => {
+      const priceId = process.env[PRICE_ID_ENV[plan]];
+      if (!priceId) {
+        console.warn(
+          `[checkout] ${PRICE_ID_ENV[plan]} が未設定のため、申し込み候補「${plan}」を出せません。`
+        );
+        return null;
+      }
+
+      const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
+
+      return {
+        plan,
+        displayName: planDisplayName(price, plan),
+        priceLabel: { unitAmount: price.unit_amount, currency: price.currency },
+        limits: planLimitsFromPrice(price),
+        // ライトは方針上クーポン対象外。早期割引の存在自体を見せない。
+        couponEligible: plan !== 'light' && couponState.available,
+      };
+    }));
+
+    return res.status(200).json({
+      signupLocked: false,
+      coupon: { percentOff: couponState.percentOff, durationInMonths: couponState.durationInMonths },
+      plans: plans.filter(Boolean),
+    });
+  } catch (err) {
+    console.error('[checkout] 申し込みプラン一覧の取得に失敗しました:', err);
+    return res.status(500).json({ error: 'internal_error', message: 'プラン情報の取得に失敗しました' });
+  }
+}
+
+// 新規申し込み(未契約者向け)のCheckoutセッション作成。ログイン前なのでrequireAuthは
+// 呼ばない(未契約者はセッションを持てないため)。
+//
+// ADMIN_EMAILSロックは本番(VERCEL_ENV === 'production')のときだけ効かせる。
+// Preview環境は公開前でも管理者以外のアドレスで申し込みフローを検証できるように
+// するため。ローカル開発・テスト実行時はVERCEL_ENVが未定義になるが、これも
+// 本番扱いにはしない(ロックしない)。
+async function handleCreateCheckout(req, res) {
+  const { email, plan } = req.body || {};
+
+  if (!isValidEmailFormat(email)) {
+    return res.status(400).json({ error: 'invalid_email', message: 'メールアドレスの形式が正しくありません' });
+  }
+  if (!SIGNUP_PLANS.includes(plan)) {
+    return res.status(400).json({
+      error: 'invalid_plan',
+      message: `plan は ${SIGNUP_PLANS.join(' / ')} のいずれかを指定してください`,
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+
+  if (process.env.VERCEL_ENV === 'production' && !isAdminEmail(normalizedEmail)) {
+    return res.status(403).json({
+      error: 'signup_locked',
+      message: '現在サービス準備中のため、新規登録は受け付けておりません。',
+    });
+  }
+
+  const priceId = process.env[PRICE_ID_ENV[plan]];
+  if (!priceId) {
+    console.error(`[checkout] ${PRICE_ID_ENV[plan]} が未設定のため、申し込み(plan=${plan})を作成できません。`);
+    return res.status(500).json({ error: 'internal_error', message: '決済画面の生成に失敗しました' });
+  }
+
+  try {
+    // 既存顧客の解決と、有効な契約が既にあるかの確認を1回のStripe往復
+    // (customers.list + subscriptions.list)にまとめる(lib/subscription.jsの共有ヘルパー)。
+    const { customerId, subscription } = await getActiveSubscriptionWithItem(normalizedEmail);
+
+    if (subscription) {
+      return res.status(409).json({
+        error: 'already_subscribed',
+        message: 'すでにご契約があります。ログインしてください',
+      });
+    }
+
+    // standard/proのみクーポン対象(ライトは方針上対象外)。枠切れ・未設定ならdiscountsを付けない。
+    const couponState = plan === 'light' ? { available: false } : await fetchCouponState();
+    const discounts = couponDiscounts(couponState.available);
+
+    // サイトのURLを動的に取得（ローカル環境とVercel環境の両方に対応）
     const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
     const host = req.headers.host;
     const baseUrl = `${protocol}://${host}`;
 
-    // Stripe Checkout セッションを作成
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      mode: 'subscription',       // 継続課金（サブスク）モード
-      customer_email: email,      // 決済画面にメールアドレスを自動入力
-      line_items: [
-        {
-          price: process.env.STRIPE_PRICE_ID, // 商品（サブスク）の価格ID
-          quantity: 1,
-        },
-      ],
-      discounts: [
-        {
-          coupon: process.env.STRIPE_COUPON_ID, // 【ここでクーポンを自動適用】
-        },
-      ],
-      // 決済完了・キャンセル後のリダイレクト先
-      success_url: `${baseUrl}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${baseUrl}/`, 
+      mode: 'subscription',
+      // 既存顧客が見つかればcustomerを渡す(同一メールでの顧客重複作成を防ぐ)。
+      // 見つからない場合だけcustomer_emailで新規顧客を作らせる。
+      ...(customerId ? { customer: customerId } : { customer_email: normalizedEmail }),
+      line_items: [{ price: priceId, quantity: 1 }],
+      ...(discounts ? { discounts } : {}),
+      success_url: `${baseUrl}/?checkout=success`,
+      cancel_url: `${baseUrl}/?checkout=cancel`,
     });
 
-    // 生成されたStripeの決済画面URLを返す
     return res.status(200).json({ url: session.url });
   } catch (err) {
-    console.error('Stripe Checkout エラー:', err);
-    return res.status(500).json({ error: '決済画面の生成に失敗しました' });
+    console.error('[checkout] 新規申し込みのCheckoutセッション作成に失敗しました:', err);
+    return res.status(500).json({ error: 'internal_error', message: '決済画面の生成に失敗しました' });
   }
 }
