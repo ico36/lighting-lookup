@@ -46,6 +46,9 @@ function defaultHandlers() {
     checkout: {
       sessions: {
         create: async (params) => ({ url: `https://checkout.test/session?params=${encodeURIComponent(JSON.stringify(params))}` }),
+        // 既定は「完了済みセッションなし」。lib/legalConsent.jsのテストが
+        // __setHandlerで同意ありのセッションを差し込む。
+        list: async () => ({ data: [] }),
       },
     },
   };
@@ -133,15 +136,25 @@ export function __reset() {
 __reset();
 
 /**
- * 特定メソッドの挙動を差し替える。
+ * 特定メソッドの挙動を差し替える。任意の深さのドット区切りパスに対応する
+ * （例: 'coupons.retrieve' の2階層、'checkout.sessions.list' の3階層）。
  *   __setHandler('coupons.retrieve', async () => { throw new Error('boom'); })
+ *   __setHandler('checkout.sessions.list', async () => ({ data: [...] }))
  */
 export function __setHandler(path, fn) {
-  const [obj, method] = path.split('.');
-  if (!handlers[obj] || !(method in handlers[obj])) {
+  const parts = path.split('.');
+  const method = parts.pop();
+  let target = handlers;
+  for (const part of parts) {
+    if (!target || !(part in target)) {
+      throw new Error(`[fake stripe] 未知のメソッドです: ${path}`);
+    }
+    target = target[part];
+  }
+  if (!target || !(method in target)) {
     throw new Error(`[fake stripe] 未知のメソッドです: ${path}`);
   }
-  handlers[obj][method] = fn;
+  target[method] = fn;
 }
 
 export function __getCallLog() {
@@ -182,6 +195,7 @@ export default function Stripe() {
     checkout: {
       sessions: {
         create: (...args) => tracked('checkout.sessions.create', handlers.checkout.sessions.create, args),
+        list: (...args) => tracked('checkout.sessions.list', handlers.checkout.sessions.list, args),
       },
     },
     invoices: {

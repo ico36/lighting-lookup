@@ -12,6 +12,7 @@ import { redis, redisKey } from '../lib/redis';
 import { isAdminEmail } from '../lib/adminEmails';
 import { checkActiveSubscriptionLive, ADMIN_PLAN_LIMITS } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
+import { getTosConsent, isTosConsentCurrent, detectAndRecordCheckoutConsent } from '../lib/legalConsent';
 
 const RATE_LIMIT_MAX_ATTEMPTS = 5;      // この回数を超えたらブロック
 const RATE_LIMIT_WINDOW_SECONDS = 900;  // 15分間の試行回数でカウント
@@ -112,6 +113,14 @@ export default async function handler(req, res) {
         code: 'NO_ACTIVE_SUBSCRIPTION',
         error: '有効なサブスクリプションが見つかりませんでした。お支払い状況をご確認ください',
       });
+    }
+
+    // 新規契約者がCheckoutのconsent_collectionで既に同意済みなら、ログイン後の
+    // 確認ゲートを二重に出さないようここで検出・記録しておく。未記録のときだけ
+    // Stripeへ問い合わせる(tos:{email}が既にあれば何もしない)。失敗しても
+    // ログイン自体は継続する(detectAndRecordCheckoutConsent()内で吸収済み)。
+    if (!isTosConsentCurrent(await getTosConsent(normalizedEmail))) {
+      await detectAndRecordCheckoutConsent(normalizedEmail);
     }
 
     const token = createSessionToken(normalizedEmail);

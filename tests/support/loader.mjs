@@ -38,6 +38,12 @@ const CASES_ARCHIVE_JS = path.join(REPO_ROOT, 'api', 'cases', 'archive.js');
 // 差し替える(tests/support/fakes/redis.mjs のコメント参照)。
 const LIB_CASES_JS = path.join(REPO_ROOT, 'lib', 'cases.js');
 
+// lib/legalConsent.js が読む `./redis` も同じフェイクへ。tos:{email} の読み書き
+// (getTosConsent/recordTosConsent)を実ネットワークに出さずに検証するため。
+// lib/legalConsent.js 自体・lib/subscription.js(stripeインスタンス・
+// getStripeCustomerIdByEmailの取得元)はフェイクにせず本物を読み込む。
+const LIB_LEGAL_CONSENT_JS = path.join(REPO_ROOT, 'lib', 'legalConsent.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -64,9 +70,10 @@ export async function resolve(specifier, context, nextResolve) {
   }
 
   // 2c. lib/cases.js が読む `./redis` をフェイクへ(工程P3-2)。
+  // 2d. lib/legalConsent.js が読む `./redis` も同じフェイクへ。
   if (specifier === './redis' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
-    if (parentPath === LIB_CASES_JS) {
+    if (parentPath === LIB_CASES_JS || parentPath === LIB_LEGAL_CONSENT_JS) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }

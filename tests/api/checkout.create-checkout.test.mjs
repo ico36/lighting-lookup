@@ -86,6 +86,19 @@ test('standard プラン: 早期割引が利用可能ならクーポンを付け
   assert.deepEqual(params.discounts, [{ coupon: 'coupon_test' }]);
 });
 
+test('利用規約への同意(consent_collection)を必須にし、custom_textにプライバシーポリシーの絶対URLを含める', async () => {
+  noExistingCustomer();
+  const res = await callCreateCheckout({ plan: 'light' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.deepEqual(params.consent_collection, { terms_of_service: 'required' });
+  assert.match(
+    params.custom_text.terms_of_service_acceptance.message,
+    /https:\/\/lighting-lookup\.vercel\.app\/privacy\.html/
+  );
+});
+
 test('既存顧客が見つかる場合は customer を渡し、customer_email は渡さない', async () => {
   fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_existing' }] }));
   fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] })); // 有効な契約は無し

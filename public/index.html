@@ -1351,6 +1351,25 @@
     <button type="button" onclick="openSignupModal(document.getElementById('login-email-input').value)"
       style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;font-family:inherit;text-decoration:underline;">新規お申し込み</button>
   </div>
+  <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text2);">
+    <a href="/terms.html" target="_blank" rel="noopener" style="color:var(--text2);">利用規約</a>
+    ・
+    <a href="/privacy.html" target="_blank" rel="noopener" style="color:var(--text2);">プライバシーポリシー</a>
+  </div>
+</div>
+
+<div id="tos-gate" style="display:none;max-width:440px;margin:60px auto;padding:0 16px;">
+  <p style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.7;text-align:center;">
+    ご利用いただく前に、利用規約とプライバシーポリシーをご確認ください。
+  </p>
+  <div class="input-card">
+    <div class="section-label">利用規約・プライバシーポリシーへの同意</div>
+    <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:14px;">
+      本サービスの利用には<a href="/terms.html" target="_blank" rel="noopener">利用規約</a>と<a href="/privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a>への同意が必要です。内容をご確認のうえ、よろしければ下のボタンを押してください。
+    </p>
+    <div id="tos-gate-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:10px;"></div>
+    <button class="btn-primary" id="tos-gate-accept-btn" style="width:100%;" onclick="acceptTos()">確認しました</button>
+  </div>
 </div>
 
 <div id="company-setup-gate" style="display:none;max-width:440px;margin:60px auto;padding:0 16px;">
@@ -1539,7 +1558,7 @@
     <!-- 工事士向けの免責。#estimate-sheet の外に置くこと。印刷対象は
          @media print で #estimate-sheet の内側だけに絞ってあるため、
          ここに置く限り施主に渡るPDFには載らない。 -->
-    <div class="disclaimer-note" id="estimate-disclaimer">見積書に記載する器具はAIによる推定です。お客様に提出する前に型番・数量をご確認ください。</div>
+    <div class="disclaimer-note" id="estimate-disclaimer">見積書に記載する器具はAIによる推定です。お客様に提出する前に型番・数量をご確認ください。（<a href="/terms.html#art2" target="_blank" rel="noopener" style="color:inherit;">利用規約第2条</a>）</div>
     <div id="estimate-sheet"></div>
     <div class="sheet-actions">
       <button class="btn-secondary sheet-action-btn" onclick="window.print()">🖨️ PDF保存／印刷</button>
@@ -1629,6 +1648,8 @@
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-11')">11. 自社情報の設定（社名・ロゴなど）</a>
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-12')">12. お問い合わせ・お知らせ</a>
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-13')">13. 解約するには</a>
+      <a href="/terms.html" target="_blank" rel="noopener">14. 利用規約</a>
+      <a href="/privacy.html" target="_blank" rel="noopener">15. プライバシーポリシー</a>
     </div>
     <div class="help-content">
       <div class="help-section" id="help-sec-1">
@@ -1701,6 +1722,7 @@
       <div class="help-section" id="help-sec-13">
         <div class="help-section-title">13. 解約するには</div>
         <p>解約の手続きをしても、すでにお支払い済みの請求期間の終了日までは引き続きご利用いただけます。期間終了と同時に自動的にログインできなくなります（日割りでの返金等は行っておりません）。</p>
+        <p>解約後も6か月間は案件データ・自社情報を保存しており、その間に同じメールアドレスで再度お申し込みいただければ、そのままの状態でご利用を再開できます（詳しくは<a href="/terms.html#art6" target="_blank" rel="noopener">利用規約第6条</a>をご覧ください）。</p>
         <p>下のボタンから解約手続き画面（Stripeの契約管理ページ）に進み、案内に従って手続きを行ってください。</p>
         <button onclick="startCancelSubscription()" style="background: none; border: 1px solid var(--border); color: var(--text2); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">解約手続きへ進む</button>
         <p id="cancel-subscription-error" style="display: none; color: #c0392b; margin-top: 8px;"></p>
@@ -1982,6 +2004,7 @@ async function submitEmail() {
 function showLoginGate(message) {
   localStorage.removeItem('session_token');
   document.getElementById('app-main').style.display = 'none';
+  document.getElementById('tos-gate').style.display = 'none';
   document.getElementById('company-setup-gate').style.display = 'none';
   document.getElementById('login-gate').style.display = 'block';
   if (message) {
@@ -2972,9 +2995,12 @@ async function checkCompanyAndRoute() {
     refreshCartCase();
     refreshAnnouncementsDot();
 
-    if (!companyInfo) {
+    if (!data.tosAccepted) {
+      showTosGate();
+    } else if (!companyInfo) {
       showCompanySetupGate();
     } else {
+      document.getElementById('tos-gate').style.display = 'none';
       document.getElementById('company-setup-gate').style.display = 'none';
       document.getElementById('app-main').style.display = 'block';
       renderEstimateCompanyDisplay();
@@ -2984,8 +3010,55 @@ async function checkCompanyAndRoute() {
   }
 }
 
+function showTosGate() {
+  document.getElementById('app-main').style.display = 'none';
+  document.getElementById('company-setup-gate').style.display = 'none';
+  document.getElementById('tos-gate').style.display = 'block';
+}
+
+// 利用規約・プライバシーポリシーの確認ボタン。company:{email}には触れず
+// tos:{email}だけを書き込むaction(api/company.js)を叩く。バージョンはここで
+// 固定文字列として持つしかない(静的ファイルのため)。サーバー側
+// (lib/legalConsent.js の CURRENT_TOS_VERSION)と食い違った場合はversion_mismatchで
+// 409が返り、下のcatch節でエラー表示する。
+async function acceptTos() {
+  const btn = document.getElementById('tos-gate-accept-btn');
+  const errorEl = document.getElementById('tos-gate-error');
+  hideError(errorEl);
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await authFetch('/api/company', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'accept-tos', version: 'v1' }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          handleSessionExpired();
+          return;
+        }
+        showError(
+          errorEl,
+          data.error === 'version_mismatch'
+            ? '利用規約が更新されています。お手数ですがページを再読み込みしてください。'
+            : (data.error || '処理に失敗しました。もう一度お試しください。')
+        );
+        return;
+      }
+
+      await checkCompanyAndRoute();
+    } catch (err) {
+      showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+    }
+  }, '処理中...');
+}
+
 function showCompanySetupGate() {
   document.getElementById('app-main').style.display = 'none';
+  document.getElementById('tos-gate').style.display = 'none';
   document.getElementById('company-setup-gate').style.display = 'block';
 }
 
@@ -5559,7 +5632,7 @@ function renderResult(r) {
   if (r.is_lighting_fixture === false) {
     lastResult._candidates = [];
     document.getElementById('result-content').innerHTML = `
-      <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。</div>
+      <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。（<a href="/terms.html#art2" target="_blank" rel="noopener" style="color:inherit;">利用規約第2条</a>）</div>
       <div class="result-card">
         <div class="result-header">
           <span class="result-title">調査結果</span>
@@ -5654,7 +5727,7 @@ function renderResult(r) {
   const orderText = r.order_text || '発注情報を生成できませんでした';
 
   document.getElementById('result-content').innerHTML = `
-    <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。</div>
+    <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。（<a href="/terms.html#art2" target="_blank" rel="noopener" style="color:inherit;">利用規約第2条</a>）</div>
     ${replacingItemId ? `
     <div style="font-size:13px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:10px 14px;border-radius:8px;margin-bottom:16px;line-height:1.6;">
       🔁 「${replacingItem ? escapeHtml(replacingItem.modelNumber) : '対象の器具'}」を差し替える候補を選んでください。
