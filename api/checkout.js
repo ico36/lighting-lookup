@@ -57,6 +57,15 @@ const UPGRADE_PATHS = {
   standard: ['pro'],
 };
 
+// 現在のプランから予約できる下位プラン。UPGRADE_PATHSの逆方向。
+//   light ... 既に最下位なので移行先が無い(お問い合わせ導線ではなく「既に最下位」の
+//             表示に倒す。handleGetDowngradeOptions()のalreadyLowestで区別する)
+//   unknown/admin ... UPGRADE_PATHSと同じ理由で移行先を機械的に決めない
+const DOWNGRADE_PATHS = {
+  pro: ['standard', 'light'],
+  standard: ['light'],
+};
+
 // プラン識別子 → Price IDの環境変数。クライアントからPrice IDを受け取らないための対応表。
 const PRICE_ID_ENV = {
   light: 'STRIPE_PRICE_ID_LIGHT',
@@ -78,6 +87,9 @@ const ACTIONS = {
   'create-checkout': handleCreateCheckout,
   'get-upgrade-options': handleGetUpgradeOptions,
   'update-plan': handleUpdatePlan,
+  'get-downgrade-options': handleGetDowngradeOptions,
+  'schedule-downgrade': handleScheduleDowngrade,
+  'cancel-downgrade-schedule': handleCancelDowngradeSchedule,
 };
 
 export default async function handler(req, res) {
@@ -249,6 +261,61 @@ function planDisplayName(price, fallbackPlan) {
   return fallbackPlan || null;
 }
 
+/**
+ * 予約中のダウングレードがあれば、その内容を返す。
+ *
+ * 【Stripeを唯一の情報源にする】予約状態をこちら側のRedis等に持たず、
+ * subscription.schedule(Subscription Scheduleが付いているか)を都度見る。
+ * こうすることで、Customer Portalでの解約・当アプリでのrelease・実際の
+ * フェーズ遷移のどれが起きても、次にこの関数を呼んだ時点で自動的に正しい
+ * 状態になる(食い違ったキャッシュを消す処理が要らない)。
+ *
+ * 【対象プランの特定にmetadataを使う理由】スケジュールのphases[1].items[0].price
+ * はPrice IDのみで、そこから何プランかを逆引きするより、schedule-downgrade
+ * (handleScheduleDowngrade)を作る側で対象プラン名を直接metadataへ焼き込んで
+ * おいた方が確実（PRICE_ID_ENVの環境変数が後から変わっても、既存の予約の
+ * 表示が壊れない）。
+ *
+ * @param {Stripe.Subscription} subscription
+ * @returns {Promise<{targetPlan: string, targetPlanName: string|null, effectiveAt: number|null, scheduleId: string} | null>}
+ */
+async function getPendingDowngradeInfo(subscription) {
+  if (!subscription?.schedule) return null;
+
+  const scheduleId = typeof subscription.schedule === 'string'
+    ? subscription.schedule
+    : subscription.schedule.id;
+
+  const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+  const targetPlan = schedule.metadata?.app_downgrade_target_plan || null;
+  if (!targetPlan) {
+    // このアプリが作ったのではないスケジュール(手動でダッシュボードから
+    // 付けた等)。ダウングレード予約としては扱わない。
+    return null;
+  }
+
+  const effectivePhase = schedule.phases?.[1] || null;
+  const effectiveAt = Number.isFinite(effectivePhase?.start_date)
+    ? effectivePhase.start_date * 1000
+    : null;
+
+  let targetPlanName = null;
+  const targetPriceId = process.env[PRICE_ID_ENV[targetPlan]];
+  if (targetPriceId) {
+    try {
+      const targetPrice = await stripe.prices.retrieve(targetPriceId, { expand: ['product'] });
+      targetPlanName = planDisplayName(targetPrice, targetPlan);
+    } catch (err) {
+      console.warn(
+        `[checkout] 予約中ダウングレードの表示名取得に失敗しました(plan=${targetPlan}):`,
+        err
+      );
+    }
+  }
+
+  return { targetPlan, targetPlanName, effectiveAt, scheduleId };
+}
+
 // 移行先の候補ごとに、Priceの内容と日割り額をまとめて返す。
 // モーダルを開いたときに1回だけ叩かれる想定。
 async function handleGetUpgradeOptions(req, res) {
@@ -280,13 +347,19 @@ async function handleGetUpgradeOptions(req, res) {
     // この分岐でも表示名を返す。候補カードが出ないぶん、ここが利用者に見える
     // 唯一のプラン名になるため（特にunknownでは識別子を見せても意味が通らない）。
     if (targets.length === 0) {
-      const currentPrice = await currentPricePromise;
+      const [currentPrice, pendingDowngrade] = await Promise.all([
+        currentPricePromise,
+        getPendingDowngradeInfo(subscription),
+      ]);
       return res.status(200).json({
         currentPlan: limits.plan,
         currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
         currentLimits: limits,
         options: [],
         contactOnly: true,
+        // 予約中のダウングレードがあれば、アップグレードの確認画面で
+        // 「予約中のダウングレードは取り消されます」と案内するために使う。
+        pendingDowngrade,
       });
     }
 
@@ -373,8 +446,11 @@ async function handleGetUpgradeOptions(req, res) {
 
     const options = settled.filter(Boolean);
     // couponState は上で既に await 済み（discounts の算出に使ったため）。
-    // 残っているのは currentPricePromise だけなので、Promise.all は不要。
-    const currentPrice = await currentPricePromise;
+    // currentPricePromise とは独立に発火できるpendingDowngradeの取得も合流させる。
+    const [currentPrice, pendingDowngrade] = await Promise.all([
+      currentPricePromise,
+      getPendingDowngradeInfo(subscription),
+    ]);
 
     return res.status(200).json({
       // 割引の内容（percentOff / durationInMonths）。確認ステップの文言に使う。
@@ -391,6 +467,9 @@ async function handleGetUpgradeOptions(req, res) {
       currentLimits: limits,
       options,
       contactOnly: false,
+      // 予約中のダウングレードがあれば、アップグレードの確認画面で
+      // 「予約中のダウングレードは取り消されます」と案内するために使う。
+      pendingDowngrade,
     });
   } catch (err) {
     console.error('[checkout] アップグレード候補の取得に失敗しました:', err);
@@ -459,6 +538,18 @@ async function handleUpdatePlan(req, res) {
         error: 'plan_changed',
         message: 'プランが変更されています。画面を更新してもう一度お試しください。',
       });
+    }
+
+    // ダウングレード予約中(Subscription Scheduleが付いている)なら、アップグレード
+    // する以上その予約は意味を失うため先に取り消す。スケジュール管理下のサブスクは
+    // このあとの subscriptions.update() で直接プランを変更できない可能性が高い
+    // （要Preview確認）ため、その回避も兼ねる。release()は予約を取り消すだけで
+    // サブスク自体はそのまま残る(handleCancelDowngradeScheduleと同じ操作)。
+    if (subscription.schedule) {
+      const scheduleId = typeof subscription.schedule === 'string'
+        ? subscription.schedule
+        : subscription.schedule.id;
+      await stripe.subscriptionSchedules.release(scheduleId);
     }
 
     const updated = await stripe.subscriptions.update(
@@ -544,6 +635,283 @@ async function handleUpdatePlan(req, res) {
       err
     );
     return res.status(500).json({ error: 'internal_error', message: 'プラン変更に失敗しました' });
+  }
+}
+
+// 下位プランの候補ごとに、Priceの内容をまとめて返す。アップグレードと違い、
+// その場では課金が発生しない(次回更新日から適用)ため、invoices.createPreview は
+// 呼ばない。
+// 解約予約中(Customer Portal等でcancel_at_period_end/cancel_atが設定済み)か。
+// この状態のサブスクにダウングレードを予約させると、解約日とダウングレードの
+// 適用日のどちらが先に来るか・スケジュールと解約予約が競合しないかが不明瞭になる
+// (要Preview確認事項でもある)ため、そもそも候補を出さない・予約もさせない。
+function isCancelPending(subscription) {
+  return Boolean(subscription?.cancel_at_period_end || subscription?.cancel_at);
+}
+
+async function handleGetDowngradeOptions(req, res) {
+  const auth = await requireAuthWithPlan(req, res);
+  if (!auth) return;
+  const { email, limits } = auth;
+
+  try {
+    const { subscription, item } = await getActiveSubscriptionWithItem(email);
+    if (!subscription || !item) {
+      return res.status(404).json({
+        error: 'subscription_not_found',
+        message: '契約情報が見つかりませんでした',
+      });
+    }
+
+    const currentPricePromise = item.price?.id
+      ? stripe.prices.retrieve(item.price.id, { expand: ['product'] })
+      : Promise.resolve(null);
+    const pendingDowngradePromise = getPendingDowngradeInfo(subscription);
+
+    const nextRenewalAt = Number.isFinite(subscription.current_period_end)
+      ? subscription.current_period_end * 1000
+      : null;
+
+    if (isCancelPending(subscription)) {
+      const [currentPrice, pendingDowngrade] = await Promise.all([
+        currentPricePromise,
+        pendingDowngradePromise,
+      ]);
+      return res.status(200).json({
+        currentPlan: limits.plan,
+        currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
+        currentLimits: limits,
+        nextRenewalAt,
+        options: [],
+        pendingDowngrade,
+        contactOnly: false,
+        alreadyLowest: false,
+        cancelPending: true,
+      });
+    }
+
+    const targets = DOWNGRADE_PATHS[limits.plan] || [];
+    // light（既に最下位）と unknown/admin（現在のプランを判定できない）は
+    // どちらも候補が空になるが、意味が違うのでフロント側で文言を出し分けられる
+    // よう区別して返す。
+    const alreadyLowest = limits.plan === 'light';
+
+    if (targets.length === 0) {
+      const [currentPrice, pendingDowngrade] = await Promise.all([
+        currentPricePromise,
+        pendingDowngradePromise,
+      ]);
+      return res.status(200).json({
+        currentPlan: limits.plan,
+        currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
+        currentLimits: limits,
+        nextRenewalAt,
+        options: [],
+        pendingDowngrade,
+        contactOnly: !alreadyLowest,
+        alreadyLowest,
+        cancelPending: false,
+      });
+    }
+
+    // 候補どうしは独立。日割り計算が無い分、アップグレードよりシンプル。
+    const settled = await Promise.all(targets.map(async (plan) => {
+      const priceId = process.env[PRICE_ID_ENV[plan]];
+      if (!priceId) {
+        console.warn(
+          `[checkout] ${PRICE_ID_ENV[plan]} が未設定のため、ダウングレード候補「${plan}」を出せません。`
+        );
+        return null;
+      }
+
+      const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
+
+      return {
+        plan,
+        displayName: planDisplayName(price, plan),
+        priceLabel: { unitAmount: price.unit_amount, currency: price.currency },
+        limits: planLimitsFromPrice(price),
+        // update-plan と同じ quote 機構を流用する。ダウングレードはその場で
+        // 課金しないため amountDue は 0 固定(schedule-downgrade側では読まない)。
+        // couponSent/couponApplied も同じ理由で常に false
+        // （早期割引はライトへは引き継がせない方針。handleScheduleDowngrade参照）。
+        quote: createUpgradeQuote({
+          email,
+          fromPriceId: item.price?.id || null,
+          toPriceId: priceId,
+          toPlan: plan,
+          amountDue: 0,
+          currency: price.currency,
+          couponSent: false,
+          couponApplied: false,
+        }),
+      };
+    }));
+
+    const options = settled.filter(Boolean);
+    const [currentPrice, pendingDowngrade] = await Promise.all([
+      currentPricePromise,
+      pendingDowngradePromise,
+    ]);
+
+    return res.status(200).json({
+      currentPlan: limits.plan,
+      currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
+      currentLimits: limits,
+      nextRenewalAt,
+      options,
+      pendingDowngrade,
+      contactOnly: false,
+      alreadyLowest: false,
+      cancelPending: false,
+    });
+  } catch (err) {
+    console.error('[checkout] ダウングレード候補の取得に失敗しました:', err);
+    return res.status(500).json({ error: 'internal_error', message: 'プラン情報の取得に失敗しました' });
+  }
+}
+
+// ダウングレードの予約。get-downgrade-options が発行した quote を、
+// Subscription Schedule として確定する。この時点では課金しない。
+async function handleScheduleDowngrade(req, res) {
+  const auth = await requireAuthWithPlan(req, res);
+  if (!auth) return;
+  const { email } = auth;
+
+  const token = (req.body || {}).quote;
+  const verified = verifyUpgradeQuote(token, email);
+
+  if (!verified.ok) {
+    if (verified.reason === 'expired') {
+      return res.status(409).json({
+        error: 'quote_expired',
+        message: '見積の有効期限が切れました。もう一度プランを選び直してください。',
+      });
+    }
+    return res.status(400).json({
+      error: 'invalid_quote',
+      message: 'プラン変更の情報が正しくありません。画面を開き直してください。',
+    });
+  }
+
+  const quote = verified.quote;
+
+  try {
+    const { subscription, item } = await getActiveSubscriptionWithItem(email);
+    if (!subscription || !item) {
+      return res.status(404).json({
+        error: 'subscription_not_found',
+        message: '契約情報が見つかりませんでした',
+      });
+    }
+
+    if (item.price?.id !== quote.fromPriceId) {
+      return res.status(409).json({
+        error: 'plan_changed',
+        message: 'プランが変更されています。画面を更新してもう一度お試しください。',
+      });
+    }
+
+    if (isCancelPending(subscription)) {
+      return res.status(409).json({
+        error: 'cancel_pending',
+        message: '解約手続き済みのため、プランの変更はできません。',
+      });
+    }
+
+    if (subscription.schedule) {
+      return res.status(409).json({
+        error: 'downgrade_already_scheduled',
+        message: '既にダウングレードが予約されています。先に取り消してから選び直してください。',
+      });
+    }
+
+    if (!Number.isFinite(subscription.current_period_end)) {
+      console.error(`[checkout] ダウングレード予約に必要な current_period_end を取得できませんでした（${email}）`);
+      return res.status(500).json({ error: 'internal_error', message: 'プラン情報の取得に失敗しました' });
+    }
+
+    // 現行フェーズ(更新日まで)には、いま実際に適用されている割引をそのまま
+    // 引き継がせる。省略すると「顧客単位の割引を継承する」という挙動になり
+    // （Stripeの型コメント）、このアプリがsubscription単位で付けている早期割引と
+    // 一致する保証がない(要Preview確認)ため、既存のdiscount idを明示的に渡す。
+    const currentDiscounts = (subscription.discounts || [])
+      .map((d) => (typeof d === 'string' ? d : d.id))
+      .filter(Boolean)
+      .map((discountId) => ({ discount: discountId }));
+
+    const schedule = await stripe.subscriptionSchedules.create(
+      { from_subscription: subscription.id },
+      { idempotencyKey: idempotencyKeyFromQuote(token) }
+    );
+
+    await stripe.subscriptionSchedules.update(schedule.id, {
+      end_behavior: 'release',
+      // 予約中の表示(getPendingDowngradeInfo)がPrice IDの逆引きをせずに
+      // 済むよう、対象プラン識別子をここへ焼き込む。
+      metadata: { app_downgrade_target_plan: quote.toPlan },
+      phases: [
+        {
+          items: [{ price: quote.fromPriceId }],
+          start_date: schedule.phases[0].start_date,
+          end_date: subscription.current_period_end,
+          discounts: currentDiscounts.length ? currentDiscounts : '',
+        },
+        {
+          items: [{ price: quote.toPriceId }],
+          // 早期割引はスタンダード/プロ限定の方針(api/checkout.jsのcouponDiscounts
+          // 呼び出し箇所を参照)。「指定しなければ顧客の割引を継承する」という
+          // 既定に任せず、ライトへの移行後は割引が一切乗らないことを明示する。
+          discounts: '',
+        },
+      ],
+    });
+
+    return res.status(200).json({
+      success: true,
+      targetPlan: quote.toPlan,
+      effectiveAt: subscription.current_period_end * 1000,
+    });
+  } catch (err) {
+    console.error(
+      `[checkout] ダウングレードの予約に失敗しました（code=${err?.code || 'なし'}, type=${err?.type || 'なし'}）:`,
+      err
+    );
+    return res.status(500).json({ error: 'internal_error', message: 'ダウングレードの予約に失敗しました' });
+  }
+}
+
+// 予約中のダウングレードの取り消し。Subscription Scheduleをreleaseするだけで、
+// サブスクリプション自体(現在のプラン)はそのまま残る。
+async function handleCancelDowngradeSchedule(req, res) {
+  const email = await requireAuth(req, res);
+  if (!email) return;
+
+  try {
+    const { subscription } = await getActiveSubscriptionWithItem(email);
+    if (!subscription) {
+      return res.status(404).json({
+        error: 'subscription_not_found',
+        message: '契約情報が見つかりませんでした',
+      });
+    }
+
+    if (!subscription.schedule) {
+      return res.status(404).json({
+        error: 'no_pending_downgrade',
+        message: '予約中のダウングレードが見つかりませんでした',
+      });
+    }
+
+    const scheduleId = typeof subscription.schedule === 'string'
+      ? subscription.schedule
+      : subscription.schedule.id;
+    await stripe.subscriptionSchedules.release(scheduleId);
+
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[checkout] ダウングレード予約の取り消しに失敗しました:', err);
+    return res.status(500).json({ error: 'internal_error', message: '取り消しに失敗しました' });
   }
 }
 

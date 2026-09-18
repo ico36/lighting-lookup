@@ -51,7 +51,77 @@ function defaultHandlers() {
         list: async () => ({ data: [] }),
       },
     },
+    subscriptionSchedules: {
+      create: async (params) => defaultScheduleCreate(params),
+      update: async (id, params) => defaultScheduleUpdate(id, params),
+      retrieve: async (id) => defaultScheduleRetrieve(id),
+      release: async (id) => defaultScheduleRelease(id),
+    },
   };
+}
+
+// Subscription Scheduleのフェイク永続化(インメモリ)。create→update→retrieve→release
+// の一連の呼び出しが1テスト内で整合するよう、簡易的なMapで状態を持つ。
+// __reset()で必ずクリアする(テスト間の汚染防止)。
+let scheduleStore = new Map();
+let scheduleIdCounter = 0;
+
+function defaultScheduleCreate(params) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const id = `sub_sched_test_${++scheduleIdCounter}`;
+  const schedule = {
+    id,
+    status: 'active',
+    subscription: params?.from_subscription || null,
+    metadata: {},
+    end_behavior: 'release',
+    // from_subscriptionでの作成直後は、現在のサブスクをそのまま引き継いだ
+    // 1フェーズだけが入っている、という実際のStripeの挙動を模す。
+    // 呼び出し側(handleScheduleDowngrade)はこの直後にupdate()でphasesを
+    // 2フェーズに置き換えるため、items の中身自体はテストで参照されない。
+    phases: [
+      {
+        start_date: nowSec,
+        end_date: nowSec + 30 * 24 * 60 * 60,
+        items: [{ price: 'price_light_test' }],
+      },
+    ],
+  };
+  scheduleStore.set(id, schedule);
+  return schedule;
+}
+
+function defaultScheduleUpdate(id, params) {
+  const existing = scheduleStore.get(id);
+  if (!existing) {
+    throw new Error(`[fake stripe] 未知のsubscription scheduleです: ${id}`);
+  }
+  const updated = {
+    ...existing,
+    ...(params?.end_behavior ? { end_behavior: params.end_behavior } : {}),
+    ...(params?.metadata ? { metadata: { ...existing.metadata, ...params.metadata } } : {}),
+    ...(params?.phases ? { phases: params.phases } : {}),
+  };
+  scheduleStore.set(id, updated);
+  return updated;
+}
+
+function defaultScheduleRetrieve(id) {
+  const existing = scheduleStore.get(id);
+  if (!existing) {
+    throw new Error(`[fake stripe] 未知のsubscription scheduleです: ${id}`);
+  }
+  return existing;
+}
+
+function defaultScheduleRelease(id) {
+  const existing = scheduleStore.get(id);
+  if (!existing) {
+    throw new Error(`[fake stripe] 未知のsubscription scheduleです: ${id}`);
+  }
+  const released = { ...existing, status: 'released' };
+  scheduleStore.set(id, released);
+  return released;
 }
 
 function defaultSubscription() {
@@ -131,6 +201,8 @@ export function __reset() {
   callLog = [];
   concurrent = 0;
   maxConcurrent = 0;
+  scheduleStore = new Map();
+  scheduleIdCounter = 0;
   handlers = defaultHandlers();
 }
 __reset();
@@ -159,6 +231,42 @@ export function __setHandler(path, fn) {
 
 export function __getCallLog() {
   return callLog.slice();
+}
+
+/**
+ * defaultPrice()を外部のテストから使うための公開版。ダウングレード系のテストが
+ * サブスクのitemsを自前で組み立てる際、price_light_test等の中身をこのファイルと
+ * 二重管理しないために使う。
+ */
+export function __getDefaultPrice(id) {
+  return defaultPrice(id);
+}
+
+/** subscriptionSchedules.create()で作られたスケジュールIDの一覧(作成順)。 */
+export function __getScheduleStoreIds() {
+  return [...scheduleStore.keys()];
+}
+
+/** テストの検証用。subscriptionSchedules.retrieve()と違い呼び出しログに乗らない。 */
+export function __peekSchedule(id) {
+  return scheduleStore.get(id) || null;
+}
+
+/**
+ * subscriptionSchedules.create()を経由せず、既に存在するスケジュールとして
+ * ストアへ直接登録する。「サブスクに既にscheduleが付いている」状態を作るテストで、
+ * create()の呼び出し履歴を汚さずに済ませるために使う。
+ */
+export function __seedSchedule(id, data = {}) {
+  scheduleStore.set(id, {
+    id,
+    status: 'active',
+    subscription: null,
+    metadata: {},
+    end_behavior: 'release',
+    phases: [],
+    ...data,
+  });
 }
 
 export function __getMaxConcurrent() {
@@ -197,6 +305,12 @@ export default function Stripe() {
         create: (...args) => tracked('checkout.sessions.create', handlers.checkout.sessions.create, args),
         list: (...args) => tracked('checkout.sessions.list', handlers.checkout.sessions.list, args),
       },
+    },
+    subscriptionSchedules: {
+      create: (...args) => tracked('subscriptionSchedules.create', handlers.subscriptionSchedules.create, args),
+      update: (...args) => tracked('subscriptionSchedules.update', handlers.subscriptionSchedules.update, args),
+      retrieve: (...args) => tracked('subscriptionSchedules.retrieve', handlers.subscriptionSchedules.retrieve, args),
+      release: (...args) => tracked('subscriptionSchedules.release', handlers.subscriptionSchedules.release, args),
     },
     invoices: {
       createPreview: (...args) => tracked('invoices.createPreview', handlers.invoices.createPreview, args),

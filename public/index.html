@@ -1587,6 +1587,15 @@
       <div class="modal-title">自社情報の設定</div>
       <button class="modal-close" onclick="closeCompanySettings()">✕</button>
     </div>
+    <!-- 契約プラン。金額・プラン名・予約状態はすべてget-downgrade-optionsの
+         レスポンスから描画するため、ここには一切書かない(アップグレードモーダルと
+         同じ方針)。 -->
+    <div class="modal-section-label" style="margin-top:0;">契約プラン</div>
+    <div id="settings-pending-downgrade" style="display:none;"></div>
+    <div style="margin-bottom:20px;">
+      <button type="button" onclick="openDowngradeModal()"
+        style="background: none; border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">プランを変更する（下位プランへ）</button>
+    </div>
     <div>
       <input type="text" id="settings-biz-name" class="stacked-input" placeholder="屋号・会社名（必須）" />
       <input type="text" id="settings-biz-tel" class="stacked-input" placeholder="電話番号（任意）" />
@@ -1723,6 +1732,7 @@
         <div class="help-section-title">13. 解約するには</div>
         <p>解約の手続きをしても、すでにお支払い済みの請求期間の終了日までは引き続きご利用いただけます。期間終了と同時に自動的にログインできなくなります（日割りでの返金等は行っておりません）。</p>
         <p>解約後も6か月間は案件データ・自社情報を保存しており、その間に同じメールアドレスで再度お申し込みいただければ、そのままの状態でご利用を再開できます（詳しくは<a href="/terms.html#art6" target="_blank" rel="noopener">利用規約第6条</a>をご覧ください）。</p>
+        <div id="help-pending-downgrade" style="display:none;"></div>
         <p>下のボタンから解約手続き画面（Stripeの契約管理ページ）に進み、案内に従って手続きを行ってください。</p>
         <button onclick="startCancelSubscription()" style="background: none; border: 1px solid var(--border); color: var(--text2); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">解約手続きへ進む</button>
         <p id="cancel-subscription-error" style="display: none; color: #c0392b; margin-top: 8px;"></p>
@@ -1865,6 +1875,41 @@
 
     <!-- 3. 完了。提示額ではなく実際に請求された額を出す -->
     <div id="upgrade-step-done" style="display:none;"></div>
+  </div>
+</div>
+
+<!-- プランのダウングレード。#upgrade-overlayと同じ3領域(候補選択→確認→完了)構成。
+     設定画面の「プランを変更する（下位プランへ）」から開く。次回更新日から適用され、
+     その場では課金しない点がアップグレードとの一番の違い。
+     金額・プラン名・上限値・予約状態はすべてget-downgrade-optionsのレスポンスから
+     描画するため、ここには一切書かない。 -->
+<div class="modal-overlay" id="downgrade-overlay" onclick="if(event.target===this) closeDowngradeModal()">
+  <div class="modal-sheet">
+    <div class="modal-header">
+      <div class="modal-title" id="downgrade-title">プランのダウングレード</div>
+      <button class="modal-close" onclick="closeDowngradeModal()">✕</button>
+    </div>
+
+    <div id="downgrade-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:12px;"></div>
+
+    <!-- 1. 候補の選択。既に予約中ならここに予約状態と取り消しボタンだけを出し、
+         候補カードは出さない(二重予約を避けるため。サーバー側もdowngrade_already_scheduledで
+         弾く)。 -->
+    <div id="downgrade-step-select">
+      <div id="downgrade-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
+      <div id="downgrade-current" style="display:none;font-size:12px;color:var(--text2);margin-bottom:12px;"></div>
+      <div id="downgrade-pending" style="display:none;"></div>
+      <div id="downgrade-options"></div>
+      <div id="downgrade-already-lowest" style="display:none;color:var(--text2);font-size:13px;"></div>
+      <div id="downgrade-cancel-pending" style="display:none;color:var(--text2);font-size:13px;"></div>
+      <div id="downgrade-contact" style="display:none;"></div>
+    </div>
+
+    <!-- 2. 確認。何が変わるかの警告を必ず経由させる -->
+    <div id="downgrade-step-confirm" style="display:none;"></div>
+
+    <!-- 3. 完了 -->
+    <div id="downgrade-step-done" style="display:none;"></div>
   </div>
 </div>
 
@@ -2570,12 +2615,20 @@ function showUpgradeConfirm() {
     discountNote = `早期割引${escapeHtml(String(percentOff))}%オフ適用<br>`;
   }
 
+  // 予約中のダウングレードがあれば、アップグレードの実行と同時に自動で
+  // 取り消されることを確認画面で明示する(api/checkout.jsのhandleUpdatePlan参照)。
+  const pendingDowngrade = upgradeOptions?.pendingDowngrade || null;
+  const pendingDowngradeNote = pendingDowngrade
+    ? `<div class="warning-note">⚠ 予約中の${escapeHtml(pendingDowngrade.targetPlanName || pendingDowngrade.targetPlan)}へのダウングレードは、この変更と同時に取り消されます。</div>`
+    : '';
+
   document.getElementById('upgrade-step-select').style.display = 'none';
   document.getElementById('upgrade-title').textContent = 'お支払いの確認';
   document.getElementById('upgrade-step-confirm').innerHTML = `
     <div style="font-size:14px;">本日から ${name} に切り替わります${renewal}</div>
     <div style="font-size:13px;color:var(--text2);margin-top:6px;">検索回数は残り${searchLimit}になります</div>
     <div class="upgrade-confirm-amount">本日のお支払い ${amount}（税込）</div>
+    ${pendingDowngradeNote}
     <div class="upgrade-note">
       ${discountNote}
       現在のプランの残り日数分の返金はありません。<br>
@@ -2727,6 +2780,407 @@ function showUpgradeDone(data) {
   // （remaining が増えるため renderQuota() が非表示にする）。
   updateQuota(data.quota);
   hideCaseLimitNotice();
+}
+
+// ===== 予約中ダウングレードの共通表示 =====
+// 設定画面・ヘルプの解約セクション・ダウングレードモーダルの3箇所から同じ見た目で
+// 呼ばれる。containerIdは呼び出し元のid属性をそのまま渡す(取り消しボタンが
+// どこを再読み込みすればいいか判別するのに使う)。
+function renderPendingDowngradeInto(containerId, pendingDowngrade, options = {}) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  if (!pendingDowngrade) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+
+  const planName = escapeHtml(pendingDowngrade.targetPlanName || pendingDowngrade.targetPlan);
+  const effectiveDate = Number.isFinite(pendingDowngrade.effectiveAt)
+    ? escapeHtml(formatDateJa(pendingDowngrade.effectiveAt))
+    : '次回更新日';
+  const extraNote = options.extraNote ? `<div style="margin-top:6px;">${escapeHtml(options.extraNote)}</div>` : '';
+
+  el.innerHTML = `
+    <div class="warning-note">
+      <div>⚠ ${planName}へのダウングレードを予約中です（適用日: ${effectiveDate}）。</div>
+      ${extraNote}
+      <div style="margin-top:8px;">
+        <button type="button" onclick="cancelDowngradeSchedule('${containerId}')"
+          style="background: none; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;">予約を取り消す</button>
+      </div>
+    </div>
+  `;
+  el.style.display = 'block';
+}
+
+// get-downgrade-optionsはダウングレード候補も一緒に返す1本のAPIだが、
+// ここでは予約状態(pendingDowngrade)だけを軽量に読みたい箇所(設定画面・ヘルプ)が
+// あるため、専用のヘルパーとして分ける。
+async function fetchPendingDowngrade() {
+  try {
+    const response = await authFetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get-downgrade-options' }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.pendingDowngrade || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function refreshSettingsPendingDowngrade() {
+  const pendingDowngrade = await fetchPendingDowngrade();
+  renderPendingDowngradeInto('settings-pending-downgrade', pendingDowngrade);
+}
+
+async function refreshHelpPendingDowngrade() {
+  const pendingDowngrade = await fetchPendingDowngrade();
+  renderPendingDowngradeInto('help-pending-downgrade', pendingDowngrade, {
+    extraNote: '解約手続きを進める前に、先に予約を取り消すことをおすすめします。',
+  });
+}
+
+// 取り消しボタンの実処理。呼び出し元(containerId)ごとに再読み込みの仕方を変える。
+async function cancelDowngradeSchedule(containerId) {
+  try {
+    const response = await authFetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'cancel-downgrade-schedule' }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+      alert(data.message || data.error || '取り消しに失敗しました。もう一度お試しください。');
+      return;
+    }
+
+    if (containerId === 'downgrade-pending') {
+      loadDowngradeOptions();
+    } else if (containerId === 'help-pending-downgrade') {
+      refreshHelpPendingDowngrade();
+    } else {
+      refreshSettingsPendingDowngrade();
+    }
+  } catch (err) {
+    alert('通信エラーが発生しました。もう一度お試しください。');
+  }
+}
+
+// ===== プランのダウングレード =====
+// downgradeOptions は get-downgrade-options のレスポンスそのまま。
+// アップグレードと違いその場では課金しないため、確定(schedule-downgrade)後も
+// amountChargedのような実額の突き合わせは行わない。
+let downgradeOptions = null;
+let selectedDowngrade = null;
+// schedule-downgrade/cancel-downgrade-scheduleの実行中はモーダルを閉じさせない
+// (upgradeInFlightと同じ理由)。
+let downgradeInFlight = false;
+
+function openDowngradeModal() {
+  resetDowngradeModal();
+  document.getElementById('downgrade-overlay').classList.add('open');
+  loadDowngradeOptions();
+}
+
+function closeDowngradeModal() {
+  if (downgradeInFlight) return;
+  document.getElementById('downgrade-overlay').classList.remove('open');
+}
+
+function resetDowngradeModal() {
+  downgradeOptions = null;
+  selectedDowngrade = null;
+  downgradeInFlight = false;
+
+  document.getElementById('downgrade-title').textContent = 'プランのダウングレード';
+  hideError(document.getElementById('downgrade-error'));
+
+  document.getElementById('downgrade-step-select').style.display = 'block';
+  document.getElementById('downgrade-step-confirm').style.display = 'none';
+  document.getElementById('downgrade-step-confirm').innerHTML = '';
+  document.getElementById('downgrade-step-done').style.display = 'none';
+  document.getElementById('downgrade-step-done').innerHTML = '';
+
+  document.getElementById('downgrade-loading').style.display = 'block';
+  document.getElementById('downgrade-current').style.display = 'none';
+  document.getElementById('downgrade-pending').style.display = 'none';
+  document.getElementById('downgrade-pending').innerHTML = '';
+  document.getElementById('downgrade-options').innerHTML = '';
+  document.getElementById('downgrade-already-lowest').style.display = 'none';
+  document.getElementById('downgrade-cancel-pending').style.display = 'none';
+  document.getElementById('downgrade-contact').style.display = 'none';
+  document.getElementById('downgrade-contact').innerHTML = '';
+}
+
+async function loadDowngradeOptions() {
+  const errorEl = document.getElementById('downgrade-error');
+  const loadingEl = document.getElementById('downgrade-loading');
+
+  try {
+    const response = await authFetch('/api/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get-downgrade-options' }),
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        handleSessionExpired(closeDowngradeModal);
+        return;
+      }
+      loadingEl.style.display = 'none';
+      showError(errorEl, data.message || data.error || 'プラン情報の取得に失敗しました');
+      return;
+    }
+
+    loadingEl.style.display = 'none';
+    downgradeOptions = data;
+    renderDowngradeOptions(data);
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+  }
+}
+
+function renderDowngradeOptions(data) {
+  const currentEl = document.getElementById('downgrade-current');
+  currentEl.textContent = data.currentPlanName
+    ? `現在のプラン: ${data.currentPlanName}`
+    : '現在のプラン情報を確認できませんでした';
+  currentEl.style.display = 'block';
+
+  // 解約予約中(cancel_at_period_end/cancel_at設定済み)なら、そもそも候補を出さない。
+  // サーバー側もschedule-downgradeをcancel_pendingで拒否する(handleScheduleDowngrade参照)。
+  if (data.cancelPending) {
+    const cancelPendingEl = document.getElementById('downgrade-cancel-pending');
+    cancelPendingEl.textContent = '解約手続き済みのため、プランの変更はできません。';
+    cancelPendingEl.style.display = 'block';
+    return;
+  }
+
+  // 既に予約中なら候補は出さず、予約状態と取り消しボタンだけを出す
+  // (サーバー側もdowngrade_already_scheduledで二重予約を弾く)。
+  if (data.pendingDowngrade) {
+    renderPendingDowngradeInto('downgrade-pending', data.pendingDowngrade, {
+      extraNote: '新しい予約をするには、先にこちらを取り消してください。',
+    });
+    document.getElementById('downgrade-options').innerHTML = '';
+    document.getElementById('downgrade-already-lowest').style.display = 'none';
+    document.getElementById('downgrade-contact').style.display = 'none';
+    return;
+  }
+
+  if (data.alreadyLowest) {
+    const lowestEl = document.getElementById('downgrade-already-lowest');
+    lowestEl.textContent = '既に最も下位のプランをご利用中です。これ以上下げることはできません。';
+    lowestEl.style.display = 'block';
+    return;
+  }
+
+  // pro/standard以外への機械判定ができないunknown/admin等。アップグレードと同じ
+  // お問い合わせ導線に倒す。
+  if (data.contactOnly || !data.options.length) {
+    const contactEl = document.getElementById('downgrade-contact');
+    contactEl.innerHTML = `
+      <div class="upgrade-note" style="margin-top:0;">
+        プラン変更については お問い合わせください。<br>
+        現在のご契約内容を確認のうえ、ご案内します。
+      </div>
+      <div style="margin-top:14px;">
+        <button type="button" class="btn-primary" style="width:100%;"
+          onclick="openContactFromUpgrade()">お問い合わせフォームを開く</button>
+      </div>
+    `;
+    contactEl.style.display = 'block';
+    return;
+  }
+
+  // 候補カード。数値はすべて data 由来で、ここには一切書かない
+  document.getElementById('downgrade-options').innerHTML = data.options.map((option, index) => `
+    <button type="button" class="plan-card" id="downgrade-plan-card-${index}" onclick="selectDowngradeOption(${index})">
+      <div class="plan-card-head">
+        <span class="plan-card-name">${escapeHtml(option.displayName || option.plan)}</span>
+        <span class="plan-card-price">${escapeHtml(formatMoney(option.priceLabel.unitAmount, option.priceLabel.currency))} / 月</span>
+      </div>
+      <div class="plan-card-limits">
+        検索回数 ${escapeHtml(formatLimit(option.limits.searchLimit, '回/月'))}<br>
+        保存できる案件 ${escapeHtml(formatLimit(option.limits.caseLimit, '件'))}<br>
+        完了案件の保存期間 ${escapeHtml(formatLimit(option.limits.retentionDays, '日'))}
+      </div>
+    </button>
+  `).join('');
+}
+
+function selectDowngradeOption(index) {
+  if (!downgradeOptions || !downgradeOptions.options[index]) return;
+  selectedDowngrade = downgradeOptions.options[index];
+
+  downgradeOptions.options.forEach((_, i) => {
+    document.getElementById(`downgrade-plan-card-${i}`).classList.toggle('is-selected', i === index);
+  });
+
+  showDowngradeConfirm();
+}
+
+// 確認ステップ。決定済み仕様の警告(次回更新日・上限の変化・ライトはアーカイブ
+// 閲覧不可・保存件数超過で新規作成不可・既存データは削除されない・保存期間は
+// 今後完了/失注にする案件から適用)をすべてここで出す。表示する数値は
+// get-downgrade-options のレスポンス由来で、ここには金額も上限もハードコードしない。
+function showDowngradeConfirm() {
+  const option = selectedDowngrade;
+  if (!option) return;
+
+  const name = escapeHtml(option.displayName || option.plan);
+  const monthly = escapeHtml(formatMoney(option.priceLabel.unitAmount, option.priceLabel.currency));
+  const renewal = Number.isFinite(downgradeOptions.nextRenewalAt)
+    ? escapeHtml(formatDateJa(downgradeOptions.nextRenewalAt))
+    : '次回更新日';
+
+  const searchLimit = escapeHtml(formatLimit(option.limits.searchLimit, '回/月'));
+  const caseLimit = escapeHtml(formatLimit(option.limits.caseLimit, '件'));
+  const retentionDays = escapeHtml(formatLimit(option.limits.retentionDays, '日'));
+
+  // ライトへの変更のときだけ、アーカイブ閲覧・複製ができなくなる旨を追加する
+  // (lib/featureCampaigns.jsのarchiveAccessがlightを許可プランに含めていないため)。
+  const archiveNote = option.plan === 'light'
+    ? '<li>アーカイブ済みの案件の閲覧・複製ができなくなります。</li>'
+    : '';
+
+  document.getElementById('downgrade-step-select').style.display = 'none';
+  document.getElementById('downgrade-title').textContent = 'ダウングレードの確認';
+  document.getElementById('downgrade-step-confirm').innerHTML = `
+    <div style="font-size:14px;">次回更新日（${renewal}）から ${name}（${monthly} / 月）に切り替わります</div>
+    <div class="warning-note" style="margin-top:12px;">
+      <strong>切り替え後に変わること</strong>
+      <ul style="margin:8px 0 0;padding-left:1.2em;">
+        <li>検索回数の上限: ${searchLimit}</li>
+        <li>保存できる案件数の上限: ${caseLimit}</li>
+        <li>保存期間: ${retentionDays}（今後、完了・失注にする案件から新しい保存期間が適用されます。既に完了・失注にした案件の保存期間はそのままです）</li>
+        ${archiveNote}
+        <li>保存件数が新しい上限を超えている場合、上限を下回るまで新しい案件を作成できなくなります。</li>
+      </ul>
+    </div>
+    <div class="upgrade-note">
+      既存の案件データ・自社情報は削除されません。<br>
+      次回更新日までは現在のプランのまま引き続きご利用いただけます。<br>
+      予約は適用日まで取り消せます（設定画面またはヘルプからいつでも）。
+    </div>
+    <div style="margin-top:16px;display:flex;gap:8px;">
+      <button type="button" class="btn-primary" id="downgrade-confirm-btn" style="flex:1;"
+        onclick="submitDowngrade(this)">この内容で予約する</button>
+      <button type="button" class="btn-secondary" style="flex:1;"
+        onclick="backToDowngradeSelect()">戻る</button>
+    </div>
+  `;
+  document.getElementById('downgrade-step-confirm').style.display = 'block';
+}
+
+function backToDowngradeSelect() {
+  if (downgradeInFlight) return;
+  hideError(document.getElementById('downgrade-error'));
+  document.getElementById('downgrade-step-confirm').style.display = 'none';
+  document.getElementById('downgrade-title').textContent = 'プランのダウングレード';
+  document.getElementById('downgrade-step-select').style.display = 'block';
+}
+
+// 409(既に予約中・プラン変更後)のあとはdowngradeOptionsを必ず捨てて取り直す。
+// submitUpgradeのrestartUpgradeFlow()と同じ考え方。
+function restartDowngradeFlow(message) {
+  downgradeOptions = null;
+  selectedDowngrade = null;
+
+  document.getElementById('downgrade-step-confirm').style.display = 'none';
+  document.getElementById('downgrade-step-confirm').innerHTML = '';
+  document.getElementById('downgrade-title').textContent = 'プランのダウングレード';
+  document.getElementById('downgrade-step-select').style.display = 'block';
+  document.getElementById('downgrade-loading').style.display = 'block';
+  document.getElementById('downgrade-options').innerHTML = '';
+  document.getElementById('downgrade-pending').style.display = 'none';
+  document.getElementById('downgrade-already-lowest').style.display = 'none';
+  document.getElementById('downgrade-cancel-pending').style.display = 'none';
+  document.getElementById('downgrade-contact').style.display = 'none';
+  document.getElementById('downgrade-contact').innerHTML = '';
+
+  showError(document.getElementById('downgrade-error'), message);
+  loadDowngradeOptions();
+}
+
+async function submitDowngrade(btn) {
+  const option = selectedDowngrade;
+  if (!option) return;
+  const errorEl = document.getElementById('downgrade-error');
+  hideError(errorEl);
+
+  downgradeInFlight = true;
+  try {
+    await withButtonGuard(btn, async () => {
+      const response = await authFetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'schedule-downgrade', quote: option.quote }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          downgradeInFlight = false;
+          handleSessionExpired(closeDowngradeModal);
+          return;
+        }
+        if (response.status === 409) {
+          downgradeInFlight = false;
+          restartDowngradeFlow(data.message || 'プランの状態が変わりました。もう一度お選びください。');
+          return;
+        }
+        throw new Error(data.message || data.error || 'ダウングレードの予約に失敗しました');
+      }
+
+      showDowngradeDone(data);
+    }, '予約中...');
+  } catch (err) {
+    showError(errorEl, err.message || '通信エラーが発生しました');
+  } finally {
+    downgradeInFlight = false;
+  }
+}
+
+function showDowngradeDone(data) {
+  document.getElementById('downgrade-step-confirm').style.display = 'none';
+  document.getElementById('downgrade-title').textContent = '予約しました';
+
+  // プラン表示名はレスポンス(data)ではなく選択時のoption(displayName)から取る。
+  // schedule-downgradeのレスポンスはtargetPlan(識別子)までしか返さないため。
+  const planName = escapeHtml(selectedDowngrade?.displayName || data.targetPlan);
+  const effectiveDate = Number.isFinite(data.effectiveAt)
+    ? escapeHtml(formatDateJa(data.effectiveAt))
+    : '次回更新日';
+
+  document.getElementById('downgrade-step-done').innerHTML = `
+    <div style="text-align:center;padding:8px 0 4px;">
+      <div class="upgrade-done-icon">✅</div>
+      <div style="font-size:15px;font-weight:700;margin-top:8px;">ダウングレードを予約しました</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:6px;">${effectiveDate}から ${planName} に切り替わります</div>
+    </div>
+    <div class="upgrade-note">
+      それまでは現在のプランのまま引き続きご利用いただけます。予約は設定画面またはヘルプからいつでも取り消せます。
+    </div>
+    <div style="margin-top:16px;">
+      <button type="button" class="btn-primary" style="width:100%;"
+        onclick="closeDowngradeModal()">閉じる</button>
+    </div>
+  `;
+  document.getElementById('downgrade-step-done').style.display = 'block';
 }
 
 // ===== 新規お申し込み(未契約者向け) =====
@@ -3071,6 +3525,7 @@ function openCompanySettings() {
   renderLogoPreview('settings');
   document.getElementById('settings-error').style.display = 'none';
   document.getElementById('company-settings-overlay').classList.add('open');
+  refreshSettingsPendingDowngrade();
 }
 
 function closeCompanySettings() {
@@ -3081,6 +3536,7 @@ function closeCompanySettings() {
 
 function openHelpModal() {
   document.getElementById('help-overlay').classList.add('open');
+  refreshHelpPendingDowngrade();
 }
 
 function closeHelpModal() {
