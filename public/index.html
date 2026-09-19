@@ -1592,6 +1592,13 @@
          同じ方針)。 -->
     <div class="modal-section-label" style="margin-top:0;">契約プラン</div>
     <div id="settings-pending-downgrade" style="display:none;"></div>
+    <!-- 常時表示し、状態による出し分け(プロ契約中・解約予約中・管理者・unknown等)は
+         モーダル内(get-upgrade-optionsのレスポンス)に任せる。ダウングレードボタンと
+         同じ方針(前段の調査メモ・下のダウングレードボタン参照)。 -->
+    <div style="margin-bottom:8px;">
+      <button type="button" onclick="openUpgradeModal()"
+        style="background: none; border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">プランを変更する（上位プランへ）</button>
+    </div>
     <div style="margin-bottom:20px;">
       <button type="button" onclick="openDowngradeModal()"
         style="background: none; border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">プランを変更する（下位プランへ）</button>
