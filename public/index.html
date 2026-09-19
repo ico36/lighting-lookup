@@ -1874,6 +1874,7 @@
       <div id="upgrade-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
       <div id="upgrade-current" style="display:none;font-size:12px;color:var(--text2);margin-bottom:12px;"></div>
       <div id="upgrade-options"></div>
+      <div id="upgrade-cancel-pending" style="display:none;color:var(--text2);font-size:13px;"></div>
       <div id="upgrade-contact" style="display:none;"></div>
     </div>
 
@@ -2473,6 +2474,7 @@ function resetUpgradeModal() {
   document.getElementById('upgrade-loading').style.display = 'block';
   document.getElementById('upgrade-current').style.display = 'none';
   document.getElementById('upgrade-options').innerHTML = '';
+  document.getElementById('upgrade-cancel-pending').style.display = 'none';
   document.getElementById('upgrade-contact').style.display = 'none';
   document.getElementById('upgrade-contact').innerHTML = '';
 }
@@ -2533,6 +2535,15 @@ function renderUpgradeOptions(data) {
     ? `現在のプラン: ${data.currentPlanName}`
     : '現在のプラン情報を確認できませんでした';
   currentEl.style.display = 'block';
+
+  // 解約予約中(cancel_at_period_end/cancel_at設定済み)なら、そもそも候補を出さない。
+  // ダウングレード側(renderDowngradeOptions)と同じ文言・表示方法。
+  if (data.cancelPending) {
+    const cancelPendingEl = document.getElementById('upgrade-cancel-pending');
+    cancelPendingEl.textContent = '解約手続き済みのため、プランの変更はできません。';
+    cancelPendingEl.style.display = 'block';
+    return;
+  }
 
   // pro（最上位）と unknown（Price metadata未設定でプランを判定できない）は
   // 移行先を機械的に決められないので、お問い合わせへ誘導する

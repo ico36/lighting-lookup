@@ -340,6 +340,25 @@ async function handleGetUpgradeOptions(req, res) {
       ? stripe.prices.retrieve(item.price.id, { expand: ['product'] })
       : Promise.resolve(null);
 
+    // 解約予約中(cancel_at_period_end/cancel_at設定済み)なら、そもそも候補を出さない。
+    // ダウングレード側(isCancelPending, handleGetDowngradeOptions)と同じ扱い。
+    // update-plan側もisCancelPending()で拒否する(フロントを経由しない呼び出しへの防御)。
+    if (isCancelPending(subscription)) {
+      const [currentPrice, pendingDowngrade] = await Promise.all([
+        currentPricePromise,
+        getPendingDowngradeInfo(subscription),
+      ]);
+      return res.status(200).json({
+        currentPlan: limits.plan,
+        currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
+        currentLimits: limits,
+        options: [],
+        contactOnly: false,
+        pendingDowngrade,
+        cancelPending: true,
+      });
+    }
+
     const targets = UPGRADE_PATHS[limits.plan] || [];
 
     // pro（最上位）/ unknown（metadata未設定で現在のプランが判定できない）/ admin。
@@ -360,6 +379,7 @@ async function handleGetUpgradeOptions(req, res) {
         // 予約中のダウングレードがあれば、アップグレードの確認画面で
         // 「予約中のダウングレードは取り消されます」と案内するために使う。
         pendingDowngrade,
+        cancelPending: false,
       });
     }
 
@@ -470,6 +490,7 @@ async function handleGetUpgradeOptions(req, res) {
       // 予約中のダウングレードがあれば、アップグレードの確認画面で
       // 「予約中のダウングレードは取り消されます」と案内するために使う。
       pendingDowngrade,
+      cancelPending: false,
     });
   } catch (err) {
     console.error('[checkout] アップグレード候補の取得に失敗しました:', err);
@@ -537,6 +558,16 @@ async function handleUpdatePlan(req, res) {
       return res.status(409).json({
         error: 'plan_changed',
         message: 'プランが変更されています。画面を更新してもう一度お試しください。',
+      });
+    }
+
+    // 解約予約中はダウングレードと同じ扱いで拒否する(handleScheduleDowngrade参照)。
+    // get-upgrade-optionsがcancelPendingを返すためフロント経由では通常ここに来ないが、
+    // フロントを経由しない呼び出しへの防御として残す。
+    if (isCancelPending(subscription)) {
+      return res.status(409).json({
+        error: 'cancel_pending',
+        message: '解約手続き済みのため、プランの変更はできません。',
       });
     }
 
