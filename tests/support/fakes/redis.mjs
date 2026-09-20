@@ -28,6 +28,10 @@ export { redisKey } from '../../../lib/redis.js';
 const strings = new Map();
 const lists = new Map();
 const zsets = new Map();
+// TTLは実タイマーで自動失効させない(テストが実時間の経過を待たずに済むように)。
+// 「TTL経過後」を検証したいテストは __expireKey() で明示的に消す。ここではあくまで
+// 「いつ失効する予定か」を記録するだけ(__getTTLSeconds() での確認用)。
+const ttls = new Map();
 
 function getZset(key) {
   if (!zsets.has(key)) zsets.set(key, new Map());
@@ -38,9 +42,31 @@ async function get(key) {
   return strings.has(key) ? strings.get(key) : null;
 }
 
-async function set(key, value) {
+async function set(key, value, opts) {
   strings.set(key, value);
+  if (opts?.ex) {
+    ttls.set(key, Date.now() + opts.ex * 1000);
+  } else {
+    ttls.delete(key);
+  }
   return 'OK';
+}
+
+// otp:attempts:{email} 用。real Upstash の INCR と同様、存在しないキーは0から始める
+// (lib/otp.js の storeOtp() が先に0で作る前提だが、直接 incr() を呼ぶテストも通るように
+// フェイク単体でも動くようにしておく)。
+async function incr(key) {
+  const current = strings.has(key) ? Number(strings.get(key)) : 0;
+  const next = current + 1;
+  strings.set(key, next);
+  return next;
+}
+
+// real Redis と同様、存在しないキーへのEXPIREは何もしない(0を返す)。
+async function expire(key, seconds) {
+  if (!strings.has(key) && !lists.has(key) && !zsets.has(key)) return 0;
+  ttls.set(key, Date.now() + seconds * 1000);
+  return 1;
 }
 
 async function del(...keys) {
@@ -49,6 +75,7 @@ async function del(...keys) {
     if (strings.delete(key)) count++;
     if (lists.delete(key)) count++;
     if (zsets.delete(key)) count++;
+    ttls.delete(key);
   }
   return count;
 }
@@ -119,10 +146,26 @@ function pipeline() {
   return chain;
 }
 
-export const redis = { get, set, del, rpush, lrange, zadd, zrem, zcard, zrange, pipeline };
+export const redis = { get, set, incr, expire, del, rpush, lrange, zadd, zrem, zcard, zrange, pipeline };
 
 export function __resetFakeRedis() {
   strings.clear();
   lists.clear();
   zsets.clear();
+  ttls.clear();
+}
+
+// 「TTL経過後」を模すテスト専用ヘルパー。実タイマーを待たず、該当キーを即座に
+// 全種別(strings/lists/zsets)とTTL記録から消す。
+export function __expireKey(key) {
+  strings.delete(key);
+  lists.delete(key);
+  zsets.delete(key);
+  ttls.delete(key);
+}
+
+// set()/expire() で記録したTTLの残り秒数。TTL未設定なら null。
+export function __getTTLSeconds(key) {
+  if (!ttls.has(key)) return null;
+  return Math.round((ttls.get(key) - Date.now()) / 1000);
 }

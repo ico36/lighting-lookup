@@ -44,6 +44,10 @@ const LIB_CASES_JS = path.join(REPO_ROOT, 'lib', 'cases.js');
 // getStripeCustomerIdByEmailの取得元)はフェイクにせず本物を読み込む。
 const LIB_LEGAL_CONSENT_JS = path.join(REPO_ROOT, 'lib', 'legalConsent.js');
 
+// lib/otp.js が読む `./redis` も同じフェイクへ。OTPの生成・検証テストを実際の
+// Upstash Redisに一切触れさせないため。lib/otp.js自体は本物のまま読み込む。
+const LIB_OTP_JS = path.join(REPO_ROOT, 'lib', 'otp.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -73,7 +77,7 @@ export async function resolve(specifier, context, nextResolve) {
   // 2d. lib/legalConsent.js が読む `./redis` も同じフェイクへ。
   if (specifier === './redis' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
-    if (parentPath === LIB_CASES_JS || parentPath === LIB_LEGAL_CONSENT_JS) {
+    if (parentPath === LIB_CASES_JS || parentPath === LIB_LEGAL_CONSENT_JS || parentPath === LIB_OTP_JS) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
