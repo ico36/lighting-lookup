@@ -48,6 +48,11 @@ const LIB_LEGAL_CONSENT_JS = path.join(REPO_ROOT, 'lib', 'legalConsent.js');
 // Upstash Redisに一切触れさせないため。lib/otp.js自体は本物のまま読み込む。
 const LIB_OTP_JS = path.join(REPO_ROOT, 'lib', 'otp.js');
 
+// api/login.js が読む `../lib/redis`(レート制限のINCR/EXPIRE)も同じフェイクへ。
+// api/login.js自体・lib/otp.js・lib/subscription.js(Stripe経由の契約チェック)は
+// 本物のまま読み込む(契約チェックはフェイクStripe経由で実ロジックごとテストする)。
+const LOGIN_JS = path.join(REPO_ROOT, 'api', 'login.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -79,6 +84,23 @@ export async function resolve(specifier, context, nextResolve) {
     const parentPath = fileURLToPath(context.parentURL);
     if (parentPath === LIB_CASES_JS || parentPath === LIB_LEGAL_CONSENT_JS || parentPath === LIB_OTP_JS) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
+    }
+  }
+
+  // 2e. api/login.js が読む `../lib/redis` も同じフェイクへ。
+  if (specifier === '../lib/redis' && context.parentURL) {
+    const parentPath = fileURLToPath(context.parentURL);
+    if (parentPath === LOGIN_JS) {
+      return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
+    }
+  }
+
+  // 2f. api/login.js が読む `../lib/otpMail` をフェイクへ。Resendへ実際に
+  // 送信させず、送信内容の記録・送信失敗の模擬をテストから行えるようにする。
+  if (specifier === '../lib/otpMail' && context.parentURL) {
+    const parentPath = fileURLToPath(context.parentURL);
+    if (parentPath === LOGIN_JS) {
+      return { url: new URL('otpMail.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
 
