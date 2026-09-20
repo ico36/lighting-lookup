@@ -1,14 +1,60 @@
 // api/info/[type].js
 // 軽量な参照専用エンドポイントをまとめたもの（Vercel HobbyプランのServerless Function数上限対策）
-// GET /api/info/announcements   … お知らせ一覧の取得
-// GET /api/info/contact-config  … お問い合わせフォーム用の宛先・アカウント情報の取得
+// GET /api/info/announcements            … お知らせ一覧の取得
+// GET /api/info/contact-config           … お問い合わせフォーム用の宛先・アカウント情報の取得
+// GET /api/info/admin-prefecture-stats   … 管理者向け・都道府県別の登録者数集計
 
 import { requireAuthWithPlan } from '../_auth';
 import { redis, redisKey } from '../../lib/redis';
+import { isAdminEmail } from '../../lib/adminEmails';
+import { buildPrefectureStats } from '../../lib/companyStats';
 
 async function getAnnouncements(req, res) {
   const announcements = (await redis.get(redisKey('announcements'))) || [];
   return res.status(200).json({ announcements });
+}
+
+// company:{email}(Preview環境ではpreview:company:{email})を全件SCANし、
+// 都道府県別に集計する。管理者専用。存在自体を見せないため権限不足は403ではなく404。
+async function getAdminPrefectureStats(req, res, email) {
+  if (!isAdminEmail(email)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  // 管理者専用の集計のため、CDN・ブラウザともにキャッシュさせない。
+  res.setHeader('Cache-Control', 'no-store');
+
+  // KEYSはRedis本体をブロックしうるため使わず、SCANをカーソルが'0'に戻るまで回す。
+  // カーソルの型はUpstash側のJSON化次第で文字列とは限らないため、String()経由で比較する。
+  const keys = [];
+  let cursor = '0';
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, {
+      match: redisKey('company', '*'),
+      count: 100,
+    });
+    keys.push(...batch);
+    cursor = nextCursor;
+  } while (String(cursor) !== '0');
+
+  if (keys.length === 0) {
+    return res.status(200).json({
+      generatedAt: new Date().toISOString(),
+      total: 0,
+      unregistered: 0,
+      byPrefecture: {},
+    });
+  }
+
+  const values = await redis.mget(...keys);
+  const { total, unregistered, byPrefecture } = buildPrefectureStats(keys, values);
+
+  return res.status(200).json({
+    generatedAt: new Date().toISOString(),
+    total,
+    unregistered,
+    byPrefecture,
+  });
 }
 
 async function getContactConfig(req, res, email, limits) {
@@ -45,6 +91,7 @@ export default async function handler(req, res) {
 
   if (type === 'announcements') return getAnnouncements(req, res);
   if (type === 'contact-config') return getContactConfig(req, res, email, limits);
+  if (type === 'admin-prefecture-stats') return getAdminPrefectureStats(req, res, email);
 
   return res.status(404).json({ error: 'Not found' });
 }

@@ -1,14 +1,29 @@
 // api/company.js
-// 自社情報（社名・電話番号・登録番号・ロゴURL）の保存／取得API
+// 自社情報（社名・電話番号・登録番号・ロゴURL・住所）の保存／取得API
 // Redisキー: company:{email} にJSONで保存する（Preview環境では preview: 接頭辞付き）
 
 import { requireAuthWithPlan } from './_auth';
 import { redis, redisKey } from '../lib/redis';
 import { readQuota } from '../lib/quota';
 import { getTosConsent, isTosConsentCurrent, recordTosConsent, CURRENT_TOS_VERSION } from '../lib/legalConsent';
+import { PREFECTURES } from '../lib/prefectures';
+
+const PREFECTURE_SET = new Set(PREFECTURES);
 
 function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim().length > 0;
+}
+
+// 全角数字・全角ハイフン類を許容し、`123-4567`形式に正規化する。
+// ハイフンの有無は問わない(除去してから7桁の数字かどうかだけを見る)。
+// 7桁の数字にならない入力はnullを返し、呼び出し側で400にする。
+function normalizePostalCode(raw) {
+  const halfWidth = String(raw)
+    .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[‐－ー―−]/g, '-');
+  const digits = halfWidth.replace(/-/g, '').trim();
+  if (!/^\d{7}$/.test(digits)) return null;
+  return `${digits.slice(0, 3)}-${digits.slice(3)}`;
 }
 
 export default async function handler(req, res) {
@@ -46,10 +61,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    const { name, tel, license, logoUrl } = req.body || {};
+    const { name, tel, license, logoUrl, postalCode, prefecture, addressLine } = req.body || {};
 
     if (!isNonEmptyString(name)) {
       return res.status(400).json({ error: '会社名を入力してください' });
+    }
+
+    if (!isNonEmptyString(postalCode)) {
+      return res.status(400).json({ error: '郵便番号を入力してください' });
+    }
+    const normalizedPostalCode = normalizePostalCode(postalCode);
+    if (!normalizedPostalCode) {
+      return res.status(400).json({ error: '郵便番号は7桁の数字で入力してください' });
+    }
+
+    if (!isNonEmptyString(prefecture) || !PREFECTURE_SET.has(prefecture)) {
+      return res.status(400).json({ error: '都道府県を選択してください' });
+    }
+
+    if (!isNonEmptyString(addressLine)) {
+      return res.status(400).json({ error: '住所（市区町村以降）を入力してください' });
     }
 
     const company = {
@@ -57,6 +88,9 @@ export default async function handler(req, res) {
       tel: isNonEmptyString(tel) ? tel.trim() : '',
       license: isNonEmptyString(license) ? license.trim() : '',
       logoUrl: isNonEmptyString(logoUrl) ? logoUrl.trim() : '',
+      postalCode: normalizedPostalCode,
+      prefecture,
+      addressLine: addressLine.trim(),
       updatedAt: Date.now(),
     };
 
