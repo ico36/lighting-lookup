@@ -1376,11 +1376,17 @@
   <p style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.7;text-align:center;">
     見積書に表示する自社情報を入力してください。ロゴ以外は後から「設定」でいつでも変更できます。
   </p>
+  <div id="setup-address-notice" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:var(--text);line-height:1.6;">
+    住所の入力が必要になりました。お手数ですがご入力をお願いします（社名・電話番号・登録番号・ロゴは保存済みの内容が入力済みです）。
+  </div>
   <div class="input-card">
     <div class="section-label">自社情報（初回設定）</div>
     <input type="text" id="setup-biz-name" class="stacked-input" placeholder="屋号・会社名（必須）" />
     <input type="text" id="setup-biz-tel" class="stacked-input" placeholder="電話番号（任意）" />
-    <input type="text" id="setup-biz-license" class="stacked-input" placeholder="第二種電気工事士 登録番号など（任意）" style="margin-bottom:0;" />
+    <input type="text" id="setup-biz-license" class="stacked-input" placeholder="第二種電気工事士 登録番号など（任意）" />
+    <input type="text" id="setup-biz-postal" class="stacked-input" placeholder="郵便番号（例：123-4567）（必須）" />
+    <select id="setup-biz-prefecture" class="stacked-input"></select>
+    <input type="text" id="setup-biz-address" class="stacked-input" placeholder="市区町村以降の住所（必須）" style="margin-bottom:0;" />
 
     <div class="section-label" style="margin-top:20px;">ロゴ画像（任意）</div>
     <div class="upload-zone" style="padding:16px;">
@@ -1606,7 +1612,10 @@
     <div>
       <input type="text" id="settings-biz-name" class="stacked-input" placeholder="屋号・会社名（必須）" />
       <input type="text" id="settings-biz-tel" class="stacked-input" placeholder="電話番号（任意）" />
-      <input type="text" id="settings-biz-license" class="stacked-input" placeholder="第二種電気工事士 登録番号など（任意）" style="margin-bottom:0;" />
+      <input type="text" id="settings-biz-license" class="stacked-input" placeholder="第二種電気工事士 登録番号など（任意）" />
+      <input type="text" id="settings-biz-postal" class="stacked-input" placeholder="郵便番号（例：123-4567）（必須）" />
+      <select id="settings-biz-prefecture" class="stacked-input"></select>
+      <input type="text" id="settings-biz-address" class="stacked-input" placeholder="市区町村以降の住所（必須）" style="margin-bottom:0;" />
 
       <div class="modal-section-label">ロゴ画像（任意）</div>
       <div class="upload-zone" style="padding:16px;">
@@ -3425,11 +3434,27 @@ async function submitSignup(btn) {
   }, '処理中...');
 }
 
-// ===== 自社情報（社名・電話番号・登録番号・ロゴ）の保存・再利用 =====
+// ===== 自社情報（社名・電話番号・登録番号・ロゴ・住所）の保存・再利用 =====
 
 let companyInfo = null;
 let pendingLogo = { setup: null, settings: null };
 let logoRemoved = { setup: false, settings: false };
+
+// lib/prefectures.jsと同じ47件（フロントは静的ファイルのためモジュール共有ではなく
+// 別途定義している。増減がある場合は両方を直すこと）。
+const PREFECTURE_OPTIONS = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+  '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+  '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
+  '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
+  '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+  '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
+  '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+];
+const PREFECTURE_OPTIONS_HTML = '<option value="">選択してください</option>' +
+  PREFECTURE_OPTIONS.map(p => `<option value="${p}">${p}</option>`).join('');
+document.getElementById('setup-biz-prefecture').innerHTML = PREFECTURE_OPTIONS_HTML;
+document.getElementById('settings-biz-prefecture').innerHTML = PREFECTURE_OPTIONS_HTML;
 
 // api/company-logo.js の上限・許可形式と揃えること
 const LOGO_MAX_BYTES = 2 * 1024 * 1024; // 2MB
@@ -3469,7 +3494,7 @@ async function checkCompanyAndRoute() {
 
     if (!data.tosAccepted) {
       showTosGate();
-    } else if (!companyInfo) {
+    } else if (isCompanyInfoMissingRequiredFields(companyInfo)) {
       showCompanySetupGate();
     } else {
       document.getElementById('tos-gate').style.display = 'none';
@@ -3528,16 +3553,41 @@ async function acceptTos() {
   }, '処理中...');
 }
 
+// companyInfoが無い(真の初回)か、必須3項目(郵便番号・都道府県・住所)のいずれかが
+// 欠けている(住所必須化前に登録した既存アカウント)かを判定する。
+function isCompanyInfoMissingRequiredFields(info) {
+  return !info || !info.postalCode || !info.prefecture || !info.addressLine;
+}
+
 function showCompanySetupGate() {
   document.getElementById('app-main').style.display = 'none';
   document.getElementById('tos-gate').style.display = 'none';
   document.getElementById('company-setup-gate').style.display = 'block';
+
+  // 住所必須化より前に登録した既存アカウントがここに戻された場合、既に保存済みの
+  // 社名・電話番号・登録番号・ロゴを空欄に戻すと再入力の手間と「消えた」という
+  // 誤解を招くため、companyInfoがあれば事前入力する(真の初回はcompanyInfoがnullなので
+  // 全欄が空のまま)。
+  document.getElementById('setup-biz-name').value = companyInfo?.name || '';
+  document.getElementById('setup-biz-tel').value = companyInfo?.tel || '';
+  document.getElementById('setup-biz-license').value = companyInfo?.license || '';
+  document.getElementById('setup-biz-postal').value = companyInfo?.postalCode || '';
+  document.getElementById('setup-biz-prefecture').value = companyInfo?.prefecture || '';
+  document.getElementById('setup-biz-address').value = companyInfo?.addressLine || '';
+  pendingLogo.setup = null;
+  logoRemoved.setup = false;
+  renderLogoPreview('setup');
+
+  document.getElementById('setup-address-notice').style.display = companyInfo ? 'block' : 'none';
 }
 
 function openCompanySettings() {
   document.getElementById('settings-biz-name').value = companyInfo?.name || '';
   document.getElementById('settings-biz-tel').value = companyInfo?.tel || '';
   document.getElementById('settings-biz-license').value = companyInfo?.license || '';
+  document.getElementById('settings-biz-postal').value = companyInfo?.postalCode || '';
+  document.getElementById('settings-biz-prefecture').value = companyInfo?.prefecture || '';
+  document.getElementById('settings-biz-address').value = companyInfo?.addressLine || '';
   pendingLogo.settings = null;
   logoRemoved.settings = false;
   renderLogoPreview('settings');
@@ -3839,7 +3889,10 @@ function renderLogoPreview(scope) {
   if (!container) return;
 
   const pending = pendingLogo[scope];
-  const existingUrl = (scope === 'settings' && companyInfo?.logoUrl && !logoRemoved[scope])
+  // scopeを問わずcompanyInfoの既存ロゴを見る。setup画面は通常companyInfoがnullの
+  // 真の初回だが、住所必須化前の既存アカウントが住所未入力で戻された場合は
+  // companyInfoにロゴが既にあるため、setup側でもプレビューを表示する必要がある。
+  const existingUrl = (companyInfo?.logoUrl && !logoRemoved[scope])
     ? companyInfo.logoUrl
     : null;
   const src = pending ? pending.dataUrl : existingUrl;
@@ -3869,12 +3922,30 @@ async function saveCompanyInfo(scope) {
   const nameEl = document.getElementById(`${scope}-biz-name`);
   const telEl = document.getElementById(`${scope}-biz-tel`);
   const licenseEl = document.getElementById(`${scope}-biz-license`);
+  const postalEl = document.getElementById(`${scope}-biz-postal`);
+  const prefectureEl = document.getElementById(`${scope}-biz-prefecture`);
+  const addressEl = document.getElementById(`${scope}-biz-address`);
   const errorEl = document.getElementById(`${scope}-error`);
   const saveBtn = document.getElementById(`${scope}-save-btn`);
 
   const name = nameEl.value.trim();
   if (!name) {
     showError(errorEl, '会社名を入力してください');
+    return;
+  }
+  const postalCode = postalEl.value.trim();
+  if (!postalCode) {
+    showError(errorEl, '郵便番号を入力してください');
+    return;
+  }
+  const prefecture = prefectureEl.value;
+  if (!prefecture) {
+    showError(errorEl, '都道府県を選択してください');
+    return;
+  }
+  const addressLine = addressEl.value.trim();
+  if (!addressLine) {
+    showError(errorEl, '住所（市区町村以降）を入力してください');
     return;
   }
   hideError(errorEl);
@@ -3916,7 +3987,10 @@ async function saveCompanyInfo(scope) {
           name,
           tel: telEl.value.trim(),
           license: licenseEl.value.trim(),
-          logoUrl
+          logoUrl,
+          postalCode,
+          prefecture,
+          addressLine
         })
       });
       const data = await response.json();
@@ -6801,6 +6875,10 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
   const bizName = companyInfo?.name || '（屋号未設定）';
   const bizTel = companyInfo?.tel || '';
   const bizLicense = companyInfo?.license || '';
+  const bizPostalCode = companyInfo?.postalCode || '';
+  const bizPrefecture = companyInfo?.prefecture || '';
+  const bizAddressLine = companyInfo?.addressLine || '';
+  const hasBizAddress = !!(bizPostalCode && bizPrefecture && bizAddressLine);
   const logoHTML = companyInfo?.logoUrl
     ? `<img src="${companyInfo.logoUrl}" alt="ロゴ" style="max-height:40px;max-width:180px;object-fit:contain;margin-bottom:6px;" />`
     : '';
@@ -6843,6 +6921,7 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
       <div class="sheet-company">
         ${logoHTML}
         <div class="name">${escapeHtml(bizName)}</div>
+        ${hasBizAddress ? `<div>〒${escapeHtml(bizPostalCode)} ${escapeHtml(bizPrefecture)}${escapeHtml(bizAddressLine)}</div>` : ''}
         ${bizTel ? `<div>TEL: ${escapeHtml(bizTel)}</div>` : ''}
         ${bizLicense ? `<div>${escapeHtml(bizLicense)}</div>` : ''}
       </div>
@@ -6923,6 +7002,10 @@ async function generateEstimateSheet(btn) {
   const clientSite = document.getElementById('client-site').value.trim();
   const bizName = companyInfo?.name || '（屋号未設定）';
   const bizTel = companyInfo?.tel || '';
+  const bizPostalCode = companyInfo?.postalCode || '';
+  const bizPrefecture = companyInfo?.prefecture || '';
+  const bizAddressLine = companyInfo?.addressLine || '';
+  const hasBizAddress = !!(bizPostalCode && bizPrefecture && bizAddressLine);
 
   const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
@@ -6989,7 +7072,7 @@ ${extraItemsText}小計：${yen(subtotal)}
 合計：${yen(total)}
 ━━━━━━━━━━━━━━
 ${bizName}${bizTel ? ' / TEL: ' + bizTel : ''}
-
+${hasBizAddress ? '〒' + bizPostalCode + ' ' + bizPrefecture + bizAddressLine + '\n' : ''}
 記載の器具型番・金額は現時点の参考情報です。正式な発注前に最終確認のうえ確定いたしますので、あらかじめご了承ください。
 `.trim();
 
