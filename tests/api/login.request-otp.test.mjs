@@ -211,6 +211,34 @@ test('IP側レート制限: 21回目は429', async () => {
   assert.equal(res21.statusCode, 429);
 });
 
+test('LOGIN_MODE=legacyでもemail側レート制限: 6回目は429', async () => {
+  process.env.LOGIN_MODE = 'legacy';
+  seedUnlimitedPlanSubscription();
+  for (let i = 0; i < 5; i++) {
+    const res = fakeRes();
+    await handler(req({ action: 'request-otp', email: EMAIL }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.mode, 'legacy');
+  }
+  const res6 = fakeRes();
+  await handler(req({ action: 'request-otp', email: EMAIL }), res6);
+  assert.equal(res6.statusCode, 429);
+});
+
+test('LOGIN_MODE=legacyでもIP側レート制限: 21回目は429', async () => {
+  process.env.LOGIN_MODE = 'legacy';
+  seedUnlimitedPlanSubscription();
+  for (let i = 0; i < 20; i++) {
+    const res = fakeRes();
+    await handler(req({ action: 'request-otp', email: `legacy-ip-rate-${i}@example.com` }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.mode, 'legacy');
+  }
+  const res21 = fakeRes();
+  await handler(req({ action: 'request-otp', email: 'legacy-ip-rate-final@example.com' }), res21);
+  assert.equal(res21.statusCode, 429);
+});
+
 test('送信失敗時はotp:{email}・otp:attempts:{email}・otp:cooldown:{email}のいずれも残らない', async () => {
   fakeOtpMail.__setShouldFail(true);
   const res = fakeRes();

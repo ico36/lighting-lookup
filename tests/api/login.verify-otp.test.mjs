@@ -199,3 +199,11 @@ test('大文字を含むメールでrequest-otpし、小文字でverify-otpし�
   assert.equal(verifyRes.statusCode, 200);
   assert.equal(typeof verifyRes.body.token, 'string');
 });
+
+test('管理者でもrequest-otpを経ずにverify-otpだけでは401 CODE_EXPIRED(即時ログイン経路廃止の回帰防止)', async () => {
+  const res = fakeRes();
+  await handler(req({ action: 'verify-otp', email: ADMIN_EMAIL, code: '123456' }), res);
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.body.code, 'CODE_EXPIRED');
+  assert.equal('token' in res.body, false);
+});
