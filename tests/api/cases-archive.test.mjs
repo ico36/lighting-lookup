@@ -19,6 +19,16 @@ import { createCase, updateCaseStatus, archiveCase, STATUS } from '../../lib/cas
 
 const EMAIL = 'archive-tester@example.com';
 
+// api/cases/archive.js は from/to を JST(UTC+9) 固定で解釈する(該当ファイル63-71行目参照)。
+// テスト側で archivedAt(epoch ms) から from/to の日付文字列を作る際、単純に
+// toISOString().slice(0, 10) するとUTCのカレンダー日になり、JST 0:00〜8:59台に
+// テストを実行するとUTC日付とJST日付がズレて範囲判定が食い違う(実行時刻依存で
+// 失敗する原因だった)。実行環境の暗黙のタイムゾーンに依存させないよう、+9時間を
+// 加算してからtoISOString()する(new Date().toLocaleString()等のロケール依存APIは使わない)。
+function toJstDateString(ms) {
+  return new Date(ms + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 beforeEach(() => {
   __resetFakeRedis();
   __resetAuth();
@@ -89,7 +99,7 @@ test('GET /api/cases/archive: 日付範囲の絞り込みが効いている(範�
   // 併せて確認して初めて、絞り込みが実際に機能していると言える)。
   const archived = await createArchivedCase('鈴木様');
 
-  const withinFrom = new Date(archived.archivedAt).toISOString().slice(0, 10);
+  const withinFrom = toJstDateString(archived.archivedAt);
   const withinTo = withinFrom;
   const withinReq = fakeReq(undefined, { method: 'GET', query: { from: withinFrom, to: withinTo } });
   const withinRes = fakeRes();
@@ -97,8 +107,8 @@ test('GET /api/cases/archive: 日付範囲の絞り込みが効いている(範�
   assert.equal(withinRes.statusCode, 200);
   assert.equal(withinRes.body.cases.length, 1, '範囲内(アーカイブ日を含む)なら1件返るはず');
 
-  const futureFrom = new Date(archived.archivedAt + 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const futureTo = new Date(archived.archivedAt + 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const futureFrom = toJstDateString(archived.archivedAt + 24 * 60 * 60 * 1000);
+  const futureTo = toJstDateString(archived.archivedAt + 2 * 24 * 60 * 60 * 1000);
   const outsideReq = fakeReq(undefined, { method: 'GET', query: { from: futureFrom, to: futureTo } });
   const outsideRes = fakeRes();
   await handler(outsideReq, outsideRes);
