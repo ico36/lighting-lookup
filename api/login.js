@@ -50,8 +50,10 @@ function getLoginMode() {
   return process.env.LOGIN_MODE === 'legacy' ? 'legacy' : 'otp';
 }
 
-const OTP_REQUEST_LIMIT_EMAIL = 5;
-const OTP_REQUEST_LIMIT_IP = 20;
+// 総当たり対策はverify-otp側のレート制限(下のOTP_VERIFY_LIMIT_*)が担うため、
+// 発行側は「普通に使っていて到達しない」程度まで緩めてある。
+export const OTP_REQUEST_LIMIT_EMAIL = 10;
+export const OTP_REQUEST_LIMIT_IP = 40;
 const OTP_REQUEST_WINDOW_SECONDS = 60 * 60; // 1時間
 
 const OTP_VERIFY_LIMIT_EMAIL = 10;

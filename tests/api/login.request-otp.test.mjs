@@ -12,7 +12,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import handler from '../../api/login.js';
+import handler, { OTP_REQUEST_LIMIT_EMAIL, OTP_REQUEST_LIMIT_IP } from '../../api/login.js';
 import * as fakeStripe from '../support/fakes/stripe.mjs';
 import * as fakeOtpMail from '../support/fakes/otpMail.mjs';
 import { __resetFakeRedis, __expireKey, redis, redisKey } from '../support/fakes/redis.mjs';
@@ -187,56 +187,56 @@ test('クールダウン中は契約チェック(Stripeフェイク)が呼ばれ
   assert.equal(callsAfterSecond, callsAfterFirst);
 });
 
-test('email側レート制限: 6回目は429', async () => {
-  for (let i = 0; i < 5; i++) {
+test(`email側レート制限: ${OTP_REQUEST_LIMIT_EMAIL + 1}回目は429`, async () => {
+  for (let i = 0; i < OTP_REQUEST_LIMIT_EMAIL; i++) {
     const res = fakeRes();
     await handler(req({ action: 'request-otp', email: EMAIL }), res);
     assert.equal(res.statusCode, 200);
     // クールダウンはこのテストの対象外なので、レート制限だけを見るために毎回消す。
     __expireKey(redisKey('otp', 'cooldown', EMAIL));
   }
-  const res6 = fakeRes();
-  await handler(req({ action: 'request-otp', email: EMAIL }), res6);
-  assert.equal(res6.statusCode, 429);
+  const overLimitRes = fakeRes();
+  await handler(req({ action: 'request-otp', email: EMAIL }), overLimitRes);
+  assert.equal(overLimitRes.statusCode, 429);
 });
 
-test('IP側レート制限: 21回目は429', async () => {
-  for (let i = 0; i < 20; i++) {
+test(`IP側レート制限: ${OTP_REQUEST_LIMIT_IP + 1}回目は429`, async () => {
+  for (let i = 0; i < OTP_REQUEST_LIMIT_IP; i++) {
     const res = fakeRes();
     await handler(req({ action: 'request-otp', email: `ip-rate-${i}@example.com` }), res);
     assert.equal(res.statusCode, 200);
   }
-  const res21 = fakeRes();
-  await handler(req({ action: 'request-otp', email: 'ip-rate-final@example.com' }), res21);
-  assert.equal(res21.statusCode, 429);
+  const overLimitRes = fakeRes();
+  await handler(req({ action: 'request-otp', email: 'ip-rate-final@example.com' }), overLimitRes);
+  assert.equal(overLimitRes.statusCode, 429);
 });
 
-test('LOGIN_MODE=legacyでもemail側レート制限: 6回目は429', async () => {
+test(`LOGIN_MODE=legacyでもemail側レート制限: ${OTP_REQUEST_LIMIT_EMAIL + 1}回目は429`, async () => {
   process.env.LOGIN_MODE = 'legacy';
   seedUnlimitedPlanSubscription();
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < OTP_REQUEST_LIMIT_EMAIL; i++) {
     const res = fakeRes();
     await handler(req({ action: 'request-otp', email: EMAIL }), res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.mode, 'legacy');
   }
-  const res6 = fakeRes();
-  await handler(req({ action: 'request-otp', email: EMAIL }), res6);
-  assert.equal(res6.statusCode, 429);
+  const overLimitRes = fakeRes();
+  await handler(req({ action: 'request-otp', email: EMAIL }), overLimitRes);
+  assert.equal(overLimitRes.statusCode, 429);
 });
 
-test('LOGIN_MODE=legacyでもIP側レート制限: 21回目は429', async () => {
+test(`LOGIN_MODE=legacyでもIP側レート制限: ${OTP_REQUEST_LIMIT_IP + 1}回目は429`, async () => {
   process.env.LOGIN_MODE = 'legacy';
   seedUnlimitedPlanSubscription();
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < OTP_REQUEST_LIMIT_IP; i++) {
     const res = fakeRes();
     await handler(req({ action: 'request-otp', email: `legacy-ip-rate-${i}@example.com` }), res);
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.mode, 'legacy');
   }
-  const res21 = fakeRes();
-  await handler(req({ action: 'request-otp', email: 'legacy-ip-rate-final@example.com' }), res21);
-  assert.equal(res21.statusCode, 429);
+  const overLimitRes = fakeRes();
+  await handler(req({ action: 'request-otp', email: 'legacy-ip-rate-final@example.com' }), overLimitRes);
+  assert.equal(overLimitRes.statusCode, 429);
 });
 
 test('送信失敗時はotp:{email}・otp:attempts:{email}・otp:cooldown:{email}のいずれも残らない', async () => {
