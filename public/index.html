@@ -1332,20 +1332,37 @@
   <!-- 決済(Checkout)から戻ってきたときの案内。成功/キャンセルどちらも課金結果に
        関する情報なのでエラー表示(#login-error、赤)とは分けて、ここに出す。 -->
   <div id="login-info" style="display:none;color:var(--text);font-size:13px;margin-bottom:14px;line-height:1.6;background:var(--surface2);border-radius:var(--radius);padding:12px 14px;"></div>
-  <div class="input-card">
+  <div id="login-email-step" class="input-card">
     <div class="section-label">メールアドレスでログイン</div>
     <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
       ご契約時に登録したメールアドレスを入力してください。
     </p>
     <div class="model-input-wrap">
       <input type="email" id="login-email-input" placeholder="メールアドレス" />
-      <button class="btn-primary" id="login-btn" onclick="submitEmail()">ログイン</button>
+      <button class="btn-primary" id="login-btn" onclick="requestOtp()">ログイン</button>
     </div>
     <div id="login-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
     <!-- 未契約(NO_CUSTOMER/NO_ACTIVE_SUBSCRIPTION)のログイン失敗時だけ出す申し込み導線。
          入力済みのメールアドレスを引き継いでプラン選択モーダルを開く。 -->
     <button type="button" id="login-signup-suggest" onclick="openSignupModal(document.getElementById('login-email-input').value)"
       style="display:none;width:100%;margin-top:10px;background:none;border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;">申し込みはこちら</button>
+  </div>
+  <!-- request-otpのレスポンスにtokenが無い(=otpモード)ときだけ表示するコード入力ステップ。
+       token入りの応答(legacyモード)のときはこのステップを一切表示せずログインを完了する。 -->
+  <div id="login-otp-step" class="input-card" style="display:none;">
+    <div class="section-label">ログインコードを入力</div>
+    <p id="login-otp-sent-to" style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;"></p>
+    <div class="model-input-wrap">
+      <input type="text" id="login-otp-input" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" placeholder="6桁のコード" />
+      <button class="btn-primary" id="login-otp-submit-btn" onclick="verifyOtp()">ログイン</button>
+    </div>
+    <div id="login-otp-error" style="display:none;color:var(--error);font-size:13px;margin-top:10px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <button type="button" id="login-otp-resend-btn" onclick="resendOtp()"
+        style="background:none;border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;">コードを再送</button>
+      <button type="button" id="login-otp-change-email-btn" onclick="backToEmailStep()"
+        style="background:none;border:none;color:var(--accent);font-size:13px;cursor:pointer;font-family:inherit;text-decoration:underline;">メールアドレスを変更</button>
+    </div>
   </div>
   <div style="text-align:center;margin-top:16px;">
     <button type="button" onclick="openSignupModal(document.getElementById('login-email-input').value)"
@@ -2023,9 +2040,12 @@ function extractJSON(raw) {
   throw new Error('JSON not properly closed');
 }
 
-async function submitEmail() {
+// request-otpのレスポンスにtokenが有る(LOGIN_MODE=legacy)ならその場でログイン完了、
+// 無い(通常のotpモード)ならコード入力ステップへ進む。
+async function requestOtp() {
   const input = document.getElementById('login-email-input');
   const email = input.value.trim();
+  input.value = email;
   if (!email) return;
 
   const btn = document.getElementById('login-btn');
@@ -2039,7 +2059,7 @@ async function submitEmail() {
       const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ action: 'request-otp', email })
       });
       const data = await response.json();
 
@@ -2049,6 +2069,117 @@ async function submitEmail() {
         // それ以外(レート制限・サーバーエラー等)では出さない。
         if (data.code === 'NO_CUSTOMER' || data.code === 'NO_ACTIVE_SUBSCRIPTION') {
           signupSuggestBtn.style.display = 'block';
+        }
+        return;
+      }
+
+      if (data.token) {
+        localStorage.setItem('session_token', data.token);
+        updateQuota(data.quota);
+        await checkCompanyAndRoute();
+        return;
+      }
+
+      showOtpStep(email);
+
+    } catch (err) {
+      showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+    }
+  }, '確認中...');
+}
+
+// メールアドレス入力ステップからコード入力ステップへ切り替える。
+function showOtpStep(email) {
+  document.getElementById('login-email-step').style.display = 'none';
+  document.getElementById('login-otp-step').style.display = 'block';
+  document.getElementById('login-otp-sent-to').textContent = email + ' にコードを送信しました';
+  const codeInput = document.getElementById('login-otp-input');
+  codeInput.value = '';
+  hideError(document.getElementById('login-otp-error'));
+  codeInput.focus();
+  startOtpResendCountdown();
+}
+
+// コード入力ステップからメールアドレス入力ステップへ戻す。「メールアドレスを変更」導線と、
+// verifyOtp()でSUBSCRIPTION_INACTIVEを受け取った場合の両方から呼ぶ。
+function backToEmailStep() {
+  stopOtpResendCountdown();
+  document.getElementById('login-otp-step').style.display = 'none';
+  document.getElementById('login-otp-input').value = '';
+  hideError(document.getElementById('login-otp-error'));
+  document.getElementById('login-email-step').style.display = 'block';
+}
+
+let otpResendCountdownTimer = null;
+
+// 再送ボタンを60秒間disabledにし、残り秒数を表示する。
+function startOtpResendCountdown() {
+  stopOtpResendCountdown();
+  const btn = document.getElementById('login-otp-resend-btn');
+  let remaining = 60;
+  btn.disabled = true;
+  btn.textContent = `コードを再送(${remaining}秒)`;
+  otpResendCountdownTimer = setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      stopOtpResendCountdown();
+      return;
+    }
+    btn.textContent = `コードを再送(${remaining}秒)`;
+  }, 1000);
+}
+
+// カウントダウンを止めて再送ボタンを押せる状態に戻す。setIntervalの後始末はここに集約する。
+function stopOtpResendCountdown() {
+  if (otpResendCountdownTimer) {
+    clearInterval(otpResendCountdownTimer);
+    otpResendCountdownTimer = null;
+  }
+  const btn = document.getElementById('login-otp-resend-btn');
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = 'コードを再送';
+  }
+}
+
+async function verifyOtp() {
+  const codeInput = document.getElementById('login-otp-input');
+  const code = codeInput.value.trim();
+  if (!code) return;
+
+  const email = document.getElementById('login-email-input').value.trim();
+  const btn = document.getElementById('login-otp-submit-btn');
+  const errorEl = document.getElementById('login-otp-error');
+  hideError(errorEl);
+
+  await withButtonGuard(btn, async () => {
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify-otp', email, code })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.code === 'INVALID_CODE') {
+          showError(errorEl, 'コードが正しくありません');
+          codeInput.value = '';
+          codeInput.focus();
+        } else if (data.code === 'CODE_EXPIRED') {
+          showError(errorEl, 'コードの有効期限が切れました。再送してください');
+          // カウントダウン中でなければ(=止まったまま残っていれば)再送を押せる状態にする。
+          if (!otpResendCountdownTimer) {
+            const resendBtn = document.getElementById('login-otp-resend-btn');
+            resendBtn.disabled = false;
+            resendBtn.textContent = 'コードを再送';
+          }
+        } else if (data.code === 'SUBSCRIPTION_INACTIVE') {
+          backToEmailStep();
+          showError(document.getElementById('login-error'), data.error || 'サブスクリプションが有効ではありません');
+        } else {
+          // 429(検証回数制限)等、上記以外はサーバーのエラー文言をそのまま出す。
+          showError(errorEl, data.error || 'エラーが発生しました');
         }
         return;
       }
@@ -2063,12 +2194,60 @@ async function submitEmail() {
   }, '確認中...');
 }
 
+// request-otpを再実行する。withButtonGuard()は使わない(disabled/textContentの
+// 復元処理がstartOtpResendCountdown()/stopOtpResendCountdown()の管理する状態と
+// 食い違うため)。二重送信防止・ボタン状態の管理はこの関数の中で直接行う。
+//
+// 【legacyモードのtokenを扱わない理由】このステップ自体、requestOtp()がレスポンスに
+// tokenを受け取らなかった(=otpモード)ときにしか表示されない(showOtpStep()参照)。
+// legacyモードではrequest-otpの成功レスポンスに常にtokenが入るため、この画面へ
+// 到達すること自体が無い。したがって再送でもtoken分岐は不要。
+async function resendOtp() {
+  const email = document.getElementById('login-email-input').value.trim();
+  if (!email) return;
+
+  const btn = document.getElementById('login-otp-resend-btn');
+  if (btn.disabled) return;
+
+  const errorEl = document.getElementById('login-otp-error');
+  hideError(errorEl);
+
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+
+  let succeeded = false;
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'request-otp', email })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      showError(errorEl, data.error || '再送に失敗しました');
+      return;
+    }
+
+    succeeded = true;
+    startOtpResendCountdown();
+
+  } catch (err) {
+    showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+  } finally {
+    if (!succeeded) {
+      stopOtpResendCountdown();
+    }
+  }
+}
+
 function showLoginGate(message) {
   localStorage.removeItem('session_token');
   document.getElementById('app-main').style.display = 'none';
   document.getElementById('tos-gate').style.display = 'none';
   document.getElementById('company-setup-gate').style.display = 'none';
   document.getElementById('login-gate').style.display = 'block';
+  backToEmailStep();
   if (message) {
     showError(document.getElementById('login-error'), message);
   }
@@ -5804,7 +5983,14 @@ window.addEventListener('DOMContentLoaded', () => {
   const loginEmailInput = document.getElementById('login-email-input');
   if (loginEmailInput) {
     loginEmailInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') submitEmail();
+      if (e.key === 'Enter') requestOtp();
+    });
+  }
+
+  const loginOtpInput = document.getElementById('login-otp-input');
+  if (loginOtpInput) {
+    loginOtpInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') verifyOtp();
     });
   }
 
