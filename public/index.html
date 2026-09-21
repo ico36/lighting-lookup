@@ -2040,6 +2040,12 @@ function extractJSON(raw) {
   throw new Error('JSON not properly closed');
 }
 
+// コード入力ステップへ進んだときのメールアドレス。「メールアドレスを変更」で
+// メール入力ステップへ戻っても消さない(同じアドレスに戻ってきたときにrequestOtp()が
+// 判定に使うため)。requestOtp()で別のアドレスへ切り替わったとき・showLoginGate()での
+// 完全リセット時にのみクリアする。
+let otpPendingEmail = null;
+
 // request-otpのレスポンスにtokenが有る(LOGIN_MODE=legacy)ならその場でログイン完了、
 // 無い(通常のotpモード)ならコード入力ステップへ進む。
 async function requestOtp() {
@@ -2047,6 +2053,16 @@ async function requestOtp() {
   const email = input.value.trim();
   input.value = email;
   if (!email) return;
+
+  // 直前にOTPを送信済みの同じメールアドレスへ「メールアドレスを変更」経由で
+  // 戻ってきただけなら、request-otpを叩き直さずコード入力ステップへ戻す。
+  // 叩き直すと60秒のクールダウンに当たって429になり、既に届いている有効な
+  // コードを使えないままコード入力画面へ進めなくなる問題があった。
+  if (otpPendingEmail && email === otpPendingEmail) {
+    showOtpStep(email, false);
+    return;
+  }
+  otpPendingEmail = null;
 
   const btn = document.getElementById('login-btn');
   const errorEl = document.getElementById('login-error');
@@ -2089,7 +2105,10 @@ async function requestOtp() {
 }
 
 // メールアドレス入力ステップからコード入力ステップへ切り替える。
-function showOtpStep(email) {
+// startCountdown=falseは、新たにOTPを送っていない(=requestOtp()の同一アドレス
+// ショートカット経路)場合に使う。再送のクールダウン表示を60秒へ巻き戻さないため。
+function showOtpStep(email, startCountdown = true) {
+  otpPendingEmail = email;
   document.getElementById('login-email-step').style.display = 'none';
   document.getElementById('login-otp-step').style.display = 'block';
   document.getElementById('login-otp-sent-to').textContent = email + ' にコードを送信しました';
@@ -2097,7 +2116,9 @@ function showOtpStep(email) {
   codeInput.value = '';
   hideError(document.getElementById('login-otp-error'));
   codeInput.focus();
-  startOtpResendCountdown();
+  if (startCountdown) {
+    startOtpResendCountdown();
+  }
 }
 
 // コード入力ステップからメールアドレス入力ステップへ戻す。「メールアドレスを変更」導線と、
@@ -2175,6 +2196,11 @@ async function verifyOtp() {
             resendBtn.textContent = 'コードを再送';
           }
         } else if (data.code === 'SUBSCRIPTION_INACTIVE') {
+          // 照合成功時点でサーバー側のotp:{email}は既に削除済み(api/login.jsのverify-otp参照)。
+          // otpPendingEmailを残すと、同じアドレスに戻ったときrequestOtp()のショートカットが
+          // 発動して存在しないOTPへ戻ってしまう(コード入力してもCODE_EXPIREDになる)ため、
+          // ここでは必ずクリアして新しいコードを送り直させる。
+          otpPendingEmail = null;
           backToEmailStep();
           showError(document.getElementById('login-error'), data.error || 'サブスクリプションが有効ではありません');
         } else {
@@ -2247,6 +2273,7 @@ function showLoginGate(message) {
   document.getElementById('tos-gate').style.display = 'none';
   document.getElementById('company-setup-gate').style.display = 'none';
   document.getElementById('login-gate').style.display = 'block';
+  otpPendingEmail = null; // セッション切れ等での完全リセット時は古いアドレスを引きずらない
   backToEmailStep();
   if (message) {
     showError(document.getElementById('login-error'), message);
