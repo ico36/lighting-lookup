@@ -1110,8 +1110,11 @@ async function handleCreateCheckout(req, res) {
       line_items: [{ price: priceId, quantity: 1 }],
       ...(discounts ? { discounts } : {}),
       // 利用規約への同意を必須にする。Stripeダッシュボード(設定 > 契約条件)に
-      // 利用規約URL(https://lighting-lookup.vercel.app/terms.html)を登録していないと
-      // このセッション作成自体がエラーになる。同意結果は完了後のセッションの
+      // 利用規約URLを登録していないとこのセッション作成自体がエラーになる。
+      // このURLはStripe側の設定項目でコードからは組み立てられないため、
+      // ドメインを変更した場合はダッシュボード側を手動で差し替えること
+      // (下のcustom_textのプライバシーポリシーURLはbaseUrlから動的に組み立てているため
+      // 手動差し替え不要だが、こちらは対象外)。同意結果は完了後のセッションの
       // consent.terms_of_service に残り、lib/legalConsent.js の
       // detectAndRecordCheckoutConsent() がログイン時にそれを検出してtos:{email}へ
       // 記録する(このファイル側では何も保存しない)。
@@ -1120,7 +1123,7 @@ async function handleCreateCheckout(req, res) {
       // に対応しているため、リンクテキストとして表示させる。
       custom_text: {
         terms_of_service_acceptance: {
-          message: '[プライバシーポリシー](https://lighting-lookup.vercel.app/privacy.html)もあわせてご確認ください。',
+          message: `[プライバシーポリシー](${baseUrl}/privacy.html)もあわせてご確認ください。`,
         },
       },
       success_url: `${baseUrl}/?checkout=success`,

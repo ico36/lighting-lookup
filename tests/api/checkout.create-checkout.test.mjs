@@ -25,8 +25,8 @@ beforeEach(() => {
   delete process.env.ADMIN_EMAILS;
 });
 
-async function callCreateCheckout(body) {
-  const req = fakeReq({ action: 'create-checkout', email: 'new-user@example.com', plan: 'light', ...body });
+async function callCreateCheckout(body, overrides = {}) {
+  const req = fakeReq({ action: 'create-checkout', email: 'new-user@example.com', plan: 'light', ...body }, overrides);
   const res = fakeRes();
   await handler(req, res);
   return res;
@@ -88,7 +88,7 @@ test('standard プラン: 早期割引が利用可能ならクーポンを付け
 
 test('利用規約への同意(consent_collection)を必須にし、custom_textにプライバシーポリシーの絶対URLを含める', async () => {
   noExistingCustomer();
-  const res = await callCreateCheckout({ plan: 'light' });
+  const res = await callCreateCheckout({ plan: 'light' }, { headers: { host: 'lighting-lookup.vercel.app' } });
 
   assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
   const params = parseSessionParams(res.body.url);
@@ -97,6 +97,24 @@ test('利用規約への同意(consent_collection)を必須にし、custom_text�
     params.custom_text.terms_of_service_acceptance.message,
     /https:\/\/lighting-lookup\.vercel\.app\/privacy\.html/
   );
+});
+
+// baseUrl(req.headers.hostから組み立てる値)は本番ドメイン固定ではなくPreview環境
+// (ブランチごとのvercel.appサブドメイン)でも正しく追従する必要がある。ここでは
+// 本番と異なるhostを渡し、custom_textのURLがそのhostから組み立てられていること、
+// api/checkout.js内に直書きされていた本番ドメイン('lighting-lookup.vercel.app')の
+// 値と一致しないことを確認する。
+test('custom_text内のプライバシーポリシーURLはreq.headers.hostから組み立てられ、直書きの値と一致しない', async () => {
+  noExistingCustomer();
+  const previewHost = 'lighting-lookup-git-feature-otp-login-lighting-lookup.vercel.app';
+  const res = await callCreateCheckout({ plan: 'light' }, { headers: { host: previewHost } });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  const message = params.custom_text.terms_of_service_acceptance.message;
+
+  assert.equal(message, `[プライバシーポリシー](https://${previewHost}/privacy.html)もあわせてご確認ください。`);
+  assert.ok(!message.includes('https://lighting-lookup.vercel.app/privacy.html'));
 });
 
 test('既存顧客が見つかる場合は customer を渡し、customer_email は渡さない', async () => {
