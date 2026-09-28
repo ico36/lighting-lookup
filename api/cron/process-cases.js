@@ -28,7 +28,13 @@ import {
   archiveCase,
 } from '../../lib/cases';
 import { AUTO_LOSE_GRACE_DAYS, DAY_MS } from '../../lib/planLimits';
-import { isUnlimited, getSubscriptionStateCached } from '../../lib/subscription';
+import {
+  isUnlimited,
+  getSubscriptionStateCached,
+  OWNER_STATUS,
+  resolveAutoLoseRetentionDays,
+  getLightPlanRetentionDaysFallback,
+} from '../../lib/subscription';
 import { redis } from '../../lib/redis';
 
 export default async function handler(req, res) {
@@ -91,10 +97,15 @@ export default async function handler(req, res) {
     }
   }
 
+  // 解約済み/顧客なしの所有者向けフォールバック(ライトプランのretention_days)。
+  // この実行で最初に必要になった時点で1回だけStripeに問い合わせ、以降は使い回す
+  // （lib/subscription.js の getLightPlanRetentionDaysFallback() のコメント参照）。
+  let lightRetentionDaysFallback = null;
+
   for (const [email, caseIds] of byOwner) {
     let retentionDays;
     try {
-      const { limits, degraded } = await getSubscriptionStateCached(email);
+      const { limits, degraded, status, lastPlanLimits } = await getSubscriptionStateCached(email);
       if (degraded) {
         // Stripeに聞けなかっただけで、本当に無制限とは限らない。ここで既定値(-1)を
         // 焼き込むと「二度とアーカイブされない案件」が恒久的に残るため、ステータス
@@ -106,7 +117,20 @@ export default async function handler(req, res) {
         results.deferred.push(...caseIds);
         continue;
       }
-      retentionDays = limits.retentionDays;
+
+      // 解約済み/顧客なしのときだけ、ライトプランの予備値を(1回だけ)取得しておく。
+      // 有効な契約者・支払い遅延中・管理者はresolveAutoLoseRetentionDays()内で
+      // state.limits.retentionDaysをそのまま使うため、ここには来ない。
+      if (status === OWNER_STATUS.CANCELED || status === OWNER_STATUS.NO_CUSTOMER) {
+        if (lightRetentionDaysFallback === null) {
+          lightRetentionDaysFallback = await getLightPlanRetentionDaysFallback();
+        }
+      }
+
+      retentionDays = await resolveAutoLoseRetentionDays(
+        { status, limits, lastPlanLimits },
+        { fallbackRetentionDays: lightRetentionDaysFallback }
+      );
     } catch (err) {
       console.error('[cron/process-cases] plan lookup failed', email, err);
       results.errors.push({ email, step: 'plan-lookup', message: err.message });

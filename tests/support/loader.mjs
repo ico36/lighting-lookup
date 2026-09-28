@@ -53,6 +53,21 @@ const LIB_OTP_JS = path.join(REPO_ROOT, 'lib', 'otp.js');
 // 本物のまま読み込む(契約チェックはフェイクStripe経由で実ロジックごとテストする)。
 const LOGIN_JS = path.join(REPO_ROOT, 'api', 'login.js');
 
+// lib/subscription.js が読む `./redis`(subcheck:{version}:{email}キャッシュの
+// 読み書き)も同じフェイクへ。ここを差し替えないと、非管理者メールで
+// getSubscriptionStateCached()を呼ぶテストが実クライアント(KV_REST_API_URL/TOKEN
+// 未設定)へ実際にfetchを試み、失敗するまで数秒かかる(tests/api/login.verify-otp.
+// test.mjsのコメント「管理者アカウントを使う理由」に既存の実例あり)。
+// process-cases.jsの自動失注は解約済み/顧客なし=非管理者が主題のため、この回避策が
+// 使えず、フェイク化が必須になった。
+const LIB_SUBSCRIPTION_JS = path.join(REPO_ROOT, 'lib', 'subscription.js');
+
+// api/cron/process-cases.js が読む `../../lib/redis`(自動失注/自動アーカイブの
+// ZSET操作)も同じフェイクへ。api/cron/process-cases.js自体・lib/cases.js
+// (LIB_CASES_JS経由で既にフェイク化済み)・lib/subscription.jsは本物のまま
+// 読み込む。
+const CRON_PROCESS_CASES_JS = path.join(REPO_ROOT, 'api', 'cron', 'process-cases.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -80,9 +95,16 @@ export async function resolve(specifier, context, nextResolve) {
 
   // 2c. lib/cases.js が読む `./redis` をフェイクへ(工程P3-2)。
   // 2d. lib/legalConsent.js が読む `./redis` も同じフェイクへ。
+  // 2d-2. lib/subscription.js が読む `./redis`(subcheck:{version}:{email}
+  //       キャッシュ)も同じフェイクへ。理由はLIB_SUBSCRIPTION_JS定義部のコメント参照。
   if (specifier === './redis' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
-    if (parentPath === LIB_CASES_JS || parentPath === LIB_LEGAL_CONSENT_JS || parentPath === LIB_OTP_JS) {
+    if (
+      parentPath === LIB_CASES_JS ||
+      parentPath === LIB_LEGAL_CONSENT_JS ||
+      parentPath === LIB_OTP_JS ||
+      parentPath === LIB_SUBSCRIPTION_JS
+    ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
@@ -91,6 +113,15 @@ export async function resolve(specifier, context, nextResolve) {
   if (specifier === '../lib/redis' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
     if (parentPath === LOGIN_JS) {
+      return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
+    }
+  }
+
+  // 2e-2. api/cron/process-cases.js が読む `../../lib/redis` も同じフェイクへ。
+  // 理由はCRON_PROCESS_CASES_JS定義部のコメント参照。
+  if (specifier === '../../lib/redis' && context.parentURL) {
+    const parentPath = fileURLToPath(context.parentURL);
+    if (parentPath === CRON_PROCESS_CASES_JS) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
