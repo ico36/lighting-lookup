@@ -4,6 +4,9 @@
 //      自動的に「失注・キャンセル」にする
 //   2. 完了/失注・キャンセルになってから retentionDays 日を超えた案件を
 //      自動的にアーカイブ(非表示)にする
+//   3. 解約(契約終了)から6か月経ったオーナーのデータを全削除する
+//      (lib/ownerDeletion.js。Vercel HobbyのFunction数上限12/12のため
+//      新規APIエンドポイントを作れず、既存cronへ統合している)
 //
 // 【2で見るのは案件に焼き込まれた retentionDays だけ】所有者のプランは引かない。
 // 走査対象は全アカウントの完了/失注案件なので、ここでプランを引くと案件数だけ
@@ -36,6 +39,7 @@ import {
   getLightPlanRetentionDaysFallback,
 } from '../../lib/subscription';
 import { redis } from '../../lib/redis';
+import { discoverAndScheduleOwnerDeletions, processDueOwnerDeletions } from '../../lib/ownerDeletion';
 
 export default async function handler(req, res) {
   // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
@@ -212,6 +216,26 @@ export default async function handler(req, res) {
       console.error('[cron/process-cases] auto-archive failed', caseId, err);
       results.errors.push({ caseId, step: 'auto-archive', message: err.message });
     }
+  }
+
+  // --- 3. 解約から6か月後の自動削除 -----------------------------------
+  // lib/ownerDeletion.js のコメント参照。ステップ1・2の案件処理とは独立した
+  // オーナー単位の処理で、失敗してもステップ1・2の結果には影響させない
+  // (try/catchで個別に囲み、失敗してもcron全体は200を返す)。
+  try {
+    const discovered = await discoverAndScheduleOwnerDeletions();
+    const processed = await processDueOwnerDeletions({ now });
+    results.ownerDeletion = {
+      scheduled: discovered.scheduled,
+      canceled: processed.canceled,
+      postponed: processed.postponed,
+      deleted: processed.deleted,
+      dryRunTargets: processed.dryRunTargets,
+      errors: [...discovered.errors, ...processed.errors],
+    };
+  } catch (err) {
+    console.error('[cron/process-cases] owner-deletion failed', err);
+    results.errors.push({ step: 'owner-deletion', message: err.message });
   }
 
   return res.status(200).json(results);
