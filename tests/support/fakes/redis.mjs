@@ -69,7 +69,17 @@ async function expire(key, seconds) {
   return 1;
 }
 
+// __makeDelFail()で指定したキーが引数に含まれるdel()呼び出しを、実際には
+// 何も消さずに例外を投げる。lib/ownerDeletion.js の「Redis側の削除に失敗したら
+// 予定を残して翌日再試行する」を検証するためのテスト専用フック。
+let delFailureKeys = new Set();
+
 async function del(...keys) {
+  for (const key of keys) {
+    if (delFailureKeys.has(key)) {
+      throw new Error(`[fake redis] del(${key}) failure injected for test`);
+    }
+  }
   let count = 0;
   for (const key of keys) {
     if (strings.delete(key)) count++;
@@ -78,6 +88,21 @@ async function del(...keys) {
     ttls.delete(key);
   }
   return count;
+}
+
+// SCANのmatchはこのリポジトリでは常に前方一致+ワイルドカード(例: 'company:*')の
+// 単純な形でしか使わないため、'*'だけを正規表現に変換すれば十分。
+// カーソルページングは実装しない(常に1回で全件返し、カーソル'0'を返す)。
+function globToRegExp(pattern) {
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
+async function scan(cursor, { match, count } = {}) {
+  const allKeys = new Set([...strings.keys(), ...lists.keys(), ...zsets.keys()]);
+  const regex = match ? globToRegExp(match) : /.*/;
+  const matched = [...allKeys].filter((key) => regex.test(key));
+  return ['0', matched];
 }
 
 async function rpush(key, ...values) {
@@ -146,13 +171,19 @@ function pipeline() {
   return chain;
 }
 
-export const redis = { get, set, incr, expire, del, rpush, lrange, zadd, zrem, zcard, zrange, pipeline };
+export const redis = { get, set, incr, expire, del, rpush, lrange, zadd, zrem, zcard, zrange, scan, pipeline };
 
 export function __resetFakeRedis() {
   strings.clear();
   lists.clear();
   zsets.clear();
   ttls.clear();
+  delFailureKeys.clear();
+}
+
+/** 指定したキーを含むdel()呼び出しを例外にする(テスト専用)。__resetFakeRedis()でクリアされる。 */
+export function __makeDelFail(key) {
+  delFailureKeys.add(key);
 }
 
 // 「TTL経過後」を模すテスト専用ヘルパー。実タイマーを待たず、該当キーを即座に
@@ -168,4 +199,11 @@ export function __expireKey(key) {
 export function __getTTLSeconds(key) {
   if (!ttls.has(key)) return null;
   return Math.round((ttls.get(key) - Date.now()) / 1000);
+}
+
+// ZSETの特定メンバーのscoreを直接読む(テスト専用の検証ヘルパー)。
+// メンバーが無ければnull。
+export function __getZScore(key, member) {
+  const z = zsets.get(key);
+  return z && z.has(member) ? z.get(member) : null;
 }

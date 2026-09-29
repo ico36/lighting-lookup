@@ -68,6 +68,13 @@ const LIB_SUBSCRIPTION_JS = path.join(REPO_ROOT, 'lib', 'subscription.js');
 // 読み込む。
 const CRON_PROCESS_CASES_JS = path.join(REPO_ROOT, 'api', 'cron', 'process-cases.js');
 
+// lib/ownerDeletion.js が読む `./redis`(owner-deletion:scheduleのZSET操作・
+// SCANによるオーナー列挙)も同じフェイクへ。`@vercel/blob` はロゴ削除の実ネットワーク
+// 呼び出しを避けるため fakes/blob.mjs へ差し替える。lib/ownerDeletion.js自体・
+// lib/cases.js・lib/subscription.js・lib/companyStats.js・lib/legalConsent.js・
+// lib/adminEmails.jsは本物のまま読み込む(本題のロジックをフェイクにしないため)。
+const LIB_OWNER_DELETION_JS = path.join(REPO_ROOT, 'lib', 'ownerDeletion.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -103,9 +110,19 @@ export async function resolve(specifier, context, nextResolve) {
       parentPath === LIB_CASES_JS ||
       parentPath === LIB_LEGAL_CONSENT_JS ||
       parentPath === LIB_OTP_JS ||
-      parentPath === LIB_SUBSCRIPTION_JS
+      parentPath === LIB_SUBSCRIPTION_JS ||
+      parentPath === LIB_OWNER_DELETION_JS
     ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
+    }
+  }
+
+  // 2d-3. lib/ownerDeletion.js が読む `@vercel/blob` をフェイクへ。ロゴ削除の
+  // 実ネットワーク呼び出しを避ける。
+  if (specifier === '@vercel/blob' && context.parentURL) {
+    const parentPath = fileURLToPath(context.parentURL);
+    if (parentPath === LIB_OWNER_DELETION_JS) {
+      return { url: new URL('blob.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
 
