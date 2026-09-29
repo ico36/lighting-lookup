@@ -39,7 +39,11 @@ import {
   getLightPlanRetentionDaysFallback,
 } from '../../lib/subscription';
 import { redis } from '../../lib/redis';
-import { discoverAndScheduleOwnerDeletions, processDueOwnerDeletions } from '../../lib/ownerDeletion';
+import {
+  discoverAndScheduleOwnerDeletions,
+  processDueOwnerDeletions,
+  warnIfOwnerDeletionPreviewGraceEnabled,
+} from '../../lib/ownerDeletion';
 
 export default async function handler(req, res) {
   // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
@@ -223,6 +227,7 @@ export default async function handler(req, res) {
   // オーナー単位の処理で、失敗してもステップ1・2の結果には影響させない
   // (try/catchで個別に囲み、失敗してもcron全体は200を返す)。
   try {
+    warnIfOwnerDeletionPreviewGraceEnabled();
     const discovered = await discoverAndScheduleOwnerDeletions();
     const processed = await processDueOwnerDeletions({ now });
     results.ownerDeletion = {

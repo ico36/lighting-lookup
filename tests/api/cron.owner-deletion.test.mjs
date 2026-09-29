@@ -33,6 +33,7 @@ beforeEach(() => {
   process.env.ADMIN_EMAILS = 'admin@example.com';
   delete process.env.VERCEL_ENV;
   delete process.env.OWNER_DELETION_DRY_RUN; // 既定 = ドライラン
+  delete process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES;
 });
 
 async function callCron() {
@@ -378,4 +379,123 @@ test('executeOwnerDeletion(): 既に削除済みの案件(CASE_NOT_FOUND)は成�
   assert.deepEqual(res.body.ownerDeletion.deleted, [email]);
   assert.equal(res.body.ownerDeletion.errors.length, 0, 'CASE_NOT_FOUNDはエラーとして報告されないはず');
   assert.equal(__getZScore(OWNER_DELETION_SCHEDULE_KEY, email), null);
+});
+
+// --- Preview限定の猶予期間短縮(OWNER_DELETION_PREVIEW_GRACE_MINUTES) -------
+// 分数の判定自体はtests/lib/ownerDeletion.previewGrace.test.mjsで固定済み。
+// ここではPass3a/Pass3bの実際の計算に配線されていることを確認する。
+
+test('Pass3a: Preview環境でOWNER_DELETION_PREVIEW_GRACE_MINUTESが有効なら、暦6か月の代わりにその分数を使う', async () => {
+  process.env.VERCEL_ENV = 'preview';
+  process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES = '10';
+  const email = 'preview-grace@example.com';
+  await setCompany(email);
+
+  const endedAtSec = Math.floor(Date.now() / 1000) - 3600;
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_1' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [subscriptionWith({ status: 'canceled', endedAt: endedAtSec, canceledAt: endedAtSec })],
+  }));
+
+  await callCron();
+
+  const score = __getZScore(OWNER_DELETION_SCHEDULE_KEY, email);
+  assert.equal(score, endedAtSec * 1000 + 10 * 60 * 1000);
+});
+
+test('Pass3a: production環境ではOWNER_DELETION_PREVIEW_GRACE_MINUTESが設定されていても無視され、暦6か月のまま', async () => {
+  // VERCEL_ENV未設定(=production相当)のまま猶予短縮の環境変数だけ設定する
+  process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES = '10';
+  const email = 'prod-grace-ignored@example.com';
+  await setCompany(email);
+
+  const endedAtSec = Math.floor(Date.now() / 1000) - 3600;
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_1' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [subscriptionWith({ status: 'canceled', endedAt: endedAtSec, canceledAt: endedAtSec })],
+  }));
+
+  await callCron();
+
+  const score = __getZScore(OWNER_DELETION_SCHEDULE_KEY, email);
+  assert.equal(score, addCalendarMonthsJST(endedAtSec * 1000, OWNER_DELETION_RETENTION_MONTHS));
+});
+
+test('Pass3a: Preview環境でも不正な値(0)なら無視され、暦6か月のまま', async () => {
+  process.env.VERCEL_ENV = 'preview';
+  process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES = '0';
+  const email = 'preview-invalid-grace@example.com';
+  await setCompany(email);
+
+  const endedAtSec = Math.floor(Date.now() / 1000) - 3600;
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_1' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [subscriptionWith({ status: 'canceled', endedAt: endedAtSec, canceledAt: endedAtSec })],
+  }));
+
+  await callCron();
+
+  const score = __getZScore(OWNER_DELETION_SCHEDULE_KEY, email);
+  assert.equal(score, addCalendarMonthsJST(endedAtSec * 1000, OWNER_DELETION_RETENTION_MONTHS));
+});
+
+test('Pass3b: Preview環境の猶予短縮は先送り(postponed)の再計算にも効く', async () => {
+  process.env.VERCEL_ENV = 'preview';
+  process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES = '10';
+  const email = 'preview-postpone@example.com';
+  await setCompany(email);
+  await redis.zadd(OWNER_DELETION_SCHEDULE_KEY, { score: Date.now() - 1000, member: email });
+
+  // 再確認で見つかる、より新しいended_at(再契約→再解約を想定。1分前に終了)
+  const newEndedSec = Math.floor(Date.now() / 1000) - 60;
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_new' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [subscriptionWith({ status: 'canceled', endedAt: newEndedSec, canceledAt: newEndedSec })],
+  }));
+
+  const res = await callCron();
+
+  // 猶予10分・終了1分前 → まだ9分残っているので先送りされるはず
+  assert.deepEqual(res.body.ownerDeletion.postponed.map((p) => p.email), [email]);
+  const expected = newEndedSec * 1000 + 10 * 60 * 1000;
+  assert.equal(__getZScore(OWNER_DELETION_SCHEDULE_KEY, email), expected);
+});
+
+test('猶予短縮が有効なときは、cron実行のたびにconsole.warnで通知する', async () => {
+  process.env.VERCEL_ENV = 'preview';
+  process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES = '15';
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [] }));
+
+  const originalWarn = console.warn;
+  const warnMessages = [];
+  console.warn = (...args) => {
+    warnMessages.push(args.join(' '));
+  };
+  try {
+    await callCron();
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.ok(
+    warnMessages.some((msg) => msg.includes('猶予期間の短縮') && msg.includes('15')),
+    'console.warnで猶予短縮の有効化と分数が通知されるはず'
+  );
+});
+
+test('猶予短縮が無効(production)なら、それらしいconsole.warnは出ない', async () => {
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [] }));
+
+  const originalWarn = console.warn;
+  const warnMessages = [];
+  console.warn = (...args) => {
+    warnMessages.push(args.join(' '));
+  };
+  try {
+    await callCron();
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.ok(!warnMessages.some((msg) => msg.includes('猶予期間の短縮')));
 });
