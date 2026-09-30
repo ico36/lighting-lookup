@@ -45,6 +45,11 @@ Anthropic API（Claude + web_search ツール） / Stripe / Upstash Redis / Verc
 - **コマンド実行時の申告**: シェルコマンドを実行する前に、それが「読み取りのみ」か「書き込みを伴う」かを1行で明示すること。読み取りのみは「読み取り専用です（ファイルの変更なし）」、書き込みありは何をどう変更するかを1行で述べる。判断がつかない場合は「書き込みの可能性あり」として扱う。特に `node -e` / `python -c` のように引用符の中がコードになる形式は、中身に `fs.write` 等が含まれないか確認したうえで申告する。
 - コミットメッセージ末尾に `Co-Authored-By` / `Claude-Session` 行は書かない。モデル名を確定できないまま推測で埋めると事実と異なる記録が残るため（実際に「Claude Sonnet 5」と書かれたが正しくは Opus 5 だった事例あり）。
 
+## 会社Stripeアカウントへの移行時のTODO
+
+- 旧 `STRIPE_PRICE_ID`（単数形）環境変数はProduction・Previewの両方に残っているが、現行コードはどこからも参照していない（`STRIPE_PRICE_ID_LIGHT` / `STANDARD` / `PRO` の3つのみを使う。`lib/subscription.js` の `getLightingSearchPriceIds()` 参照）。会社Stripeアカウントへの移行時に削除する。
+- 移行で3つのPrice IDを作り直したら、新しいPrice IDが正しく読み込めるか照合すること。`api/info/[type].js`（管理者専用の軽量参照エンドポイント群）に確認用の項目を追加し、3つのPrice IDそれぞれについて「取得可否・livemode・商品名(product.name)・metadata.plan」を返すようにして突き合わせる。
+
 ## 開発の背景・設計判断の記録
 
 過去の設計判断・実装経緯・つまずいた点はObsidianに記録されている：
