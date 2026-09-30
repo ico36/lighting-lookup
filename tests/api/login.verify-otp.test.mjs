@@ -33,6 +33,11 @@ beforeEach(() => {
   process.env.RESEND_API_KEY = 'test-resend-api-key';
   process.env.MAIL_FROM = '照明サーチ <noreply@example.com>';
   process.env.ADMIN_EMAILS = 'admin@example.com';
+  // getActiveSubscriptionWithItem()が照明サーチのPrice IDホワイトリストを
+  // 必ず要求する(3つ揃っていないとgetLightingSearchPriceIds()が例外を投げる)。
+  process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
+  process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
+  process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   delete process.env.LOGIN_MODE;
   delete process.env.VERCEL_ENV;
 });

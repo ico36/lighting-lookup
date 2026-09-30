@@ -46,6 +46,10 @@ beforeEach(() => {
   __resetFakeRedis();
   process.env.CRON_SECRET = CRON_SECRET;
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
+  // getActiveSubscriptionWithItem()が照明サーチのPrice IDホワイトリストを
+  // 必ず要求する(3つ揃っていないとgetLightingSearchPriceIds()が例外を投げる)。
+  process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
+  process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   process.env.ADMIN_EMAILS = 'admin@example.com';
   delete process.env.VERCEL_ENV;
 });
@@ -136,8 +140,12 @@ test('解約済みでmetadata欠損(retention_daysなし): ライトプランの
     data: [
       {
         ...subscriptionWith({ status: 'canceled', priceId: 'price_standard_test', endedAt: Math.floor(Date.now() / 1000) }),
+        // Price IDは照明サーチのホワイトリスト(STRIPE_PRICE_ID_STANDARD)と
+        // 一致させる必要がある(getActiveSubscriptionWithItem()のPrice ID絞り込み)。
+        // retention_daysが無いmetadataでも、Price ID自体は実在の照明サーチPriceの
+        // ままというのが「metadata欠損」の実態(Price IDが変わるわけではない)。
         items: {
-          data: [{ id: 'si_missing', price: customPrice({ id: 'price_missing_retention', plan: 'standard' }) }],
+          data: [{ id: 'si_missing', price: customPrice({ id: 'price_standard_test', plan: 'standard' }) }],
         },
       },
     ],

@@ -31,6 +31,14 @@ beforeEach(() => {
   __resetFakeRedis();
   process.env.CRON_SECRET = CRON_SECRET;
   process.env.ADMIN_EMAILS = 'admin@example.com';
+  // Pass3a(discoverAndScheduleOwnerDeletions)はgetSubscriptionStateCached()経由で
+  // getActiveSubscriptionWithItem()を呼ぶため、照明サーチのPrice IDホワイトリストが
+  // 必ず要求される(3つ揃っていないとgetLightingSearchPriceIds()が例外を投げ、
+  // degraded:trueになってPass3aが誤ってスキップしてしまう)。Pass3b
+  // (resolveOwnerDeletionRecheck)はitems/ホワイトリストを見ないため影響を受けない。
+  process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
+  process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
+  process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   delete process.env.VERCEL_ENV;
   delete process.env.OWNER_DELETION_DRY_RUN; // 既定 = ドライラン
   delete process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES;
@@ -44,8 +52,13 @@ async function callCron() {
 }
 
 // resolveOwnerDeletionRecheck()/checkActiveSubscriptionLive()が読むフィールド
-// (status・ended_at・canceled_at・created)だけを持つ最小限のサブスクオブジェクト。
-function subscriptionWith({ id = 'sub_test', customer = 'cus_test', status, canceledAt, endedAt }) {
+// (status・ended_at・canceled_at・created)に加え、items.dataを持つ。
+// resolveOwnerDeletionRecheck()(Pass3b)はitemsを見ないため無関係だが、
+// checkActiveSubscriptionLive()(Pass3a、getSubscriptionStateCached経由)は
+// 照明サーチのPrice IDホワイトリストで絞り込むため、items無しだと常に除外されて
+// しまう(=解約済みでも検出できずdegraded相当に落ちる)。既定は
+// price_standard_test(照明サーチのPrice)。
+function subscriptionWith({ id = 'sub_test', customer = 'cus_test', status, canceledAt, endedAt, priceId = 'price_standard_test' }) {
   const nowSec = Math.floor(Date.now() / 1000);
   return {
     id,
@@ -54,6 +67,7 @@ function subscriptionWith({ id = 'sub_test', customer = 'cus_test', status, canc
     canceled_at: canceledAt ?? null,
     ended_at: endedAt ?? null,
     created: nowSec,
+    items: { data: [{ id: `si_${id}`, price: fakeStripe.__getDefaultPrice(priceId) }] },
   };
 }
 

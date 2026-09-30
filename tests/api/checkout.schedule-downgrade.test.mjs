@@ -51,6 +51,10 @@ beforeEach(() => {
   process.env.SESSION_SECRET = 'test-session-secret';
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
+  // getActiveSubscriptionWithItem()が照明サーチのPrice IDホワイトリストを
+  // 必ず要求する(3つ揃っていないとgetLightingSearchPriceIds()が例外を投げる)。
+  // PROは従来139行目付近で個別テストのみ設定していたが、beforeEachで揃える。
+  process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [subscriptionOnPlan('price_standard_test')] }));
 });
 

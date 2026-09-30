@@ -23,6 +23,9 @@ beforeEach(() => {
   fakeStripe.__reset();
   fakeAuth.__reset();
   process.env.SESSION_SECRET = 'test-session-secret';
+  // getActiveSubscriptionWithItem()が照明サーチのPrice IDホワイトリストを
+  // 必ず要求する(3つ揃っていないとgetLightingSearchPriceIds()が例外を投げる)。
+  process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   process.env.STRIPE_COUPON_ID = 'coupon_test';

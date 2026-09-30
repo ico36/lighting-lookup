@@ -9,7 +9,7 @@
 // (lib/subscription.js・lib/quota.jsが直接読む`./redis`は未フェイクの実クライアントだが、
 // KV_REST_API_URL/TOKEN未設定でも各関数がフェイルオープンで吸収するため問題にならない)。
 
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 import handler, { OTP_REQUEST_LIMIT_EMAIL, OTP_REQUEST_LIMIT_IP } from '../../api/login.js';
@@ -35,6 +35,11 @@ beforeEach(() => {
   process.env.RESEND_API_KEY = 'test-resend-api-key';
   process.env.MAIL_FROM = '照明サーチ <noreply@example.com>';
   process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+  // getActiveSubscriptionWithItem()が照明サーチのPrice IDホワイトリストを
+  // 必ず要求する(3つ揃っていないとgetLightingSearchPriceIds()が例外を投げる)。
+  process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
+  process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
+  process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   delete process.env.LOGIN_MODE; // 既定のotp
   delete process.env.VERCEL_ENV;
 });
@@ -248,4 +253,25 @@ test('送信失敗時はotp:{email}・otp:attempts:{email}・otp:cooldown:{email
   assert.equal(await readOtp(EMAIL), null);
   assert.equal(await canResendOtp(EMAIL), true);
   assert.equal(await redis.get(redisKey('otp', 'attempts', EMAIL)), null);
+});
+
+// 照明サーチのPrice IDホワイトリスト(lib/subscription.jsのgetLightingSearchPriceIds())が
+// 前提とする3環境変数のうち1つが欠けた場合。新規ログイン試行は「全部許可」に倒さず、
+// 500で即座に全面停止する(フェイルオープンにするのはapi/_auth.js経由のセッション
+// 再チェックだけ。tests/api/auth.requireAuth.test.mjs参照)。気づけることが目的のため
+// console.errorも必ず呼ばれることを確認する。
+test('照明サーチのPrice ID環境変数が1つ欠けていると新規ログイン試行は500(全部許可に倒れない)', async () => {
+  delete process.env.STRIPE_PRICE_ID_STANDARD;
+
+  const errorMock = mock.method(console, 'error', () => {});
+  try {
+    const res = fakeRes();
+    await handler(req({ action: 'request-otp', email: EMAIL }), res);
+
+    assert.equal(res.statusCode, 500);
+    assert.equal(fakeOtpMail.__getSentEmails().length, 0);
+    assert.ok(errorMock.mock.calls.length > 0, 'console.errorが呼ばれていません');
+  } finally {
+    errorMock.mock.restore();
+  }
 });
