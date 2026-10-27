@@ -151,14 +151,14 @@ function defaultPrice(id) {
       id: 'price_light_test',
       unit_amount: 3850,
       currency: 'jpy',
-      metadata: { plan: 'light', search_limit: '20', case_limit: '5', retention_days: '30' },
+      metadata: { plan: 'light', search_limit: '40', case_limit: '5', retention_days: '30' },
       product: { id: 'prod_light', name: 'ライトプラン' },
     },
     price_standard_test: {
       id: 'price_standard_test',
       unit_amount: 8800,
       currency: 'jpy',
-      metadata: { plan: 'standard', search_limit: '100', case_limit: '30', retention_days: '365' },
+      metadata: { plan: 'standard', search_limit: '200', case_limit: '30', retention_days: '365' },
       product: { id: 'prod_standard', name: 'スタンダードプラン' },
     },
     price_pro_test: {
@@ -167,6 +167,11 @@ function defaultPrice(id) {
       // （api/checkout.js の設計判断・Obsidianログ参照）。
       unit_amount: 19800,
       currency: 'jpy',
+      // search_limitは実値(1000)ではなく意図的に-1(無制限)のまま。
+      // tests/api/login.request-otp.test.mjs の seedUnlimitedPlanSubscription() が
+      // 「上限無制限のプランならisCountable()が早期にfalseを返しredisに触れない」
+      // という無制限動作そのものの確認にこのPriceを使っているため、実値に揃えると
+      // その検証内容が壊れる。
       metadata: { plan: 'pro', search_limit: '-1', case_limit: '-1', retention_days: '-1' },
       product: { id: 'prod_pro', name: 'プロプラン' },
     },

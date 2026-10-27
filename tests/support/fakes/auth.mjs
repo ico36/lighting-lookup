@@ -6,8 +6,8 @@
 // 既定はライトプラン契約者。E-5がテストする移行先(UPGRADE_PATHS.light = ['standard', 'pro'])
 // に合わせる。数値は Stripe Price metadata の実値（lib/subscription.js には数値を
 // 持たない方針のため、フェイク側の値も実値に揃える）。
-//   light    ... search_limit 20 / case_limit 5  / retention_days 30
-//   standard ... search_limit 100 / case_limit 30 / retention_days 365
+//   light    ... search_limit 40 / case_limit 5  / retention_days 30
+//   standard ... search_limit 200 / case_limit 30 / retention_days 365
 // fakes/stripe.mjs の defaultSubscription() が返す現行Price（price_light_test）と
 // 必ず一致させること。ここだけ light で stripe.mjs 側が standard、のようなズレは
 // UPGRADE_PATHS の分岐そのものを壊す。
@@ -21,7 +21,7 @@ function defaultAuth() {
   const now = Date.now();
   return {
     email: 'tester@example.com',
-    limits: { plan: 'light', searchLimit: 20, caseLimit: 5, retentionDays: 30 },
+    limits: { plan: 'light', searchLimit: 40, caseLimit: 5, retentionDays: 30 },
     period: { start: now, end: now + 30 * 24 * 60 * 60 * 1000 },
   };
 }

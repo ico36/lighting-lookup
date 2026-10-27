@@ -34,7 +34,7 @@ function subscriptionOnPlan(priceId, extra = {}) {
 beforeEach(() => {
   fakeStripe.__reset();
   fakeAuth.__reset();
-  fakeAuth.__setAuth({ email: EMAIL, limits: { plan: 'light', searchLimit: 20, caseLimit: 5, retentionDays: 30 } });
+  fakeAuth.__setAuth({ email: EMAIL, limits: { plan: 'light', searchLimit: 40, caseLimit: 5, retentionDays: 30 } });
   process.env.SESSION_SECRET = 'test-session-secret';
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
