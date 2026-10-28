@@ -157,3 +157,31 @@ test('isWithinCampaign2xSignupWindow(): 開催期間内ならtrue、期間外な
   assert.equal(isWithinCampaign2xSignupWindow(beforeStart), false);
   assert.equal(isWithinCampaign2xSignupWindow(afterEnd), false);
 });
+
+test('isWithinCampaign2xSignupWindow(): 日付だけのSTART/ENDはJSTとして解釈される(UTC深夜0時ではない)', () => {
+  process.env.CAMPAIGN_2X_SIGNUP_START = '2026-01-01';
+  process.env.CAMPAIGN_2X_SIGNUP_END = '2026-06-30';
+
+  const atJstStart = Date.parse('2026-01-01T00:00:00+09:00');
+  const justBeforeJstStart = Date.parse('2025-12-31T23:59:59+09:00');
+  const atJstEndBoundary = Date.parse('2026-06-30T23:59:59+09:00');
+  const justAfterJstEndBoundary = Date.parse('2026-07-01T00:00:00+09:00');
+  // UTCの深夜0時として誤って解釈された場合に落ちることを確認する対照値
+  // (JSTでは2026-01-01の09:00なので、UTC解釈のままなら「開始前」になってしまう)。
+  const atUtcMidnightOfStartDate = Date.parse('2026-01-01T00:00:00Z');
+
+  assert.equal(isWithinCampaign2xSignupWindow(justBeforeJstStart), false, 'JST開始の1秒前はまだ対象外であるべき');
+  assert.equal(isWithinCampaign2xSignupWindow(atJstStart), true, 'JSTでのその日の00:00:00はちょうど開始');
+  assert.equal(isWithinCampaign2xSignupWindow(atUtcMidnightOfStartDate), true, 'UTC深夜0時(=JST朝9時)は開始後なので対象内のはず');
+  assert.equal(isWithinCampaign2xSignupWindow(atJstEndBoundary), true, 'JSTでのその日の23:59:59まで含む');
+  assert.equal(isWithinCampaign2xSignupWindow(justAfterJstEndBoundary), false, 'JST終了の次の瞬間は対象外');
+});
+
+test('isWithinCampaign2xSignupWindow(): STARTだけ日付のみ、ENDはオフセット付きでも独立に解釈される', () => {
+  process.env.CAMPAIGN_2X_SIGNUP_START = '2026-01-01';
+  process.env.CAMPAIGN_2X_SIGNUP_END = '2026-06-30T12:00:00+09:00';
+
+  assert.equal(isWithinCampaign2xSignupWindow(Date.parse('2026-01-01T00:00:00+09:00')), true);
+  assert.equal(isWithinCampaign2xSignupWindow(Date.parse('2026-06-30T12:00:00+09:00')), true);
+  assert.equal(isWithinCampaign2xSignupWindow(Date.parse('2026-06-30T12:00:01+09:00')), false);
+});

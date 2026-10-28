@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { addCalendarMonthsJST } from '../../lib/dateMath.js';
+import { addCalendarMonthsJST, isDateOnlyString, jstDateOnlyToEpochMs } from '../../lib/dateMath.js';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -44,4 +44,23 @@ test('addCalendarMonthsJST(): 年を跨ぎ、かつ月末で丸めが必要な�
 test('addCalendarMonthsJST(): 3月末(31日)+1か月は4月30日に丸める(4月は30日まで)', () => {
   const result = addCalendarMonthsJST(jst(2026, 3, 31), 1);
   assert.equal(result, jst(2026, 4, 30));
+});
+
+test('isDateOnlyString(): "YYYY-MM-DD"のみtrue、時刻やオフセット付きはfalse', () => {
+  assert.equal(isDateOnlyString('2026-10-28'), true);
+  assert.equal(isDateOnlyString('2026-10-28T00:00:00+09:00'), false);
+  assert.equal(isDateOnlyString('2026-10-28T00:00:00Z'), false);
+  assert.equal(isDateOnlyString('2026/10/28'), false);
+  assert.equal(isDateOnlyString(''), false);
+  assert.equal(isDateOnlyString(undefined), false);
+});
+
+test('jstDateOnlyToEpochMs(): 既定(endOfDayなし)はその日のJST 00:00:00', () => {
+  const result = jstDateOnlyToEpochMs('2026-10-28');
+  assert.equal(result, jst(2026, 10, 28, 0, 0, 0));
+});
+
+test('jstDateOnlyToEpochMs(): endOfDay:trueはその日のJST 23:59:59', () => {
+  const result = jstDateOnlyToEpochMs('2026-10-28', { endOfDay: true });
+  assert.equal(result, jst(2026, 10, 28, 23, 59, 59));
 });
