@@ -67,7 +67,7 @@ test('pro契約: standard/lightの2候補が返り、createPreviewは呼ばれ�
 });
 
 test('standard契約: light1候補のみ', async () => {
-  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 200, caseLimit: 30, retentionDays: 365 } });
+  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 100, caseLimit: 30, retentionDays: 365 } });
   fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [subscriptionOnPlan('price_standard_test')] }));
 
   const res = await callGetDowngradeOptions();
@@ -99,7 +99,7 @@ test('unknownプラン: 移行先を機械的に決められないのでcontactO
 });
 
 test('cancel_at_period_end: true(解約予約中)なら候補を出さずcancelPending:trueを返す', async () => {
-  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 200, caseLimit: 30, retentionDays: 365 } });
+  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 100, caseLimit: 30, retentionDays: 365 } });
   fakeStripe.__setHandler('subscriptions.list', async () => ({
     data: [subscriptionOnPlan('price_standard_test', { cancel_at_period_end: true })],
   }));
@@ -127,7 +127,7 @@ test('cancel_atが設定されている(解約予約中)場合も同様にcancel
 });
 
 test('解約予約中でなければcancelPending:falseで、通常どおり候補が返る', async () => {
-  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 200, caseLimit: 30, retentionDays: 365 } });
+  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 100, caseLimit: 30, retentionDays: 365 } });
   fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [subscriptionOnPlan('price_standard_test')] }));
 
   const res = await callGetDowngradeOptions();
@@ -138,7 +138,7 @@ test('解約予約中でなければcancelPending:falseで、通常どおり候�
 });
 
 test('予約中のダウングレードがあればpendingDowngradeに反映される', async () => {
-  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 200, caseLimit: 30, retentionDays: 365 } });
+  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 100, caseLimit: 30, retentionDays: 365 } });
   const effectiveAtSec = Math.floor(Date.now() / 1000) + 15 * 24 * 60 * 60;
 
   fakeStripe.__setHandler('subscriptions.list', async () => ({

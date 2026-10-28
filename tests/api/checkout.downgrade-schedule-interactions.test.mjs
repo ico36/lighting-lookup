@@ -34,7 +34,7 @@ function subscriptionOnPlan(priceId, extra = {}) {
 beforeEach(() => {
   fakeStripe.__reset();
   fakeAuth.__reset();
-  fakeAuth.__setAuth({ email: EMAIL, limits: { plan: 'light', searchLimit: 40, caseLimit: 5, retentionDays: 30 } });
+  fakeAuth.__setAuth({ email: EMAIL, limits: { plan: 'light', searchLimit: 20, caseLimit: 5, retentionDays: 30 } });
   process.env.SESSION_SECRET = 'test-session-secret';
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
@@ -88,7 +88,7 @@ test('update-plan: 予約中のスケジュールがあればsubscriptions.updat
     fromPriceId: 'price_light_test',
     toPriceId: 'price_standard_test',
     toPlan: 'standard',
-    amountDue: 8800,
+    amountDue: 9900,
     currency: 'jpy',
     couponSent: false,
     couponApplied: false,
@@ -119,7 +119,7 @@ test('update-plan: 予約が無ければreleaseは呼ばれない', async () => 
     fromPriceId: 'price_light_test',
     toPriceId: 'price_standard_test',
     toPlan: 'standard',
-    amountDue: 8800,
+    amountDue: 9900,
     currency: 'jpy',
     couponSent: false,
     couponApplied: false,

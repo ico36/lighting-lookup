@@ -21,7 +21,7 @@ import { createCase, updateCaseStatus, archiveCase, STATUS } from '../../lib/cas
 const EMAIL = 'id-tester@example.com';
 
 function setPlan(plan) {
-  __setAuth({ email: EMAIL, limits: { plan, searchLimit: 40, caseLimit: 5, retentionDays: 30 } });
+  __setAuth({ email: EMAIL, limits: { plan, searchLimit: 20, caseLimit: 5, retentionDays: 30 } });
 }
 
 beforeEach(() => {

@@ -98,7 +98,7 @@ test("update-plan: subscriptions.updateのトップレベルにbilling_cycle_anc
     fromPriceId: 'price_light_test',
     toPriceId: 'price_standard_test',
     toPlan: 'standard',
-    amountDue: 4400,
+    amountDue: 4950,
     currency: 'jpy',
     couponSent: false,
     couponApplied: false,

@@ -199,7 +199,7 @@ test('配線確認: get-signup-plans はライトのcouponEligibleがfalse、sta
 
 test('get-signup-plans: standard/proのdiscountedAmountはpercentOffを反映した値、lightはnull', async () => {
   // 既定のfakeクーポン(stripe.mjs)はpercent_off:50。
-  // standard定価8800円→4400円、pro定価19800円→9900円のどちらも割り切れる。
+  // standard定価9900円→4950円、pro定価19800円→9900円のどちらも割り切れる。
   const req = fakeReq({ action: 'get-signup-plans' });
   const res = fakeRes();
   await handler(req, res);
@@ -211,7 +211,7 @@ test('get-signup-plans: standard/proのdiscountedAmountはpercentOffを反映し
   const pro = res.body.plans.find((p) => p.plan === 'pro');
 
   assert.equal(light.discountedAmount, null);
-  assert.equal(standard.discountedAmount, 4400);
+  assert.equal(standard.discountedAmount, 4950);
   assert.equal(pro.discountedAmount, 9900);
 });
 

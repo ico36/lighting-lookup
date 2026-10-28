@@ -101,7 +101,7 @@ function upgradeQuote(overrides = {}) {
     fromPriceId: 'price_light_test',
     toPriceId: 'price_standard_test',
     toPlan: 'standard',
-    amountDue: 8800,
+    amountDue: 9900,
     currency: 'jpy',
     couponSent: false,
     couponApplied: false,

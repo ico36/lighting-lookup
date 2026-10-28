@@ -47,7 +47,7 @@ function downgradeQuote(overrides = {}) {
 beforeEach(() => {
   fakeStripe.__reset();
   fakeAuth.__reset();
-  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 200, caseLimit: 30, retentionDays: 365 } });
+  fakeAuth.__setAuth({ limits: { plan: 'standard', searchLimit: 100, caseLimit: 30, retentionDays: 365 } });
   process.env.SESSION_SECRET = 'test-session-secret';
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';

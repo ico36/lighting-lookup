@@ -32,7 +32,7 @@ function toJstDateString(ms) {
 beforeEach(() => {
   __resetFakeRedis();
   __resetAuth();
-  __setAuth({ email: EMAIL, limits: { plan: 'light', searchLimit: 40, caseLimit: 5, retentionDays: 30 } });
+  __setAuth({ email: EMAIL, limits: { plan: 'light', searchLimit: 20, caseLimit: 5, retentionDays: 30 } });
 });
 
 // 案件を作り、完了 → アーカイブまで進める。archivedAtにscoreとして使う日時を
@@ -70,7 +70,7 @@ test('toArchiveListItem(): キー集合が id/customerName/status/archivedAt の
 });
 
 test('GET /api/cases/archive: ライトでも200で取得できる(全プラン開放)', async () => {
-  __setAuth({ limits: { plan: 'light', searchLimit: 40, caseLimit: 5, retentionDays: 30 } });
+  __setAuth({ limits: { plan: 'light', searchLimit: 20, caseLimit: 5, retentionDays: 30 } });
   await createArchivedCase('田中様');
 
   const req = fakeReq(undefined, { method: 'GET' });

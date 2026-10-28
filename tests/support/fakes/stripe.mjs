@@ -149,16 +149,16 @@ function defaultPrice(id) {
   const table = {
     price_light_test: {
       id: 'price_light_test',
-      unit_amount: 3850,
+      unit_amount: 5500,
       currency: 'jpy',
-      metadata: { plan: 'light', search_limit: '40', case_limit: '5', retention_days: '30' },
+      metadata: { plan: 'light', search_limit: '20', case_limit: '5', retention_days: '30' },
       product: { id: 'prod_light', name: 'ライトプラン' },
     },
     price_standard_test: {
       id: 'price_standard_test',
-      unit_amount: 8800,
+      unit_amount: 9900,
       currency: 'jpy',
-      metadata: { plan: 'standard', search_limit: '200', case_limit: '30', retention_days: '365' },
+      metadata: { plan: 'standard', search_limit: '100', case_limit: '30', retention_days: '365' },
       product: { id: 'prod_standard', name: 'スタンダードプラン' },
     },
     price_pro_test: {
@@ -194,10 +194,10 @@ function defaultPreview(params) {
   // （偽陰性）。amount_due と total_discount_amounts は必ず同じ条件で揃える。
   const hasDiscount = Array.isArray(params?.discounts) && params.discounts.length > 0;
   return {
-    // スタンダード定価8,800円の50%オフ→4,400円、割引額4,400円。
-    amount_due: hasDiscount ? 4400 : 8800,
+    // スタンダード定価9,900円の50%オフ→4,950円、割引額4,950円。
+    amount_due: hasDiscount ? 4950 : 9900,
     currency: 'jpy',
-    total_discount_amounts: hasDiscount ? [{ amount: 4400 }] : [],
+    total_discount_amounts: hasDiscount ? [{ amount: 4950 }] : [],
     lines: { data: [{ period: { end: nowSec + 30 * 24 * 60 * 60 } }] },
   };
 }

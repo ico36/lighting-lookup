@@ -74,7 +74,7 @@ async function createStaleOpenCase(email) {
 }
 
 function customPrice({ id, plan, retentionDays }) {
-  const metadata = { plan, search_limit: '200', case_limit: '30' };
+  const metadata = { plan, search_limit: '100', case_limit: '30' };
   if (retentionDays !== undefined) metadata.retention_days = String(retentionDays);
   return { id, unit_amount: 0, currency: 'jpy', metadata, product: { id: `prod_${id}`, name: plan } };
 }
