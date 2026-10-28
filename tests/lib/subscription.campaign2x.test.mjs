@@ -8,7 +8,19 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { checkActiveSubscriptionLive, isWithinCampaign2xSignupWindow } from '../../lib/subscription.js';
+import { addCalendarMonthsJST } from '../../lib/dateMath.js';
 import * as fakeStripe from '../support/fakes/stripe.mjs';
+
+// resolveCampaign2x()内のestimateCampaignEndDate()と同じ手順(period.endから
+// cutoffに達するまで暦月で1か月ずつ前進)でオラクル値を計算する。
+// addCalendarMonthsJST()自体の正しさはtests/lib/dateMath.test.mjsで別途確認済み。
+function expectedEstimatedEndDate(periodEndMs, cutoffMs) {
+  let boundary = periodEndMs;
+  while (boundary < cutoffMs) {
+    boundary = addCalendarMonthsJST(boundary, 1);
+  }
+  return boundary;
+}
 
 const EMAIL = 'campaign-test@example.com';
 
@@ -36,7 +48,7 @@ beforeEach(() => {
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
 });
 
-test('metadata.app_campaign_2xがtrue・申し込みから3か月以内 → searchLimitが2倍、campaign.activeがtrue', async () => {
+test('metadata.app_campaign_2xがtrue・申し込みから3か月以内 → searchLimitが2倍、campaign.activeがtrue、normalSearchLimitは2倍前の値', async () => {
   const nowSec = Math.floor(Date.now() / 1000);
   fakeStripe.__setHandler('subscriptions.list', async () => ({
     data: [subOf('price_standard_test', {
@@ -49,7 +61,31 @@ test('metadata.app_campaign_2xがtrue・申し込みから3か月以内 → sear
 
   assert.equal(result.active, true);
   assert.equal(result.limits.searchLimit, 200, '標準の100回が2倍の200回になっていること');
-  assert.deepEqual(result.campaign, { active: true, until: result.period.end });
+  assert.equal(result.campaign.active, true);
+  assert.equal(result.campaign.normalSearchLimit, 100, '2倍にする前の元の上限');
+});
+
+test('申し込み直後で、現在の請求期間の終了日が基準日より前(=まだ複数回の更新が残っている) → estimatedEndAtはperiod.endより先の月まで繰り上がる', async () => {
+  // 今日申し込んだ場合、今期の終了日(+30日)は基準日(start_date+3か月≒+90日)より
+  // 大幅に手前。これが「11/28で終わると誤解される」と報告されたケース。
+  const nowSec = Math.floor(Date.now() / 1000);
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [subOf('price_standard_test', {
+      startDateSec: nowSec,
+      metadata: { app_campaign_2x: 'true' },
+    })],
+  }));
+
+  const result = await checkActiveSubscriptionLive(EMAIL);
+
+  const cutoff = addCalendarMonthsJST(nowSec * 1000, 3);
+  const expected = expectedEstimatedEndDate(result.period.end, cutoff);
+
+  assert.ok(
+    result.campaign.estimatedEndAt > result.period.end,
+    '今期の終了日(period.end)だけで終わりと表示してはいけない'
+  );
+  assert.equal(result.campaign.estimatedEndAt, expected);
 });
 
 test('metadata.app_campaign_2xが無い(申し込み時に対象外と判定された) → 2倍にならない', async () => {
@@ -112,7 +148,40 @@ test('基準日(start_date+3か月)が現在の請求期間の途中に来る場
   const result = await checkActiveSubscriptionLive(EMAIL);
 
   assert.equal(result.limits.searchLimit, 200, '請求期間の途中で基準日を迎えても、その期間中は2倍のまま');
-  assert.deepEqual(result.campaign, { active: true, until: result.period.end });
+  // 基準日が今期の終了日より前(=今期で足りる)なので、見積りはperiod.endそのもの。
+  assert.equal(result.campaign.estimatedEndAt, result.period.end);
+  assert.equal(result.campaign.normalSearchLimit, 100);
+});
+
+test('途中でプランを上げてbilling_cycle_anchorがずれた後も、ずれた後の現在の請求期間を起点に見積もり直す', async () => {
+  // 申し込みから5日後(start_dateは変わらない)。基準日(start_date+3か月)は
+  // まだ遠く先(約85日後)。
+  const nowSec = Math.floor(Date.now() / 1000);
+  const startDateSec = nowSec - 5 * 24 * 60 * 60;
+
+  // ところが2日前にアップグレードがあり、billing_cycle_anchorが'now'にずれて
+  // 今期は(アップグレードした日)から29日後までの短いサイクルになっている。
+  // start_dateから単純に1か月おきの日程を仮定すると実際の請求期間とズレるため、
+  // 「現在の請求期間(period.end)」を起点に前進させる必要があることを確認する。
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [subOf('price_standard_test', {
+      startDateSec,
+      current_period_start: nowSec - 2 * 24 * 60 * 60,
+      current_period_end: nowSec + 28 * 24 * 60 * 60,
+      metadata: { app_campaign_2x: 'true' },
+    })],
+  }));
+
+  const result = await checkActiveSubscriptionLive(EMAIL);
+
+  const cutoff = addCalendarMonthsJST(startDateSec * 1000, 3);
+  const expected = expectedEstimatedEndDate(result.period.end, cutoff);
+
+  assert.equal(result.campaign.active, true);
+  assert.equal(result.campaign.estimatedEndAt, expected);
+  // アップグレード後のperiod.end(今から28日後)が起点になっていることの確認
+  // (start_dateからの単純な1か月おきの日程ではないことを別途保証する)。
+  assert.ok(result.campaign.estimatedEndAt > result.period.end);
 });
 
 test('スタンダードからプロへアップグレード後も、申し込み時のstart_date・フラグを引き継いだままなら2倍が続く', async () => {

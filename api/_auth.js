@@ -142,10 +142,11 @@ export async function requireAuth(req, res) {
  * period は請求期間 { start, end }（ミリ秒エポック）で、取得できない場合は null。
  * null のときは「カウントしない・ブロックしない」で扱うこと（詳細は
  * lib/subscription.js の checkActiveSubscriptionLive() のコメントを参照）。
- * campaign は回数2倍キャンペーンの状態。{ active: true, until } (untilは2倍が
- * 適用される最後の請求期間の終了時刻、ミリ秒エポック) か、対象外ならnull。
+ * campaign は回数2倍キャンペーンの状態。{ active: true, estimatedEndAt, normalSearchLimit }
+ * (estimatedEndAtは2倍が適用される最後の請求期間の次の更新日の見積り、ミリ秒エポック。
+ * normalSearchLimitは2倍にする前の上限) か、対象外ならnull。
  *
- * @returns {Promise<{email: string, limits: {plan: string, searchLimit: number, caseLimit: number, retentionDays: number}, period: {start: number, end: number} | null, campaign: {active: true, until: number} | null} | null>}
+ * @returns {Promise<{email: string, limits: {plan: string, searchLimit: number, caseLimit: number, retentionDays: number}, period: {start: number, end: number} | null, campaign: {active: true, estimatedEndAt: number, normalSearchLimit: number} | null} | null>}
  */
 export async function requireAuthWithPlan(req, res) {
   return authenticate(req, res);

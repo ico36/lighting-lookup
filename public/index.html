@@ -2460,6 +2460,17 @@ function formatDateJa(ms) {
   });
 }
 
+// 回数2倍キャンペーンの終了予定日のように、数か月先で年が変わる可能性がある
+// 日付だけに使う(通常のリセット日表示は年が自明なのでformatDateJa()のまま)。
+function formatDateJaWithYear(ms) {
+  return new Date(ms).toLocaleDateString('ja-JP', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
 // APIレスポンスに quota が含まれていたときだけ更新する
 // （含まれないエンドポイントの応答で表示を消してしまわないため）。
 function updateQuota(next) {
@@ -2516,12 +2527,13 @@ function renderQuota() {
   const resetLabel = Number.isFinite(quota.resetAt)
     ? `（${formatDateJa(quota.resetAt)}リセット）`
     : '';
-  // 回数2倍キャンペーン中は「残りX回」に加えて案内を出す。campaign.untilは
-  // 2倍が適用される最後の請求期間の終了時刻で、現在の請求期間では
-  // quota.resetAtと同じ日になる(lib/subscription.jsのresolveCampaign2x参照)。
-  // quota.limitは既に2倍の値が入っている。
+  // 回数2倍キャンペーン中は「残りX回」に加えて案内を出す。estimatedEndAtは
+  // 2倍が適用される最後の請求期間の次の更新日の見積り(lib/subscription.jsの
+  // resolveCampaign2x・estimateCampaignEndDate参照)。見積りのため「ごろ」を付ける。
+  // quota.limitは既に2倍の値、campaign.normalSearchLimitは2倍にする前の値。
   const campaignLabel = quota.campaign?.active
-    ? `<br><span class="quota-campaign-badge">キャンペーン中：${escapeHtml(String(quota.limit))}回（${escapeHtml(formatDateJa(quota.campaign.until))}の請求期間まで）</span>`
+    ? `<br><span class="quota-campaign-badge">キャンペーン中：毎月${escapeHtml(String(quota.limit))}回（通常${escapeHtml(String(quota.campaign.normalSearchLimit))}回）` +
+      `<br>${escapeHtml(formatDateJaWithYear(quota.campaign.estimatedEndAt))}ごろまで</span>`
     : '';
   statusEl.innerHTML = `残り${remaining}回${resetLabel}${campaignLabel}`;
   statusEl.classList.toggle('is-low', remaining > 0 && remaining <= QUOTA_LOW_THRESHOLD);
