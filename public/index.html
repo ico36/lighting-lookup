@@ -3512,9 +3512,43 @@ function resetSignupModal() {
 // メール欄が有効な形式になっているかどうかで、「メールアドレスを入力すると
 // 対象かどうかが表示されます」の案内の表示・非表示を切り替える。
 // (取得し直す/しないの判断とは別。表示だけなので毎回のinputイベントで呼んでよい)
+// 早期割引・回数2倍それぞれが「今、特典として存在するか」はget-signup-plansの
+// 応答(coupon.available・campaignWindowActive)で分かる。plans[].couponEligible/
+// campaignEligibleはisNewCustomerも条件に含むため、メール未入力時点(新規かどうか
+// 不明)の案内文言にはこちらのトップレベルの値を使う。
+function signupEmailHintText() {
+  const couponActive = signupPlansData?.coupon?.available === true;
+  const campaignActive = signupPlansData?.campaignWindowActive === true;
+
+  if (couponActive && campaignActive) {
+    return '新規お申し込みの方は、メールアドレスを入力すると早期割引と回数2倍の対象かどうかが表示されます';
+  }
+  if (couponActive) {
+    return '新規お申し込みの方は、メールアドレスを入力すると早期割引の対象かどうかが表示されます';
+  }
+  if (campaignActive) {
+    return '新規お申し込みの方は、メールアドレスを入力すると回数2倍の対象かどうかが表示されます';
+  }
+  return null; // どちらも終了している場合は案内文自体を出さない
+}
+
 function updateSignupEmailHint() {
   const hintEl = document.getElementById('signup-email-hint');
-  if (hintEl) hintEl.style.display = isSignupEmailValid() ? 'none' : 'block';
+  if (!hintEl) return;
+
+  if (isSignupEmailValid()) {
+    hintEl.style.display = 'none';
+    return;
+  }
+
+  const text = signupEmailHintText();
+  if (!text) {
+    hintEl.style.display = 'none';
+    return;
+  }
+
+  hintEl.textContent = text;
+  hintEl.style.display = 'block';
 }
 
 // メール欄からフォーカスが外れた時だけ、有効な形式になっていれば再取得する
@@ -3580,6 +3614,9 @@ async function loadSignupPlans() {
 
     signupPlansData = data;
     renderSignupPlans(data);
+    // coupon.available・campaignWindowActiveが揃うのはここなので、
+    // 案内文言(signup-email-hint)もこのタイミングで最新化する。
+    updateSignupEmailHint();
   } catch (err) {
     if (requestSeq !== signupPlansRequestSeq) return;
     loadingEl.style.display = 'none';
@@ -3609,6 +3646,18 @@ function renderSignupPlans(data) {
         `${escapeHtml(formatMoney(plan.discountedAmount, plan.priceLabel.currency))} / 月`
       : `${listPrice} / 月`;
 
+    // couponEligible/campaignEligibleが無い(false)ときに三項演算子の空文字''を
+    // 複数行のテンプレートリテラルへ直接埋め込むと、その手前の改行・インデントが
+    // そのまま空白テキストノードとして残り、HTML上は1個のスペースに畳み込まれて
+    // バッジの文字がその分右にずれて見える(早期割引対象バッジで気づいた不整合)。
+    // badgesHtmlとして先に組み立て、呼び出し側では空白を挟まずに差し込む。
+    const badgesHtml = [
+      plan.couponEligible ? '<span class="plan-card-coupon">早期割引対象</span>' : '',
+      plan.campaignEligible
+        ? `<div class="plan-card-campaign">新規お申し込みの方は最初の${escapeHtml(String(data.campaignMonths))}ヶ月、検索回数2倍</div>`
+        : '',
+    ].join('');
+
     return `
     <button type="button" class="plan-card" id="signup-plan-card-${index}" onclick="selectSignupPlan(${index})">
       <div class="plan-card-head">
@@ -3619,11 +3668,7 @@ function renderSignupPlans(data) {
         検索回数 ${escapeHtml(formatLimit(plan.limits.searchLimit, '回/月'))}<br>
         保存できる案件 ${escapeHtml(formatLimit(plan.limits.caseLimit, '件'))}<br>
         完了案件の保存期間 ${escapeHtml(formatLimit(plan.limits.retentionDays, '日'))}
-      </div>
-      ${plan.couponEligible ? '<span class="plan-card-coupon">早期割引対象</span>' : ''}
-      ${plan.campaignEligible
-        ? `<div class="plan-card-campaign">新規お申し込みの方は最初の${escapeHtml(String(data.campaignMonths))}ヶ月、検索回数2倍</div>`
-        : ''}
+      </div>${badgesHtml}
     </button>
   `;
   }).join('');

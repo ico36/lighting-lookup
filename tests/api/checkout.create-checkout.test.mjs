@@ -465,6 +465,73 @@ test('get-signup-plans: 早期割引の枠切れならstandard/proのdiscountedA
   assert.equal(pro.discountedAmount, null);
 });
 
+// トップレベルのcoupon.available・campaignWindowActiveは、メール未入力時の
+// 案内文言(フロントのsignup-email-hint)が「特典自体が今あるか」を判定するために
+// 使う(plans[].couponEligible/campaignEligibleはisNewCustomerも条件に含むため
+// メール未入力時点では使えない)。emailの有無・新規かどうかに関わらず一定であることを
+// 確認する。
+test('get-signup-plans: 早期割引・キャンペーンとも有効なら、トップレベルのcoupon.available/campaignWindowActiveも両方true', async () => {
+  setCampaignWindow({ inside: true });
+
+  const req = fakeReq({ action: 'get-signup-plans' }); // emailなしでも値は一定
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.coupon.available, true);
+  assert.equal(res.body.campaignWindowActive, true);
+});
+
+test('get-signup-plans: 早期割引の枠切れ・キャンペーン期間外なら、トップレベルも両方false', async () => {
+  setCampaignWindow({ inside: false });
+  fakeStripe.__setHandler('coupons.retrieve', async () => ({
+    valid: true,
+    percent_off: 50,
+    duration_in_months: 6,
+    max_redemptions: 10,
+    times_redeemed: 10, // 枠切れ
+  }));
+
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.coupon.available, false);
+  assert.equal(res.body.campaignWindowActive, false);
+});
+
+test('get-signup-plans: 早期割引のみ有効(キャンペーン期間外)なら、coupon.availableはtrue・campaignWindowActiveはfalse', async () => {
+  setCampaignWindow({ inside: false });
+
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.coupon.available, true);
+  assert.equal(res.body.campaignWindowActive, false);
+});
+
+test('get-signup-plans: キャンペーンのみ有効(早期割引は枠切れ)なら、coupon.availableはfalse・campaignWindowActiveはtrue', async () => {
+  setCampaignWindow({ inside: true });
+  fakeStripe.__setHandler('coupons.retrieve', async () => ({
+    valid: true,
+    percent_off: 50,
+    duration_in_months: 6,
+    max_redemptions: 10,
+    times_redeemed: 10, // 枠切れ
+  }));
+
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.coupon.available, false);
+  assert.equal(res.body.campaignWindowActive, true);
+});
+
 test('get-signup-plans: VERCEL_ENV=production ではsignupLocked:trueを返し、pricesを取得しない', async () => {
   process.env.VERCEL_ENV = 'production';
 

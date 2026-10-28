@@ -1017,7 +1017,8 @@ async function handleGetSignupPlans(req, res) {
   if (process.env.VERCEL_ENV === 'production') {
     return res.status(200).json({
       signupLocked: true,
-      coupon: { percentOff: null, durationInMonths: null },
+      coupon: { available: false, percentOff: null, durationInMonths: null },
+      campaignWindowActive: false,
       plans: [],
     });
   }
@@ -1089,7 +1090,18 @@ async function handleGetSignupPlans(req, res) {
 
     return res.status(200).json({
       signupLocked: false,
-      coupon: { percentOff: couponState.percentOff, durationInMonths: couponState.durationInMonths },
+      // available はメール未入力時の案内文(フロントのsignup-email-hint)が、
+      // 終了済みの特典まで案内し続けないようにするために使う(新規かどうかに
+      // 関わらず「特典自体が今あるか」を示すだけなので、isNewCustomerとは無関係)。
+      coupon: {
+        available: couponState.available,
+        percentOff: couponState.percentOff,
+        durationInMonths: couponState.durationInMonths,
+      },
+      // 同じ理由でキャンペーンの開催期間中かどうかもトップレベルに返す
+      // (plans[].campaignEligibleはisNewCustomerも条件に含むため、メール未入力時の
+      // 案内文言の判定には使えない)。
+      campaignWindowActive,
       // 案内文言「新規お申し込みの方は最初のXヶ月、検索回数2倍」のXをフロントに
       // 持たせない(CAMPAIGN_2X_SIGNUP_MONTHSを唯一の出所にする)ため、ここで返す。
       campaignMonths: CAMPAIGN_2X_SIGNUP_MONTHS,
