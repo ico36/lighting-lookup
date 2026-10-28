@@ -672,6 +672,11 @@
     font-weight: 700;
     color: var(--text);
   }
+  /* .plan-card-today内の価格テキストに続けて「割引適用」等を同じ行に出すとき専用。
+     margin-leftは直前のインライン要素(価格テキスト)との間隔を作るためのもので、
+     単独で1行目として出す場合(.plan-card-badge-line)には使わない。
+     両方を同じクラスにすると、単独行で出したときに左端が8pxずれる
+     (新規申し込みモーダルのプラン一覧で発生した不整合の原因)。 */
   .plan-card-coupon {
     display: inline-block;
     margin-left: 8px;
@@ -679,7 +684,9 @@
     font-weight: 700;
     color: var(--accent2);
   }
-  .plan-card-campaign {
+  /* 早期割引・回数2倍キャンペーンの案内を、カードの中で単独の行として出すとき用。
+     左端をカードのpaddingに揃えるため、margin-leftは持たせない。 */
+  .plan-card-badge-line {
     margin-top: 6px;
     font-size: 11px;
     font-weight: 700;
@@ -3649,12 +3656,19 @@ function renderSignupPlans(data) {
     // couponEligible/campaignEligibleが無い(false)ときに三項演算子の空文字''を
     // 複数行のテンプレートリテラルへ直接埋め込むと、その手前の改行・インデントが
     // そのまま空白テキストノードとして残り、HTML上は1個のスペースに畳み込まれて
-    // バッジの文字がその分右にずれて見える(早期割引対象バッジで気づいた不整合)。
-    // badgesHtmlとして先に組み立て、呼び出し側では空白を挟まずに差し込む。
+    // バッジの文字がその分右にずれて見える。badgesHtmlとして先に組み立て、
+    // 呼び出し側では空白を挟まずに差し込む。
+    //
+    // 【.plan-card-couponをここで使わない理由】そのクラスはdisplay:inline-block;
+    // margin-left:8pxで、「本日のお支払い ¥X」のような直前のインライン要素と
+    // 同じ行に続けて出す前提(2830行目の割引適用バッジ)。ここではカードの中で
+    // 単独の1行として出すため、margin-leftがそのまま左端のずれになる
+    // (テンプレートの空白を消した後も「全角スペースのような余白」が残っていた
+    // 原因はこちら)。単独行用の.plan-card-badge-line(margin-leftを持たない)を使う。
     const badgesHtml = [
-      plan.couponEligible ? '<span class="plan-card-coupon">早期割引対象</span>' : '',
+      plan.couponEligible ? '<div class="plan-card-badge-line">早期割引対象</div>' : '',
       plan.campaignEligible
-        ? `<div class="plan-card-campaign">新規お申し込みの方は最初の${escapeHtml(String(data.campaignMonths))}ヶ月、検索回数2倍</div>`
+        ? `<div class="plan-card-badge-line">新規お申し込みの方は最初の${escapeHtml(String(data.campaignMonths))}ヶ月、検索回数2倍</div>`
         : '',
     ].join('');
 
