@@ -144,7 +144,7 @@ export default async function handler(req, res) {
   // 検索回数の上限判定にプラン上限と請求期間が要るため requireAuthWithPlan() を使う。
   const auth = await requireAuthWithPlan(req, res);
   if (!auth) return; // requireAuthWithPlan内で既に401レスポンス済み
-  const { email, limits, period } = auth;
+  const { email, limits, period, campaign } = auth;
 
   try {
     const { modelNum, note, images } = req.body || {};
@@ -202,7 +202,7 @@ export default async function handler(req, res) {
     if (!reservation.allowed) {
       // ボディの組み立ては lib/responses.js に集約（成功時の quota と同じ
       // buildQuota() を通るため、429だけ形が食い違うことがない）
-      return res.status(429).json(quotaExceededBody(reservation, limits));
+      return res.status(429).json(quotaExceededBody(reservation, limits, campaign));
     }
 
     // ANTHROPIC_TIMEOUT_MS: config.maxDuration（60秒）より短い時間でJS側から
@@ -246,7 +246,7 @@ export default async function handler(req, res) {
         await releaseSearch({ email, period, counted: reservation.counted });
         return res.status(response.status).json({ error: data.error?.message || 'API error' });
       }
-      return res.status(200).json({ ...data, quota: quotaFromReservation(reservation, limits) });
+      return res.status(200).json({ ...data, quota: quotaFromReservation(reservation, limits, campaign) });
     } catch (err) {
       // Anthropicへの接続失敗・レスポンスのJSON解析失敗・上記タイムアウトによる
       // AbortError(err.name === 'AbortError')など。確保した枠を戻してから

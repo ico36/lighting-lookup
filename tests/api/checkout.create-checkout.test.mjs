@@ -23,6 +23,8 @@ beforeEach(() => {
   process.env.STRIPE_COUPON_ID = 'coupon_test';
   delete process.env.VERCEL_ENV;
   delete process.env.ADMIN_EMAILS;
+  delete process.env.CAMPAIGN_2X_SIGNUP_START;
+  delete process.env.CAMPAIGN_2X_SIGNUP_END;
 });
 
 async function callCreateCheckout(body, overrides = {}) {
@@ -173,6 +175,100 @@ test('既存顧客に有効なサブスクがある場合はCheckoutを作らず
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.error, 'already_subscribed');
   assert.ok(!fakeStripe.__getCallLog().includes('checkout.sessions.create'));
+});
+
+// 回数2倍キャンペーンの対象判定(handleCreateCheckoutがsubscription_data.metadataへ
+// app_campaign_2xを刻む条件)。
+function setCampaignWindow({ inside = true } = {}) {
+  if (inside) {
+    process.env.CAMPAIGN_2X_SIGNUP_START = '2020-01-01T00:00:00+09:00';
+    process.env.CAMPAIGN_2X_SIGNUP_END = '2099-12-31T23:59:59+09:00';
+  } else {
+    delete process.env.CAMPAIGN_2X_SIGNUP_START;
+    delete process.env.CAMPAIGN_2X_SIGNUP_END;
+  }
+}
+
+test('キャンペーン期間中・新規・standard申し込み → subscription_data.metadataにapp_campaign_2xが付く', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: true });
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.deepEqual(params.subscription_data, { metadata: { app_campaign_2x: 'true' } });
+});
+
+test('キャンペーン期間中・新規・ライト申し込み → ライトは対象外なのでmetadataは付かない', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: true });
+
+  const res = await callCreateCheckout({ plan: 'light' });
+
+  assert.equal(res.statusCode, 200);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.subscription_data, undefined);
+});
+
+test('キャンペーン期間中だが解約済みの契約履歴がある(新規でない) → metadataは付かない', async () => {
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_existing' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [{
+      id: 'sub_canceled',
+      customer: 'cus_existing',
+      status: 'canceled',
+      ended_at: Math.floor(Date.now() / 1000) - 60 * 60 * 24,
+      items: { data: [{ id: 'si_canceled', price: { id: 'price_standard_test' } }] },
+    }],
+  }));
+  setCampaignWindow({ inside: true });
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.subscription_data, undefined);
+});
+
+test('キャンペーン期間外(環境変数未設定)・新規・standard申し込み → metadataは付かない', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: false });
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.subscription_data, undefined);
+});
+
+test('get-signup-plans: キャンペーン期間中はstandard/proにcampaignEligible:true、ライトはfalseで、campaignMonthsを返す', async () => {
+  setCampaignWindow({ inside: true });
+
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  assert.equal(res.body.campaignMonths, 3);
+
+  const light = res.body.plans.find((p) => p.plan === 'light');
+  const standard = res.body.plans.find((p) => p.plan === 'standard');
+  const pro = res.body.plans.find((p) => p.plan === 'pro');
+  assert.equal(light.campaignEligible, false);
+  assert.equal(standard.campaignEligible, true);
+  assert.equal(pro.campaignEligible, true);
+});
+
+test('get-signup-plans: キャンペーン期間外では全プランcampaignEligible:false', async () => {
+  setCampaignWindow({ inside: false });
+
+  const req = fakeReq({ action: 'get-signup-plans' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.plans.every((p) => p.campaignEligible === false));
 });
 
 test('本番ロック: VERCEL_ENV=production かつ管理者以外は403', async () => {

@@ -35,6 +35,8 @@ import {
   invalidateSubscriptionCache,
   planLimitsFromPrice,
   isEarlyBirdCouponAvailable,
+  isWithinCampaign2xSignupWindow,
+  CAMPAIGN_2X_SIGNUP_MONTHS,
 } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
 import {
@@ -635,7 +637,7 @@ async function handleUpdatePlan(req, res) {
     // 2種類できた反省）。この呼び出しでStripeへ再照会が入るが、アップグレードは
     // 滅多に起きない操作なので許容する。
     const state = await getSubscriptionStateCached(email);
-    const quota = await readQuota({ email, limits: state.limits, period: state.period });
+    const quota = await readQuota({ email, limits: state.limits, period: state.period, campaign: state.campaign });
 
     return res.status(200).json({
       success: true,
@@ -1006,6 +1008,11 @@ async function handleGetSignupPlans(req, res) {
 
   try {
     const couponState = await fetchCouponState();
+    // 回数2倍キャンペーンの開催期間中かどうか。新規お申し込みの時点ではまだ
+    // 「新規かどうか」を判定できない(emailをこの時点で受け取っていないため)が、
+    // 案内文言の表示自体は期間だけで決めてよい(実際の適用可否は
+    // handleCreateCheckout側で新規判定も含めて最終判断する)。
+    const campaignWindowActive = isWithinCampaign2xSignupWindow(Date.now());
 
     const plans = await Promise.all(SIGNUP_PLANS.map(async (plan) => {
       const priceId = process.env[PRICE_ID_ENV[plan]];
@@ -1019,6 +1026,8 @@ async function handleGetSignupPlans(req, res) {
       const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
       // ライトは方針上クーポン対象外。早期割引の存在自体を見せない。
       const couponEligible = plan !== 'light' && couponState.available;
+      // 回数2倍キャンペーンの案内も同様にライトは対象外。
+      const campaignEligible = plan !== 'light' && campaignWindowActive;
 
       return {
         plan,
@@ -1031,12 +1040,16 @@ async function handleGetSignupPlans(req, res) {
         discountedAmount: couponEligible
           ? discountedAmountOrNull(price.unit_amount, couponState.percentOff)
           : null,
+        campaignEligible,
       };
     }));
 
     return res.status(200).json({
       signupLocked: false,
       coupon: { percentOff: couponState.percentOff, durationInMonths: couponState.durationInMonths },
+      // 案内文言「新規お申し込みの方は最初のXヶ月、検索回数2倍」のXをフロントに
+      // 持たせない(CAMPAIGN_2X_SIGNUP_MONTHSを唯一の出所にする)ため、ここで返す。
+      campaignMonths: CAMPAIGN_2X_SIGNUP_MONTHS,
       plans: plans.filter(Boolean),
     });
   } catch (err) {
@@ -1103,6 +1116,14 @@ async function handleCreateCheckout(req, res) {
     const couponState = (plan !== 'light' && isNewCustomer) ? await fetchCouponState() : { available: false };
     const discounts = couponDiscounts(couponState.available);
 
+    // 回数2倍キャンペーンの対象判定。「新規でスタンダード/プロに申し込んだ」ことは
+    // 申し込み後のStripeのサブスクリプションのスナップショットだけからは判定できない
+    // (items.dataは現在のPriceしか見えない)ため、この瞬間にしか分からない事実を
+    // サブスクリプションのmetadataに刻む。以降の上限計算(lib/subscription.jsの
+    // resolveCampaign2x)はこのフラグとsubscription.start_dateだけを見る。
+    const isCampaignEligible =
+      plan !== 'light' && isNewCustomer && isWithinCampaign2xSignupWindow(Date.now());
+
     // サイトのURLを動的に取得（ローカル環境とVercel環境の両方に対応）
     const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
     const host = req.headers.host;
@@ -1116,6 +1137,9 @@ async function handleCreateCheckout(req, res) {
       ...(customerId ? { customer: customerId } : { customer_email: normalizedEmail }),
       line_items: [{ price: priceId, quantity: 1 }],
       ...(discounts ? { discounts } : {}),
+      // Checkout完了後に実際に作られるサブスクリプションのmetadataへそのまま
+      // 引き継がれる(Webhookを使わずに済む、Stripe Checkoutの標準機能)。
+      ...(isCampaignEligible ? { subscription_data: { metadata: { app_campaign_2x: 'true' } } } : {}),
       // 利用規約への同意を必須にする。Stripeダッシュボード(設定 > 契約条件)に
       // 利用規約URLを登録していないとこのセッション作成自体がエラーになる。
       // このURLはStripe側の設定項目でコードからは組み立てられないため、

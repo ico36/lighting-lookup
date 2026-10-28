@@ -29,7 +29,7 @@ function normalizePostalCode(raw) {
 export default async function handler(req, res) {
   const auth = await requireAuthWithPlan(req, res);
   if (!auth) return; // requireAuthWithPlan内で既に401レスポンス済み
-  const { email, limits, period } = auth;
+  const { email, limits, period, campaign } = auth;
 
   const key = redisKey('company', email);
 
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     // 残り検索回数も一緒に返す。ログイン済みのまま画面を開き直した場合
     // (セッションは30日有効)は api/login.js を通らないため、ここで返さないと
     // 次に検索するまで「残り○回」を表示できない。カウントは増やさない読み取り専用。
-    const quota = await readQuota({ email, limits, period });
+    const quota = await readQuota({ email, limits, period, campaign });
     // 規約同意の状態も一緒に返す。専用エンドポイントは作らない方針(api配下は
     // 12ファイル上限、api/login.jsと同じ理由)のため、ここに相乗りさせる。
     const tosAccepted = isTosConsentCurrent(await getTosConsent(email));

@@ -165,6 +165,7 @@ async function handleRequestOtp(req, res) {
   const admin = isAdminEmail(normalizedEmail);
   let limits = ADMIN_PLAN_LIMITS;
   let period = null;
+  let campaign = null;
 
   if (!admin) {
     let contractResult;
@@ -189,6 +190,7 @@ async function handleRequestOtp(req, res) {
     }
     limits = contractResult.limits;
     period = contractResult.period;
+    campaign = contractResult.campaign;
 
     // 新規契約者がCheckoutのconsent_collectionで既に同意済みなら、ログイン後の
     // 確認ゲートを二重に出さないようここで検出・記録しておく(tos:{email}が
@@ -206,7 +208,7 @@ async function handleRequestOtp(req, res) {
       console.warn('[login] LOGIN_MODE=legacy が本番で使用されました:', normalizedEmail);
     }
     const token = createSessionToken(normalizedEmail);
-    const quota = await readQuota({ email: normalizedEmail, limits, period });
+    const quota = await readQuota({ email: normalizedEmail, limits, period, campaign });
     return res.status(200).json({ success: true, admin, token, quota, mode: 'legacy' });
   }
 
@@ -292,7 +294,7 @@ async function handleVerifyOtp(req, res) {
   // コードは出さず、api/_auth.jsのauthenticate()と同じ汎用401にする)。
   await clearOtpState(normalizedEmail);
 
-  const { active, limits, period } = await getSubscriptionStateCached(normalizedEmail);
+  const { active, limits, period, campaign } = await getSubscriptionStateCached(normalizedEmail);
   if (!active) {
     return res.status(401).json({
       code: 'SUBSCRIPTION_INACTIVE',
@@ -302,7 +304,7 @@ async function handleVerifyOtp(req, res) {
 
   const admin = isAdminEmail(normalizedEmail);
   const token = createSessionToken(normalizedEmail);
-  const quota = await readQuota({ email: normalizedEmail, limits, period });
+  const quota = await readQuota({ email: normalizedEmail, limits, period, campaign });
   return res.status(200).json({ success: true, admin, token, quota });
 }
 

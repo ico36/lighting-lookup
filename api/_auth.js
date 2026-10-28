@@ -84,13 +84,13 @@ async function authenticate(req, res) {
     return null;
   }
 
-  const { active, limits, period } = await getSubscriptionStateCached(email);
+  const { active, limits, period, campaign } = await getSubscriptionStateCached(email);
   if (!active) {
     res.status(401).json({ error: '認証エラーが発生しました' });
     return null;
   }
 
-  return { email, limits, period };
+  return { email, limits, period, campaign };
 }
 
 /**
@@ -136,12 +136,16 @@ export async function requireAuth(req, res) {
  *   }
  *
  * limits は { plan, searchLimit, caseLimit, retentionDays }。数値は -1 が無制限で、
- * lib/subscription.js の isUnlimited() で判定する。
+ * lib/subscription.js の isUnlimited() で判定する。回数2倍キャンペーン対象の場合、
+ * searchLimit は既に2倍の値になっている(campaignの有無で呼び出し側が計算し直す
+ * 必要はない)。
  * period は請求期間 { start, end }（ミリ秒エポック）で、取得できない場合は null。
  * null のときは「カウントしない・ブロックしない」で扱うこと（詳細は
  * lib/subscription.js の checkActiveSubscriptionLive() のコメントを参照）。
+ * campaign は回数2倍キャンペーンの状態。{ active: true, until } (untilは2倍が
+ * 適用される最後の請求期間の終了時刻、ミリ秒エポック) か、対象外ならnull。
  *
- * @returns {Promise<{email: string, limits: {plan: string, searchLimit: number, caseLimit: number, retentionDays: number}, period: {start: number, end: number} | null} | null>}
+ * @returns {Promise<{email: string, limits: {plan: string, searchLimit: number, caseLimit: number, retentionDays: number}, period: {start: number, end: number} | null, campaign: {active: true, until: number} | null} | null>}
  */
 export async function requireAuthWithPlan(req, res) {
   return authenticate(req, res);

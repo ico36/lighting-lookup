@@ -1,13 +1,17 @@
-// tests/lib/ownerDeletion.addCalendarMonthsJST.test.mjs
-// lib/ownerDeletion.js の addCalendarMonthsJST() の単体テスト。
+// tests/lib/dateMath.test.mjs
+// lib/dateMath.js の addCalendarMonthsJST() の単体テスト。
 // 「6か月」を暦月で加算し、加算先の月に存在しない日(月末起点)は丸めることを固定する
 // (実装コメント参照。JSのDate.setMonth()に素直に任せると3月へ繰り上がる既知の挙動を
 // 避けている)。日付はすべてテスト内でリテラルに組み立てており、実行時刻に依存しない。
+//
+// 元はlib/ownerDeletion.js専用のユーティリティだったが、lib/subscription.jsの
+// 回数2倍キャンペーン判定からも必要になり、循環importを避けるためlib/dateMath.jsへ
+// 切り出した(ownerDeletion.jsは引き続き同じ関数を re-export している)。
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { addCalendarMonthsJST } from '../../lib/ownerDeletion.js';
+import { addCalendarMonthsJST } from '../../lib/dateMath.js';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 

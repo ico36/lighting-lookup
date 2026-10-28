@@ -525,6 +525,10 @@
     color: var(--error);
     font-weight: 700;
   }
+  .quota-campaign-badge {
+    color: var(--accent2);
+    font-weight: 700;
+  }
 
   /* 上限到達時の専用メッセージ領域（アップグレード導線を後から入れられるよう箱にしてある） */
   .quota-limit-notice {
@@ -667,6 +671,12 @@
   .plan-card-coupon {
     display: inline-block;
     margin-left: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent2);
+  }
+  .plan-card-campaign {
+    margin-top: 6px;
     font-size: 11px;
     font-weight: 700;
     color: var(--accent2);
@@ -2500,7 +2510,14 @@ function renderQuota() {
   const resetLabel = Number.isFinite(quota.resetAt)
     ? `（${formatDateJa(quota.resetAt)}リセット）`
     : '';
-  statusEl.textContent = `残り${remaining}回${resetLabel}`;
+  // 回数2倍キャンペーン中は「残りX回」に加えて案内を出す。campaign.untilは
+  // 2倍が適用される最後の請求期間の終了時刻で、現在の請求期間では
+  // quota.resetAtと同じ日になる(lib/subscription.jsのresolveCampaign2x参照)。
+  // quota.limitは既に2倍の値が入っている。
+  const campaignLabel = quota.campaign?.active
+    ? `<br><span class="quota-campaign-badge">キャンペーン中：${escapeHtml(String(quota.limit))}回（${escapeHtml(formatDateJa(quota.campaign.until))}の請求期間まで）</span>`
+    : '';
+  statusEl.innerHTML = `残り${remaining}回${resetLabel}${campaignLabel}`;
   statusEl.classList.toggle('is-low', remaining > 0 && remaining <= QUOTA_LOW_THRESHOLD);
   statusEl.classList.toggle('is-empty', remaining === 0);
   statusEl.style.display = 'block';
@@ -3527,6 +3544,9 @@ function renderSignupPlans(data) {
         完了案件の保存期間 ${escapeHtml(formatLimit(plan.limits.retentionDays, '日'))}
       </div>
       ${plan.couponEligible ? '<span class="plan-card-coupon">早期割引対象</span>' : ''}
+      ${plan.campaignEligible
+        ? `<div class="plan-card-campaign">新規お申し込みの方は最初の${escapeHtml(String(data.campaignMonths))}ヶ月、検索回数2倍</div>`
+        : ''}
     </button>
   `;
   }).join('');
