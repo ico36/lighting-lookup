@@ -28,6 +28,8 @@
 import Stripe from 'stripe';
 import { requireAuth, requireAuthWithPlan } from './_auth';
 import { isAdminEmail } from '../lib/adminEmails';
+import { redisKey } from '../lib/redis';
+import { getClientIp, checkRateLimit } from '../lib/rateLimit';
 import {
   getStripeCustomerIdByEmail,
   getActiveSubscriptionWithItem,
@@ -956,6 +958,14 @@ function isValidEmailFormat(email) {
 // (別の配列を持つとプランを増減したときに片方だけ直す事故になる)。
 const SIGNUP_PLANS = Object.keys(PRICE_ID_ENV);
 
+// get-signup-plansにメールアドレスが渡されたときだけ、早期割引・回数2倍の対象
+// (新規かどうか)を判定するためStripeへ照会する(handleGetSignupPlans参照)。
+// 任意のメールアドレスの契約有無を無制限に照会できてしまうことを防ぐため、
+// api/login.jsのOTP発行(OTP_REQUEST_LIMIT_IP/OTP_REQUEST_WINDOW_SECONDS)と
+// 同じ考え方・同じ値でIP単位のレート制限をかける。
+const SIGNUP_PLANS_LOOKUP_LIMIT_IP = 40;
+const SIGNUP_PLANS_LOOKUP_WINDOW_SECONDS = 60 * 60; // 1時間
+
 /**
  * 早期割引適用後の初回金額。unitAmount(Priceの定価、最小通貨単位)から
  * percentOff(%)ぶんを差し引いた額が整数で割り切れる場合だけ返す。
@@ -993,10 +1003,16 @@ function discountedAmountOrNull(unitAmount, percentOff) {
 // プラン名や金額の対応表を持たない(handleGetUpgradeOptionsと同じ方針)。
 //
 // 本番(VERCEL_ENV === 'production')ではロック中である旨(signupLocked: true)だけを
-// 返し、Stripeへの問い合わせ(prices.retrieve等)自体を行わない。ここではemailを
-// 受け取っておらず管理者判定もできないため、実際の申し込み可否の最終防衛線は
-// handleCreateCheckout側の管理者ロック(下記)に committed する。ここはモーダルを
-// 開いた時点で「申し込めない」と分からせるためだけの早期リターン。
+// 返し、Stripeへの問い合わせ(prices.retrieve等)自体を行わない。ここでは管理者判定も
+// できないため、実際の申し込み可否の最終防衛線は handleCreateCheckout側の管理者ロック
+// (下記)に committed する。ここはモーダルを開いた時点で「申し込めない」と
+// 分からせるためだけの早期リターン。
+//
+// 【emailは任意】フロントは、メール欄が有効な形式になったときだけemailを付けて
+// このactionを呼び直す(確認画面に進む前に、早期割引・回数2倍が「新規」かどうかで
+// 食い違わないようにするため。handleCreateCheckout と同じisNewCustomer判定をここでも
+// 使う)。email無し(未入力・形式不正)のときは「新規かどうか不明」として、
+// 割引・2倍とも出さない安全側で返す。
 async function handleGetSignupPlans(req, res) {
   if (process.env.VERCEL_ENV === 'production') {
     return res.status(200).json({
@@ -1006,12 +1022,37 @@ async function handleGetSignupPlans(req, res) {
     });
   }
 
+  const { email } = req.body || {};
+  const hasValidEmail = typeof email === 'string' && isValidEmailFormat(email.trim());
+
   try {
+    // 「新規」(照明サーチの契約履歴が一度もない)かどうかは、handleCreateCheckout と
+    // 同じ getActiveSubscriptionWithItem() の historyCount で判定する。emailが
+    // 無い・不正な場合は照会自体を行わず、isNewCustomer: false(割引・2倍とも
+    // 出さない)のまま進む。
+    let isNewCustomer = false;
+
+    if (hasValidEmail) {
+      // 任意のメールアドレスの契約有無を無制限に照会できてしまうことを防ぐため、
+      // api/login.jsのOTP発行と同じ方式でIP単位のレート制限をかける。
+      const ip = getClientIp(req);
+      const ipOk = await checkRateLimit(
+        redisKey('ratelimit', 'signup-plans-lookup', 'ip', ip),
+        SIGNUP_PLANS_LOOKUP_LIMIT_IP,
+        SIGNUP_PLANS_LOOKUP_WINDOW_SECONDS
+      );
+
+      if (ipOk) {
+        const normalizedEmail = email.trim().toLowerCase();
+        const { historyCount } = await getActiveSubscriptionWithItem(normalizedEmail);
+        isNewCustomer = historyCount === 0;
+      }
+      // レート制限に達した場合はStripeに照会せず、email無しと同じ
+      // (isNewCustomer: false、割引・2倍とも出さない)安全側で返す。価格を見るだけの
+      // 操作を429で止める必要はないため、一覧の取得自体は失敗させない。
+    }
+
     const couponState = await fetchCouponState();
-    // 回数2倍キャンペーンの開催期間中かどうか。新規お申し込みの時点ではまだ
-    // 「新規かどうか」を判定できない(emailをこの時点で受け取っていないため)が、
-    // 案内文言の表示自体は期間だけで決めてよい(実際の適用可否は
-    // handleCreateCheckout側で新規判定も含めて最終判断する)。
     const campaignWindowActive = isWithinCampaign2xSignupWindow(Date.now());
 
     const plans = await Promise.all(SIGNUP_PLANS.map(async (plan) => {
@@ -1025,9 +1066,11 @@ async function handleGetSignupPlans(req, res) {
 
       const price = await stripe.prices.retrieve(priceId, { expand: ['product'] });
       // ライトは方針上クーポン対象外。早期割引の存在自体を見せない。
-      const couponEligible = plan !== 'light' && couponState.available;
-      // 回数2倍キャンペーンの案内も同様にライトは対象外。
-      const campaignEligible = plan !== 'light' && campaignWindowActive;
+      // 新規でない(解約して申し込み直した)場合も、handleCreateCheckout側で
+      // クーポンを当てない方針に合わせ、ここでも出さない。
+      const couponEligible = plan !== 'light' && isNewCustomer && couponState.available;
+      // 回数2倍キャンペーンの案内も同様。
+      const campaignEligible = plan !== 'light' && isNewCustomer && campaignWindowActive;
 
       return {
         plan,

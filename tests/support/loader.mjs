@@ -75,6 +75,13 @@ const CRON_PROCESS_CASES_JS = path.join(REPO_ROOT, 'api', 'cron', 'process-cases
 // lib/adminEmails.jsは本物のまま読み込む(本題のロジックをフェイクにしないため)。
 const LIB_OWNER_DELETION_JS = path.join(REPO_ROOT, 'lib', 'ownerDeletion.js');
 
+// lib/rateLimit.js が読む `./redis`(レート制限のINCR/EXPIRE)も同じフェイクへ。
+// 元はapi/login.js内にあった処理(LOGIN_JSのルール参照)で、
+// api/checkout.jsのget-signup-plans(メールアドレスでのStripe照会)にも
+// 同じ仕組みが必要になり共通化した。lib/rateLimit.js自体・呼び出し元
+// (api/login.js・api/checkout.js)は本物のまま読み込む。
+const LIB_RATE_LIMIT_JS = path.join(REPO_ROOT, 'lib', 'rateLimit.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -111,7 +118,8 @@ export async function resolve(specifier, context, nextResolve) {
       parentPath === LIB_LEGAL_CONSENT_JS ||
       parentPath === LIB_OTP_JS ||
       parentPath === LIB_SUBSCRIPTION_JS ||
-      parentPath === LIB_OWNER_DELETION_JS
+      parentPath === LIB_OWNER_DELETION_JS ||
+      parentPath === LIB_RATE_LIMIT_JS
     ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }

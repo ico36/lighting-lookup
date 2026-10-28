@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import handler from '../../api/checkout.js';
 import * as fakeStripe from '../support/fakes/stripe.mjs';
 import { fakeReq, fakeRes } from '../support/fakeHttp.mjs';
+import { __resetFakeRedis } from '../support/fakes/redis.mjs';
 
 function parseSessionParams(url) {
   const query = new URL(url).searchParams;
@@ -17,6 +18,9 @@ function parseSessionParams(url) {
 
 beforeEach(() => {
   fakeStripe.__reset();
+  // get-signup-plansがメールアドレス付きで呼ばれるとIP単位のレート制限を
+  // redis.incr/expireで数えるため、テスト間で持ち越さないようにリセットする。
+  __resetFakeRedis();
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
@@ -242,10 +246,11 @@ test('キャンペーン期間外(環境変数未設定)・新規・standard申�
   assert.equal(params.subscription_data, undefined);
 });
 
-test('get-signup-plans: キャンペーン期間中はstandard/proにcampaignEligible:true、ライトはfalseで、campaignMonthsを返す', async () => {
+test('get-signup-plans: 新規のメールアドレス・キャンペーン期間中はstandard/proにcampaignEligible:true、ライトはfalseで、campaignMonthsを返す', async () => {
+  noExistingCustomer();
   setCampaignWindow({ inside: true });
 
-  const req = fakeReq({ action: 'get-signup-plans' });
+  const req = fakeReq({ action: 'get-signup-plans', email: 'new-user@example.com' });
   const res = fakeRes();
   await handler(req, res);
 
@@ -261,7 +266,19 @@ test('get-signup-plans: キャンペーン期間中はstandard/proにcampaignEli
 });
 
 test('get-signup-plans: キャンペーン期間外では全プランcampaignEligible:false', async () => {
+  noExistingCustomer();
   setCampaignWindow({ inside: false });
+
+  const req = fakeReq({ action: 'get-signup-plans', email: 'new-user@example.com' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.body.plans.every((p) => p.campaignEligible === false));
+});
+
+test('get-signup-plans: メールアドレス未指定ではisNewCustomerが判定できないため、campaignEligibleは全プランfalse', async () => {
+  setCampaignWindow({ inside: true });
 
   const req = fakeReq({ action: 'get-signup-plans' });
   const res = fakeRes();
@@ -269,6 +286,92 @@ test('get-signup-plans: キャンペーン期間外では全プランcampaignEli
 
   assert.equal(res.statusCode, 200);
   assert.ok(res.body.plans.every((p) => p.campaignEligible === false));
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.list'), 'emailが無い場合はStripeへ照会しない');
+});
+
+test('get-signup-plans: 解約済みの契約履歴がある(新規でない)メールアドレスではcampaignEligibleもcouponEligibleもfalse', async () => {
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_existing' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [{
+      id: 'sub_canceled',
+      customer: 'cus_existing',
+      status: 'canceled',
+      ended_at: Math.floor(Date.now() / 1000) - 60 * 60 * 24,
+      items: { data: [{ id: 'si_canceled', price: { id: 'price_standard_test' } }] },
+    }],
+  }));
+  setCampaignWindow({ inside: true });
+
+  const req = fakeReq({ action: 'get-signup-plans', email: 'existing-user@example.com' });
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  const standard = res.body.plans.find((p) => p.plan === 'standard');
+  assert.equal(standard.campaignEligible, false);
+  assert.equal(standard.couponEligible, false);
+  assert.equal(standard.discountedAmount, null);
+});
+
+test('get-signup-plans: emailを伴う照会はIP単位でレート制限され、超過後はStripeに照会せず安全側(新規でない扱い)になる', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: true });
+  const ip = '203.0.113.1';
+
+  // 上限(40回)まではStripeに照会してよい。
+  for (let i = 0; i < 40; i += 1) {
+    const req = fakeReq(
+      { action: 'get-signup-plans', email: `user${i}@example.com` },
+      { headers: { 'x-vercel-forwarded-for': ip } }
+    );
+    const res = fakeRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+  }
+  assert.ok(fakeStripe.__getCallLog().includes('customers.list'), '上限内ではStripeに照会している');
+
+  // 41回目は同じIPなのでレート制限に達し、Stripeに照会せず安全側で返る。
+  fakeStripe.__reset();
+  noExistingCustomer();
+  const req = fakeReq(
+    { action: 'get-signup-plans', email: 'user40@example.com' },
+    { headers: { 'x-vercel-forwarded-for': ip } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const standard = res.body.plans.find((p) => p.plan === 'standard');
+  assert.equal(standard.campaignEligible, false);
+  assert.equal(standard.couponEligible, false);
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.list'), 'レート制限に達した後はStripeに照会しない');
+});
+
+test('get-signup-plans: emailを指定しない照会はレート制限の枠を消費しない', async () => {
+  const ip = '203.0.113.2';
+
+  for (let i = 0; i < 40; i += 1) {
+    const req = fakeReq({ action: 'get-signup-plans' }, { headers: { 'x-vercel-forwarded-for': ip } });
+    const res = fakeRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+  }
+
+  // emailを指定しない呼び出しは一度もStripeに照会していないはず
+  // (枠を消費していないことの間接確認)。
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.list'));
+
+  // 続けてemail付きで呼んでも、別カウンタなのでまだ上限に達していない。
+  noExistingCustomer();
+  const req = fakeReq(
+    { action: 'get-signup-plans', email: 'new-user@example.com' },
+    { headers: { 'x-vercel-forwarded-for': ip } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(fakeStripe.__getCallLog().includes('customers.list'));
 });
 
 test('本番ロック: VERCEL_ENV=production かつ管理者以外は403', async () => {
@@ -301,8 +404,10 @@ test('本番ロックはVERCEL_ENVがproduction以外(Preview/未定義)のと�
   assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
 });
 
-test('配線確認: get-signup-plans はライトのcouponEligibleがfalse、standard/proはクーポン状態に従う', async () => {
-  const req = fakeReq({ action: 'get-signup-plans' });
+test('配線確認: get-signup-plans はライトのcouponEligibleがfalse、standard/proはクーポン状態に従う(新規のメールアドレス)', async () => {
+  noExistingCustomer();
+
+  const req = fakeReq({ action: 'get-signup-plans', email: 'new-user@example.com' });
   const res = fakeRes();
   await handler(req, res);
 
@@ -316,10 +421,12 @@ test('配線確認: get-signup-plans はライトのcouponEligibleがfalse、sta
   assert.equal(standard.couponEligible, true); // 既定のfakeクーポンはavailable:true
 });
 
-test('get-signup-plans: standard/proのdiscountedAmountはpercentOffを反映した値、lightはnull', async () => {
+test('get-signup-plans: 新規のメールアドレスなら、standard/proのdiscountedAmountはpercentOffを反映した値、lightはnull', async () => {
   // 既定のfakeクーポン(stripe.mjs)はpercent_off:50。
   // standard定価9900円→4950円、pro定価19800円→9900円のどちらも割り切れる。
-  const req = fakeReq({ action: 'get-signup-plans' });
+  noExistingCustomer();
+
+  const req = fakeReq({ action: 'get-signup-plans', email: 'new-user@example.com' });
   const res = fakeRes();
   await handler(req, res);
 
@@ -335,6 +442,7 @@ test('get-signup-plans: standard/proのdiscountedAmountはpercentOffを反映し
 });
 
 test('get-signup-plans: 早期割引の枠切れならstandard/proのdiscountedAmountもnull', async () => {
+  noExistingCustomer();
   fakeStripe.__setHandler('coupons.retrieve', async () => ({
     valid: true,
     percent_off: 50,
@@ -343,7 +451,7 @@ test('get-signup-plans: 早期割引の枠切れならstandard/proのdiscountedA
     times_redeemed: 10, // 枠切れ
   }));
 
-  const req = fakeReq({ action: 'get-signup-plans' });
+  const req = fakeReq({ action: 'get-signup-plans', email: 'new-user@example.com' });
   const res = fakeRes();
   await handler(req, res);
 

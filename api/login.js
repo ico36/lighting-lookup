@@ -18,7 +18,8 @@
 //   otp:{email} / otp:attempts:{email} / otp:cooldown:{email} ... lib/otp.js 参照
 
 import crypto from 'crypto';
-import { redis, redisKey } from '../lib/redis';
+import { redisKey } from '../lib/redis';
+import { getClientIp, checkRateLimit } from '../lib/rateLimit';
 import { isAdminEmail } from '../lib/adminEmails';
 import { checkActiveSubscriptionLive, getSubscriptionStateCached, ADMIN_PLAN_LIMITS } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
@@ -69,20 +70,6 @@ function normalizeEmail(email) {
   return email.trim().toLowerCase();
 }
 
-// クライアントの実IPを取得する。
-// Vercelはエッジ層でx-forwarded-forを上書きし、外部からの偽装値は転送しない
-// 仕様のため通常はx-forwarded-forのままでも安全だが
-// (https://vercel.com/docs/headers/request-headers#x-forwarded-for)、
-// 将来Vercelの手前に別プロキシ(CDN等)を追加した場合はx-forwarded-forが
-// そちらの値で上書きされる可能性がある。x-vercel-forwarded-forは
-// 「x-forwarded-forと同一だが外部プロキシの影響を受けないVercel内部専用の値」
-// のため、これを優先して使う。
-function getClientIp(req) {
-  const raw = req.headers['x-vercel-forwarded-for'] || req.headers['x-forwarded-for'] || '';
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  return value.split(',')[0].trim() || 'unknown-ip';
-}
-
 // email + 有効期限をSESSION_SECRETで署名した簡易トークンを発行
 function createSessionToken(email) {
   const expiresAt = Date.now() + SESSION_DURATION_SECONDS * 1000;
@@ -92,15 +79,6 @@ function createSessionToken(email) {
     .update(payload)
     .digest('hex');
   return Buffer.from(`${payload}:${signature}`).toString('base64url');
-}
-
-// INCRして初回だけEXPIREを付ける既存パターン。limitを超えたらfalseを返す。
-async function checkRateLimit(key, limit, windowSeconds) {
-  const attempts = await redis.incr(key);
-  if (attempts === 1) {
-    await redis.expire(key, windowSeconds);
-  }
-  return attempts <= limit;
 }
 
 // OTPのハッシュ(HMAC-SHA256のhex、常に64文字)同士の比較。長さは常に一致する前提だが、

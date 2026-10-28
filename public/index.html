@@ -647,6 +647,10 @@
     border-color: var(--accent);
     background: var(--surface2);
   }
+  .plan-card:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
   .plan-card-head {
     display: flex;
     align-items: baseline;
@@ -1974,7 +1978,9 @@
     <div id="signup-step-select">
       <!-- 本番(VERCEL_ENV==='production')でロック中はこれを隠し、#signup-lockedだけ出す -->
       <div id="signup-email-wrap" class="model-input-wrap" style="margin-bottom:14px;">
-        <input type="email" id="signup-email-input" placeholder="メールアドレス" />
+        <input type="email" id="signup-email-input" placeholder="メールアドレス"
+          oninput="updateSignupEmailHint()" onblur="handleSignupEmailBlur()" />
+        <div id="signup-email-hint" style="color:var(--text2);font-size:12px;margin-top:6px;">新規お申し込みの方は、メールアドレスを入力すると早期割引と回数2倍の対象かどうかが表示されます</div>
       </div>
       <div id="signup-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
       <div id="signup-locked" style="display:none;color:var(--text2);font-size:13px;">現在サービス準備中のため、新規登録は受け付けておりません。</div>
@@ -3446,10 +3452,18 @@ let signupPlansData = null;
 let selectedSignupPlan = null;
 // create-checkout の実行中(Stripeへの外部遷移が起きるまで)はモーダルを閉じさせない。
 let signupInFlight = false;
+// loadSignupPlans()の再取得中(メール欄blur時)はプランを選択できなくする。
+// 古いメールアドレス向けの割引・2倍表示のまま確認画面へ進んでしまうのを防ぐため。
+let signupPlansLoading = false;
+// メールアドレスを変えながら連続でblurした場合、古いリクエストの応答が後から
+// 返ってきて新しい結果を上書きしないよう、リクエストごとに番号を振って
+// 最新のものだけを反映する。
+let signupPlansRequestSeq = 0;
 
 function openSignupModal(prefillEmail = '') {
   resetSignupModal();
   document.getElementById('signup-email-input').value = prefillEmail || '';
+  updateSignupEmailHint();
   document.getElementById('signup-overlay').classList.add('open');
   loadSignupPlans();
 }
@@ -3466,6 +3480,7 @@ function resetSignupModal() {
   signupPlansData = null;
   selectedSignupPlan = null;
   signupInFlight = false;
+  signupPlansLoading = false;
 
   document.getElementById('signup-title').textContent = '新規お申し込み';
   hideError(document.getElementById('signup-error'));
@@ -3479,19 +3494,60 @@ function resetSignupModal() {
 
   document.getElementById('signup-loading').style.display = 'block';
   document.getElementById('signup-plans').innerHTML = '';
+  updateSignupEmailHint();
+}
+
+// メール欄が有効な形式になっているかどうかで、「メールアドレスを入力すると
+// 対象かどうかが表示されます」の案内の表示・非表示を切り替える。
+// (取得し直す/しないの判断とは別。表示だけなので毎回のinputイベントで呼んでよい)
+function updateSignupEmailHint() {
+  const hintEl = document.getElementById('signup-email-hint');
+  if (hintEl) hintEl.style.display = isSignupEmailValid() ? 'none' : 'block';
+}
+
+// メール欄からフォーカスが外れた時だけ、有効な形式になっていれば再取得する
+// (inputイベントごとに毎回Stripeへ照会させないため)。
+function handleSignupEmailBlur() {
+  if (isSignupEmailValid()) {
+    loadSignupPlans();
+  }
+}
+
+// 再取得中は既存のプランカードを選択できないようにする(新しい結果が
+// 反映されるまで、古い割引・2倍表示のまま確認画面へ進めてしまうのを防ぐ)。
+function setSignupPlansInteractive(enabled) {
+  document.querySelectorAll('#signup-plans .plan-card').forEach((btn) => {
+    btn.disabled = !enabled;
+  });
 }
 
 async function loadSignupPlans() {
   const errorEl = document.getElementById('signup-error');
   const loadingEl = document.getElementById('signup-loading');
+  // 送信時点のメール欄の値をそのまま使う。有効な形式でなければemailを送らない
+  // (handleGetSignupPlans側も、emailが無ければ「新規かどうか不明」として
+  // 割引・2倍とも出さない安全側で返す)。
+  const email = document.getElementById('signup-email-input').value.trim();
+  const hasValidEmail = isSignupEmailValid();
+
+  const requestSeq = ++signupPlansRequestSeq;
+  signupPlansLoading = true;
+  setSignupPlansInteractive(false);
 
   try {
     const response = await fetch('/api/checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'get-signup-plans' }),
+      body: JSON.stringify({
+        action: 'get-signup-plans',
+        ...(hasValidEmail ? { email } : {}),
+      }),
     });
     const data = await response.json();
+
+    // 古いリクエストの応答は無視する(この呼び出しの後により新しいloadSignupPlans()
+    // が走っていた場合)。
+    if (requestSeq !== signupPlansRequestSeq) return;
 
     if (!response.ok) {
       loadingEl.style.display = 'none';
@@ -3513,8 +3569,17 @@ async function loadSignupPlans() {
     signupPlansData = data;
     renderSignupPlans(data);
   } catch (err) {
+    if (requestSeq !== signupPlansRequestSeq) return;
     loadingEl.style.display = 'none';
     showError(errorEl, '通信エラーが発生しました。もう一度お試しください。');
+  } finally {
+    if (requestSeq === signupPlansRequestSeq) {
+      signupPlansLoading = false;
+      // renderSignupPlans()が呼ばれていれば新しいカード(既定で有効)に
+      // 置き換わっているので、ここでのtrueは「再取得失敗で古いカードが
+      // 残っている」場合に選べる状態へ戻すためのもの。
+      setSignupPlansInteractive(true);
+    }
   }
 }
 
@@ -3561,6 +3626,9 @@ function isSignupEmailValid() {
 }
 
 function selectSignupPlan(index) {
+  // プランカードはsetSignupPlansInteractive(false)でdisabledになり通常はクリックが
+  // 発生しないが、念のためフラグでも二重に防ぐ(再取得中の古い表示での選択を防ぐ)。
+  if (signupPlansLoading) return;
   if (!signupPlansData || !signupPlansData.plans[index]) return;
 
   if (!isSignupEmailValid()) {
