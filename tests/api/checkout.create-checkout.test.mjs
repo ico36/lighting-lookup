@@ -204,6 +204,88 @@ test('キャンペーン期間中・新規・standard申し込み → subscripti
   assert.deepEqual(params.subscription_data, { metadata: { app_campaign_2x: 'true' } });
 });
 
+test('キャンペーン対象の申し込み(standard) → custom_text.submitにプランの2倍の回数を含む案内が入り、terms_of_service_acceptanceは変わらない', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: true });
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  // price_standard_testのsearch_limitは100(tests/support/fakes/stripe.mjs)なので、
+  // 案内に出る回数は2倍の200。
+  assert.match(params.custom_text.submit.message, /最初の3ヶ月は検索回数が2倍（毎月200回）になります/);
+  assert.ok(params.custom_text.terms_of_service_acceptance.message.includes('プライバシーポリシー'));
+});
+
+test('キャンペーン対象の申し込み(pro) → custom_text.submitにプランの2倍の回数を含む案内が入る', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: true });
+  // プロはfakes/stripe.mjs上search_limitが-1(無制限)のため、このテストだけ
+  // 有限値のPriceを差し込み、2倍表示が成立する場合の挙動を確認する。
+  fakeStripe.__setHandler('prices.retrieve', async (id) => {
+    if (id === 'price_pro_test') {
+      return {
+        id,
+        unit_amount: 19800,
+        currency: 'jpy',
+        metadata: { plan: 'pro', search_limit: '500', case_limit: '-1', retention_days: '-1' },
+        product: { id: 'prod_pro', name: 'プロプラン' },
+      };
+    }
+    return fakeStripe.__getDefaultPrice(id);
+  });
+
+  const res = await callCreateCheckout({ plan: 'pro' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.match(params.custom_text.submit.message, /最初の3ヶ月は検索回数が2倍（毎月1000回）になります/);
+});
+
+test('キャンペーン期間外の申し込み(standard) → custom_text.submitは付かない', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: false });
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.custom_text.submit, undefined);
+  assert.ok(!fakeStripe.__getCallLog().includes('prices.retrieve'), 'キャンペーン対象外ならprices.retrieveを呼ばない');
+});
+
+test('ライト申し込み(キャンペーン期間中でも対象外) → custom_text.submitは付かない', async () => {
+  noExistingCustomer();
+  setCampaignWindow({ inside: true });
+
+  const res = await callCreateCheckout({ plan: 'light' });
+
+  assert.equal(res.statusCode, 200);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.custom_text.submit, undefined);
+});
+
+test('解約済みの契約履歴がある(新規でない)申し込み(standard、キャンペーン期間中) → custom_text.submitは付かない', async () => {
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_existing' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [{
+      id: 'sub_canceled',
+      customer: 'cus_existing',
+      status: 'canceled',
+      ended_at: Math.floor(Date.now() / 1000) - 60 * 60 * 24,
+      items: { data: [{ id: 'si_canceled', price: { id: 'price_standard_test' } }] },
+    }],
+  }));
+  setCampaignWindow({ inside: true });
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.custom_text.submit, undefined);
+});
+
 test('キャンペーン期間中・新規・ライト申し込み → ライトは対象外なのでmetadataは付かない', async () => {
   noExistingCustomer();
   setCampaignWindow({ inside: true });

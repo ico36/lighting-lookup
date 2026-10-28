@@ -38,6 +38,7 @@ import {
   planLimitsFromPrice,
   isEarlyBirdCouponAvailable,
   isWithinCampaign2xSignupWindow,
+  isUnlimited,
   CAMPAIGN_2X_SIGNUP_MONTHS,
 } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
@@ -1179,6 +1180,24 @@ async function handleCreateCheckout(req, res) {
     const isCampaignEligible =
       plan !== 'light' && isNewCustomer && isWithinCampaign2xSignupWindow(Date.now());
 
+    // キャンペーン対象のときだけ、Stripeの決済画面(custom_text.submit)に
+    // 「新規お申し込み特典：最初のXヶ月は検索回数が2倍（毎月Y回）になります」を
+    // 出す。Yの算出に申し込み先PriceのmetadataのsearchLimitが要るため、対象の
+    // ときだけ追加で1回 prices.retrieve する(対象外の大半の申し込みでは
+    // この往復は発生しない)。無制限プラン(searchLimit: -1)は「2倍」という
+    // 表現が成立しないため、その場合は文言自体を出さない
+    // (lib/subscription.jsのresolveCampaign2xも無制限プランは2倍にしない)。
+    let campaignSubmitMessage = null;
+    if (isCampaignEligible) {
+      const campaignPrice = await stripe.prices.retrieve(priceId);
+      const { searchLimit } = planLimitsFromPrice(campaignPrice);
+      if (Number.isInteger(searchLimit) && !isUnlimited(searchLimit)) {
+        campaignSubmitMessage =
+          `新規お申し込み特典：最初の${CAMPAIGN_2X_SIGNUP_MONTHS}ヶ月は検索回数が2倍` +
+          `（毎月${searchLimit * 2}回）になります`;
+      }
+    }
+
     // サイトのURLを動的に取得（ローカル環境とVercel環境の両方に対応）
     const protocol = process.env.NODE_ENV === 'development' ? 'http' : 'https';
     const host = req.headers.host;
@@ -1207,10 +1226,15 @@ async function handleCreateCheckout(req, res) {
       consent_collection: { terms_of_service: 'required' },
       // custom_textはMarkdownのリンク記法(https://stripe.com/docs/payments/checkout/customization/policies)
       // に対応しているため、リンクテキストとして表示させる。
+      //
+      // submitは決済確定ボタンのそばに表示される別枠(terms_of_service_acceptanceとは
+      // 独立したフィールド)で、キャンペーン対象のときだけここに案内を追加する。
+      // 利用規約の同意文言とは表示位置が別なので干渉しない。
       custom_text: {
         terms_of_service_acceptance: {
           message: `[プライバシーポリシー](${baseUrl}/privacy.html)もあわせてご確認ください。`,
         },
+        ...(campaignSubmitMessage ? { submit: { message: campaignSubmitMessage } } : {}),
       },
       success_url: `${baseUrl}/?checkout=success`,
       cancel_url: `${baseUrl}/?checkout=cancel`,
