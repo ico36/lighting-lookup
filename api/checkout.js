@@ -1083,7 +1083,7 @@ async function handleCreateCheckout(req, res) {
   try {
     // 既存顧客の解決と、有効な契約が既にあるかの確認を1回のStripe往復
     // (customers.list + subscriptions.list)にまとめる(lib/subscription.jsの共有ヘルパー)。
-    const { customerId, subscription } = await getActiveSubscriptionWithItem(normalizedEmail);
+    const { customerId, subscription, historyCount } = await getActiveSubscriptionWithItem(normalizedEmail);
 
     if (subscription) {
       return res.status(409).json({
@@ -1092,8 +1092,15 @@ async function handleCreateCheckout(req, res) {
       });
     }
 
-    // standard/proのみクーポン対象(ライトは方針上対象外)。枠切れ・未設定ならdiscountsを付けない。
-    const couponState = plan === 'light' ? { available: false } : await fetchCouponState();
+    // 「新規」= 照明サーチのPriceでの契約履歴が一度もない(解約済みも含む)。
+    // 早期割引クーポンは新規申し込みのみ対象で、解約して申し込み直した人には
+    // 当てない方針のため、ここで判定して以降の両方(クーポン・将来のキャンペーン判定)
+    // から参照する。
+    const isNewCustomer = historyCount === 0;
+
+    // standard/proのみクーポン対象(ライトは方針上対象外)。新規でない(解約して
+    // 申し込み直した)場合もクーポンを当てない。枠切れ・未設定ならdiscountsを付けない。
+    const couponState = (plan !== 'light' && isNewCustomer) ? await fetchCouponState() : { available: false };
     const discounts = couponDiscounts(couponState.available);
 
     // サイトのURLを動的に取得（ローカル環境とVercel環境の両方に対応）

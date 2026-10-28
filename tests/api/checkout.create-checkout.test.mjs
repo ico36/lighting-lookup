@@ -86,6 +86,29 @@ test('standard プラン: 早期割引が利用可能ならクーポンを付け
   assert.deepEqual(params.discounts, [{ coupon: 'coupon_test' }]);
 });
 
+test('standard プラン: 解約済みの契約履歴がある(新規でない)顧客にはクーポンを付けない', async () => {
+  // 顧客は存在するが、有効な契約は無い(解約済みの履歴が1件ある)。
+  // 「新規」ではないため、早期割引が利用可能でもクーポンを当てない。
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_existing' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({
+    data: [{
+      id: 'sub_canceled',
+      customer: 'cus_existing',
+      status: 'canceled',
+      ended_at: Math.floor(Date.now() / 1000) - 60 * 60 * 24,
+      items: { data: [{ id: 'si_canceled', price: { id: 'price_standard_test' } }] },
+    }],
+  }));
+
+  const res = await callCreateCheckout({ plan: 'standard' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.discounts, undefined);
+  // 新規ではないと分かった時点でクーポンを当てないので、coupons.retrieve 自体を呼ぶ必要が無い
+  assert.ok(!fakeStripe.__getCallLog().includes('coupons.retrieve'));
+});
+
 test('利用規約への同意(consent_collection)を必須にし、custom_textにプライバシーポリシーの絶対URLを含める', async () => {
   noExistingCustomer();
   const res = await callCreateCheckout({ plan: 'light' }, { headers: { host: 'lighting-lookup.vercel.app' } });
