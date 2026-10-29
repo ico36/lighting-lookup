@@ -47,7 +47,6 @@ Anthropic API（Claude + web_search ツール） / Stripe / Upstash Redis / Verc
 
 ## 会社Stripeアカウントへの移行時のTODO
 
-- 旧 `STRIPE_PRICE_ID`（単数形）環境変数はProduction・Previewの両方に残っているが、現行コードはどこからも参照していない（`STRIPE_PRICE_ID_LIGHT` / `STANDARD` / `PRO` の3つのみを使う。`lib/subscription.js` の `getLightingSearchPriceIds()` 参照）。会社Stripeアカウントへの移行時に削除する。
 - 移行で3つのPrice IDを作り直したら、新しいPrice IDが正しく読み込めるか照合すること。`api/info/[type].js`（管理者専用の軽量参照エンドポイント群）に確認用の項目を追加し、3つのPrice IDそれぞれについて「取得可否・livemode・商品名(product.name)・metadata.plan」を返すようにして突き合わせる。
 
 ## 開発の背景・設計判断の記録
