@@ -3784,11 +3784,27 @@ function showSignupConfirm() {
     amountLine = `本日のお支払い ${listPrice}（税込）`;
   }
 
+  // プランの内容(検索回数・保存件数・保存期間)はStripeのPrice metadataを
+  // planLimitsFromPrice()で変換した値(plan.limits、renderSignupPlans()の
+  // プランカードと同じ出所)をそのまま使う。ここに数値をハードコードしない。
+  const planSummaryLine =
+    `検索回数 毎月${escapeHtml(formatLimit(plan.limits.searchLimit, '回'))}／` +
+    `保存件数 ${escapeHtml(formatLimit(plan.limits.caseLimit, '件'))}／` +
+    `保存期間 完了から${escapeHtml(formatLimit(plan.limits.retentionDays, '日'))}`;
+
   document.getElementById('signup-step-select').style.display = 'none';
   document.getElementById('signup-title').textContent = 'お申し込み内容の確認';
   document.getElementById('signup-step-confirm').innerHTML = `
     <div style="font-size:14px;">${name} で申し込みます</div>
+    <div class="upgrade-note" style="margin-top:0;">${planSummaryLine}</div>
     <div class="upgrade-confirm-amount">${amountLine}</div>
+    <div class="upgrade-note">
+      ご契約は毎月自動で更新され、お申し込み日と同じ日に毎月請求されます。<br>
+      解約はアプリのヘルプ「13. 解約するには」からいつでもお手続きいただけ、その請求期間の終わりまでご利用いただけます。<br>
+      月の途中で解約された場合も、日割りでの返金はありません。<br>
+      <a href="/terms.html" target="_blank" rel="noopener">利用規約</a>をご確認ください。
+      <!-- v2公開時に特商法表記へのリンクを追加 -->
+    </div>
     <div class="upgrade-note">
       ${durationNote}
       「申し込む」を押すとStripeの決済画面に移動します。決済完了後、登録したメールアドレスでログインしてください。
