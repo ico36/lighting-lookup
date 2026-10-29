@@ -4,13 +4,7 @@
 //
 // 必要な環境変数:
 //   STRIPE_SECRET_KEY, KV_REST_API_URL, KV_REST_API_TOKEN, ADMIN_EMAILS, SESSION_SECRET,
-//   LOGIN_MODE ('otp'が既定。'legacy'のときだけ旧・即時ログイン相当の経路を使う),
-//   RESEND_API_KEY, MAIL_FROM (LOGIN_MODE=otp のときのみ必須)
-//
-// 【LOGIN_MODE=legacy について】ドメイン取得前でResendの送信元アドレスを用意できない間、
-// 本番を legacy のまま運用できるようにするための一時的な経路。契約チェック(Stripe)まで
-// 通ったその場でセッショントークンを返す(OTPを発行しない)。
-// TODO: LOGIN_MODE=legacy はドメイン取得後・OTP必須化のタイミングで削除予定。
+//   RESEND_API_KEY, MAIL_FROM
 //
 // Redisキー:
 //   ratelimit:otp-request:email:{email} / :ip:{ip}  ... request-otp のレート制限
@@ -21,7 +15,7 @@ import crypto from 'crypto';
 import { redisKey } from '../lib/redis';
 import { getClientIp, checkRateLimit } from '../lib/rateLimit';
 import { isAdminEmail } from '../lib/adminEmails';
-import { checkActiveSubscriptionLive, getSubscriptionStateCached, ADMIN_PLAN_LIMITS } from '../lib/subscription';
+import { checkActiveSubscriptionLive, getSubscriptionStateCached } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
 import { getTosConsent, isTosConsentCurrent, detectAndRecordCheckoutConsent } from '../lib/legalConsent';
 import {
@@ -42,14 +36,6 @@ const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 30; // セッション有効期�
 // トークン自体はこの期間有効なままだが、requireAuth()側でStripeサブスク状態を
 // 定期的に再チェックしているため、解約後は最大1時間程度でアクセスできなくなる
 // (lib/subscription.js の SUBSCRIPTION_CACHE_TTL_SECONDS 参照)。
-
-// 既定はotp。'legacy'以外の値(未設定・typo含む)はすべてotp扱いにする。
-// モジュール読み込み時の定数ではなくリクエストごとに読む関数にしてある
-// (Vercel環境では環境変数の変更に再デプロイが必要なため実質差はないが、
-// テストがprocess.env.LOGIN_MODEを切り替えて分岐を検証できるようにするため)。
-function getLoginMode() {
-  return process.env.LOGIN_MODE === 'legacy' ? 'legacy' : 'otp';
-}
 
 // 総当たり対策はverify-otp側のレート制限(下のOTP_VERIFY_LIMIT_*)が担うため、
 // 発行側は「普通に使っていて到達しない」程度まで緩めてある。
@@ -102,11 +88,9 @@ function getNormalizedEmailOrNull(req, res) {
 }
 
 async function handleRequestOtp(req, res) {
-  const loginMode = getLoginMode();
-
-  // 0. 設定チェック(otpモードのみ)。ここで弾けばレート制限枠を消費させずに済む。
-  if (loginMode === 'otp' && (!process.env.RESEND_API_KEY || !process.env.MAIL_FROM)) {
-    console.error('[login] LOGIN_MODE=otp ですが RESEND_API_KEY または MAIL_FROM が未設定です');
+  // 0. 設定チェック。ここで弾けばレート制限枠を消費させずに済む。
+  if (!process.env.RESEND_API_KEY || !process.env.MAIL_FROM) {
+    console.error('[login] RESEND_API_KEY または MAIL_FROM が未設定です');
     return res.status(500).json({ error: 'サーバーエラーが発生しました' });
   }
 
@@ -133,17 +117,14 @@ async function handleRequestOtp(req, res) {
     return res.status(429).json({ error: 'リクエストが多すぎます。しばらく時間をおいて再度お試しください' });
   }
 
-  // 4. クールダウン判定。legacyモードではmarkOtpSent()を呼ばないため
-  // otp:cooldown:{email}が存在せず、実質常に素通りする。
+  // 4. クールダウン判定
   if (!(await canResendOtp(normalizedEmail))) {
     return res.status(429).json({ error: '前回の送信から時間が経っていません。しばらくお待ちください' });
   }
 
-  // 5. 契約チェック(管理者はスキップ)
+  // 5. 契約チェック(管理者はスキップ)。結果のlimits/period/campaignはここでは使わない
+  // (OTPモードのquotaはverify-otp成功時にgetSubscriptionStateCached()で別途取得するため)。
   const admin = isAdminEmail(normalizedEmail);
-  let limits = ADMIN_PLAN_LIMITS;
-  let period = null;
-  let campaign = null;
 
   if (!admin) {
     let contractResult;
@@ -166,10 +147,6 @@ async function handleRequestOtp(req, res) {
         error: '有効なサブスクリプションが見つかりませんでした。お支払い状況をご確認ください',
       });
     }
-    limits = contractResult.limits;
-    period = contractResult.period;
-    campaign = contractResult.campaign;
-
     // 新規契約者がCheckoutのconsent_collectionで既に同意済みなら、ログイン後の
     // 確認ゲートを二重に出さないようここで検出・記録しておく(tos:{email}が
     // 既にあれば何もしない)。失敗してもログイン自体は継続する
@@ -179,18 +156,7 @@ async function handleRequestOtp(req, res) {
     }
   }
 
-  // 6. LOGIN_MODEで分岐
-  if (loginMode === 'legacy') {
-    // TODO: LOGIN_MODE=legacy はドメイン取得後・OTP必須化のタイミングで削除予定。
-    if (process.env.VERCEL_ENV === 'production') {
-      console.warn('[login] LOGIN_MODE=legacy が本番で使用されました:', normalizedEmail);
-    }
-    const token = createSessionToken(normalizedEmail);
-    const quota = await readQuota({ email: normalizedEmail, limits, period, campaign });
-    return res.status(200).json({ success: true, admin, token, quota, mode: 'legacy' });
-  }
-
-  // otpモード: 生成・保存・送信。adminフラグ・token・codeはレスポンスに含めない
+  // 6. 生成・保存・送信。adminフラグ・token・codeはレスポンスに含めない
   // (未認証の相手に管理者かどうかを教えないため)。
   const code = generateOtpCode();
   const hash = hashOtpCode(normalizedEmail, code);

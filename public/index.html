@@ -1368,8 +1368,7 @@
     <button type="button" id="login-signup-suggest" onclick="openSignupModal(document.getElementById('login-email-input').value)"
       style="display:none;width:100%;margin-top:10px;background:none;border:1px solid var(--border);color:var(--text);padding:8px 16px;border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit;">申し込みはこちら</button>
   </div>
-  <!-- request-otpのレスポンスにtokenが無い(=otpモード)ときだけ表示するコード入力ステップ。
-       token入りの応答(legacyモード)のときはこのステップを一切表示せずログインを完了する。 -->
+  <!-- request-otp成功後に表示するコード入力ステップ。 -->
   <div id="login-otp-step" class="input-card" style="display:none;">
     <div class="section-label">ログインコードを入力</div>
     <p id="login-otp-sent-to" style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;"></p>
@@ -2069,8 +2068,6 @@ function extractJSON(raw) {
 // 完全リセット時にのみクリアする。
 let otpPendingEmail = null;
 
-// request-otpのレスポンスにtokenが有る(LOGIN_MODE=legacy)ならその場でログイン完了、
-// 無い(通常のotpモード)ならコード入力ステップへ進む。
 async function requestOtp() {
   const input = document.getElementById('login-email-input');
   const email = input.value.trim();
@@ -2109,13 +2106,6 @@ async function requestOtp() {
         if (data.code === 'NO_CUSTOMER' || data.code === 'NO_ACTIVE_SUBSCRIPTION') {
           signupSuggestBtn.style.display = 'block';
         }
-        return;
-      }
-
-      if (data.token) {
-        localStorage.setItem('session_token', data.token);
-        updateQuota(data.quota);
-        await checkCompanyAndRoute();
         return;
       }
 
@@ -2246,11 +2236,6 @@ async function verifyOtp() {
 // request-otpを再実行する。withButtonGuard()は使わない(disabled/textContentの
 // 復元処理がstartOtpResendCountdown()/stopOtpResendCountdown()の管理する状態と
 // 食い違うため)。二重送信防止・ボタン状態の管理はこの関数の中で直接行う。
-//
-// 【legacyモードのtokenを扱わない理由】このステップ自体、requestOtp()がレスポンスに
-// tokenを受け取らなかった(=otpモード)ときにしか表示されない(showOtpStep()参照)。
-// legacyモードではrequest-otpの成功レスポンスに常にtokenが入るため、この画面へ
-// 到達すること自体が無い。したがって再送でもtoken分岐は不要。
 async function resendOtp() {
   const email = document.getElementById('login-email-input').value.trim();
   if (!email) return;
