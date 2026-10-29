@@ -2741,6 +2741,18 @@ function formatLimit(value, unit) {
   return `${value.toLocaleString('ja-JP')}${unit}`;
 }
 
+// 保存期間(retentionDays)専用の表示。365で割り切れる日数は「◯年」、それ以外は
+// 「◯日」にする(例: 30→30日、365→1年、1095→3年)。判定・計算に使う実際の
+// 日数自体はこの関数の外では一切変えず、表示のときだけ変換する。
+function formatRetentionDays(days) {
+  if (days === -1) return '無制限';
+  if (!Number.isFinite(days)) return '—';
+  if (days > 0 && days % 365 === 0) {
+    return `${(days / 365).toLocaleString('ja-JP')}年`;
+  }
+  return `${days.toLocaleString('ja-JP')}日`;
+}
+
 async function loadUpgradeOptions() {
   const errorEl = document.getElementById('upgrade-error');
   const loadingEl = document.getElementById('upgrade-loading');
@@ -2819,7 +2831,7 @@ function renderUpgradeOptions(data) {
       <div class="plan-card-limits">
         検索回数 ${escapeHtml(formatLimit(option.limits.searchLimit, '回/月'))}<br>
         保存できる案件 ${escapeHtml(formatLimit(option.limits.caseLimit, '件'))}<br>
-        完了案件の保存期間 ${escapeHtml(formatLimit(option.limits.retentionDays, '日'))}
+        完了案件の保存期間 ${escapeHtml(formatRetentionDays(option.limits.retentionDays))}
       </div>
       <div class="plan-card-today">
         本日のお支払い ${escapeHtml(formatMoney(option.amountDueNow, option.currency))}
@@ -3331,7 +3343,7 @@ function renderDowngradeOptions(data) {
       <div class="plan-card-limits">
         検索回数 ${escapeHtml(formatLimit(option.limits.searchLimit, '回/月'))}<br>
         保存できる案件 ${escapeHtml(formatLimit(option.limits.caseLimit, '件'))}<br>
-        完了案件の保存期間 ${escapeHtml(formatLimit(option.limits.retentionDays, '日'))}
+        完了案件の保存期間 ${escapeHtml(formatRetentionDays(option.limits.retentionDays))}
       </div>
     </button>
   `).join('');
@@ -3364,7 +3376,7 @@ function showDowngradeConfirm() {
 
   const searchLimit = escapeHtml(formatLimit(option.limits.searchLimit, '回/月'));
   const caseLimit = escapeHtml(formatLimit(option.limits.caseLimit, '件'));
-  const retentionDays = escapeHtml(formatLimit(option.limits.retentionDays, '日'));
+  const retentionDays = escapeHtml(formatRetentionDays(option.limits.retentionDays));
 
   // ライトへの変更のときだけ、アーカイブ閲覧・複製ができなくなる旨を追加する
   // (lib/featureCampaigns.jsのarchiveAccessがlightを許可プランに含めていないため)。
@@ -3721,7 +3733,7 @@ function renderSignupPlans(data) {
       <div class="plan-card-limits">
         検索回数 ${escapeHtml(formatLimit(plan.limits.searchLimit, '回/月'))}<br>
         保存できる案件 ${escapeHtml(formatLimit(plan.limits.caseLimit, '件'))}<br>
-        完了案件の保存期間 ${escapeHtml(formatLimit(plan.limits.retentionDays, '日'))}
+        完了案件の保存期間 ${escapeHtml(formatRetentionDays(plan.limits.retentionDays))}
       </div>${badgesHtml}
     </button>
   `;
@@ -3790,7 +3802,7 @@ function showSignupConfirm() {
   const planSummaryLine =
     `検索回数 毎月${escapeHtml(formatLimit(plan.limits.searchLimit, '回'))}／` +
     `保存件数 ${escapeHtml(formatLimit(plan.limits.caseLimit, '件'))}／` +
-    `保存期間 完了から${escapeHtml(formatLimit(plan.limits.retentionDays, '日'))}`;
+    `保存期間 完了から${escapeHtml(formatRetentionDays(plan.limits.retentionDays))}`;
 
   document.getElementById('signup-step-select').style.display = 'none';
   document.getElementById('signup-title').textContent = 'お申し込み内容の確認';
