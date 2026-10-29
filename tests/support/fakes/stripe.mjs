@@ -36,6 +36,9 @@ function defaultHandlers() {
       update: async () => {
         throw new Error('fake stripe: subscriptions.update は E-5 のテスト対象外です');
       },
+      // 既定は「discountsが空の、未expandのサブスクと同じ内容」。早期割引の詳細
+      // (expand:['discounts'])を検証するテストは__setHandlerで差し替える。
+      retrieve: async (id) => ({ ...defaultSubscription(), id, discounts: [] }),
     },
     prices: {
       retrieve: async (id) => defaultPrice(id),
@@ -301,6 +304,7 @@ export default function Stripe() {
     subscriptions: {
       list: (...args) => tracked('subscriptions.list', handlers.subscriptions.list, args),
       update: (...args) => tracked('subscriptions.update', handlers.subscriptions.update, args),
+      retrieve: (...args) => tracked('subscriptions.retrieve', handlers.subscriptions.retrieve, args),
     },
     prices: {
       retrieve: (...args) => tracked('prices.retrieve', handlers.prices.retrieve, args),

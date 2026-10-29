@@ -1634,6 +1634,10 @@
          レスポンスから描画するため、ここには一切書かない(アップグレードモーダルと
          同じ方針)。 -->
     <div class="modal-section-label" style="margin-top:0;">契約プラン</div>
+    <!-- 現在のプラン・月額・次回更新日(または解約予定日)。get-downgrade-optionsの
+         レスポンスからrenderCurrentPlanInto()が描画する。契約が無い(管理者等、
+         404 subscription_not_found)場合は何も表示しない。 -->
+    <div id="settings-current-plan" style="display:none;"></div>
     <div id="settings-pending-downgrade" style="display:none;"></div>
     <!-- 常時表示し、状態による出し分け(プロ契約中・解約予約中・管理者・unknown等)は
          モーダル内(get-upgrade-optionsのレスポンス)に任せる。ダウングレードボタンと
@@ -3075,10 +3079,56 @@ function renderPendingDowngradeInto(containerId, pendingDowngrade, options = {})
   el.style.display = 'block';
 }
 
+// 設定画面の「契約プラン」欄。現在のプラン名・月額(早期割引中は割引後金額と
+// 終了日・定価も)・次回更新日(解約予約中はその予定日)を出す。契約が無い
+// (管理者等、get-downgrade-optionsが404 subscription_not_foundを返す)場合は
+// dataがnullになり、何も表示しない(追加表示を出さない方針)。
+// ダウングレード予約中でも、ここに出すのは「今のプラン」のまま
+// (予約先のプランはsettings-pending-downgrade側のバナーで別途出る)。
+function renderCurrentPlanInto(containerId, data) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  if (!data || !data.currentPlanName) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+
+  const planName = escapeHtml(data.currentPlanName);
+
+  let amountLine = '';
+  if (data.currentPriceLabel) {
+    const listPrice = escapeHtml(formatMoney(data.currentPriceLabel.unitAmount, data.currentPriceLabel.currency));
+    if (data.currentDiscount) {
+      const discounted = escapeHtml(formatMoney(data.currentDiscount.discountedAmount, data.currentPriceLabel.currency));
+      const until = escapeHtml(formatDateJaWithYear(data.currentDiscount.endAt));
+      amountLine = `月額：${discounted}（税込・早期割引中、${until}まで。以降${listPrice}）`;
+    } else {
+      amountLine = `月額：${listPrice}（税込）`;
+    }
+  }
+
+  const renewalLine = data.cancelPending
+    ? `${escapeHtml(formatDateJaWithYear(data.cancelEffectiveAt))}に解約予定（それまでご利用いただけます）`
+    : (Number.isFinite(data.nextRenewalAt)
+      ? `次回の更新日：${escapeHtml(formatDateJaWithYear(data.nextRenewalAt))}（日本時間）`
+      : '');
+
+  el.innerHTML = `
+    <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-bottom:12px;">
+      現在のプラン：${planName}<br>
+      ${amountLine}${amountLine && renewalLine ? '<br>' : ''}
+      ${renewalLine}
+    </div>
+  `;
+  el.style.display = 'block';
+}
+
 // get-downgrade-optionsはダウングレード候補も一緒に返す1本のAPIだが、
-// ここでは予約状態(pendingDowngrade)だけを軽量に読みたい箇所(設定画面・ヘルプ)が
+// ここでは予約状態(pendingDowngrade)だけを軽量に読みたい箇所(ヘルプ)が
 // あるため、専用のヘルパーとして分ける。
-async function fetchPendingDowngrade() {
+async function fetchDowngradeOptionsData() {
   try {
     const response = await authFetch('/api/checkout', {
       method: 'POST',
@@ -3086,16 +3136,21 @@ async function fetchPendingDowngrade() {
       body: JSON.stringify({ action: 'get-downgrade-options' }),
     });
     if (!response.ok) return null;
-    const data = await response.json();
-    return data.pendingDowngrade || null;
+    return await response.json();
   } catch (err) {
     return null;
   }
 }
 
+async function fetchPendingDowngrade() {
+  const data = await fetchDowngradeOptionsData();
+  return data?.pendingDowngrade || null;
+}
+
 async function refreshSettingsPendingDowngrade() {
-  const pendingDowngrade = await fetchPendingDowngrade();
-  renderPendingDowngradeInto('settings-pending-downgrade', pendingDowngrade);
+  const data = await fetchDowngradeOptionsData();
+  renderCurrentPlanInto('settings-current-plan', data);
+  renderPendingDowngradeInto('settings-pending-downgrade', data?.pendingDowngrade || null);
 }
 
 async function refreshHelpPendingDowngrade() {

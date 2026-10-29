@@ -685,6 +685,76 @@ function isCancelPending(subscription) {
   return Boolean(subscription?.cancel_at_period_end || subscription?.cancel_at);
 }
 
+/**
+ * サブスクリプションに今まさに適用されている割引(早期割引)の詳細を取る。
+ *
+ * subscription.discounts は(未expandでも)IDの配列として常に入っているため、
+ * 空ならStripeへ問い合わせずnoneを返す(早期割引の対象外・期間終了後の大半の
+ * 契約者はここで止まり、追加の問い合わせが発生しない)。
+ *
+ * 値があるときだけ expand:['discounts'] で詳細を取りに行く。この1回の追加
+ * 問い合わせが失敗した場合、または percent_off・end のどちらかが欠けている
+ * 場合は 'unknown' を返す。'unknown' は「割引があるのは分かっているが
+ * 金額を確定できない」状態で、呼び出し側(buildCurrentPriceDisplay)はこの場合
+ * 定価も出さない(定価を見せると実際の請求より高く見えるため)。
+ *
+ * @returns {Promise<{status: 'none'} | {status: 'unknown'} | {status: 'ok', percentOff: number, endAt: number}>}
+ */
+async function fetchCurrentDiscountRaw(subscription) {
+  const discountRefs = subscription?.discounts || [];
+  if (discountRefs.length === 0) return { status: 'none' };
+
+  let expandedSub;
+  try {
+    expandedSub = await stripe.subscriptions.retrieve(subscription.id, { expand: ['discounts'] });
+  } catch (err) {
+    console.error('[checkout] 現在の割引情報の取得に失敗しました:', err);
+    return { status: 'unknown' };
+  }
+
+  const discount = (expandedSub.discounts || [])[0];
+  const percentOff = discount?.coupon?.percent_off;
+  const endAt = Number.isFinite(discount?.end) ? discount.end * 1000 : null;
+  if (typeof percentOff !== 'number' || endAt == null) {
+    return { status: 'unknown' };
+  }
+
+  return { status: 'ok', percentOff, endAt };
+}
+
+/**
+ * currentPriceLabel(定価)・currentDiscount(割引後金額・終了日)を組み立てる。
+ *
+ * 'unknown'(問い合わせ失敗・詳細不備)のときと、割引額が割り切れない
+ * (discountedAmountOrNullがnullを返す)ときは、どちらも「割引が効いているのは
+ * 分かっているが金額を確定できない」という同じ状況のため、同じ扱いで
+ * currentPriceLabel自体をnullにする(定価だけを見せると実際の請求より
+ * 高く見えてしまうため、行ごと出さない)。
+ */
+function buildCurrentPriceDisplay(currentPrice, discountRaw) {
+  if (!currentPrice) return { currentPriceLabel: null, currentDiscount: null };
+
+  if (discountRaw.status === 'unknown') {
+    return { currentPriceLabel: null, currentDiscount: null };
+  }
+
+  const currentPriceLabel = { unitAmount: currentPrice.unit_amount, currency: currentPrice.currency };
+
+  if (discountRaw.status === 'none') {
+    return { currentPriceLabel, currentDiscount: null };
+  }
+
+  const discountedAmount = discountedAmountOrNull(currentPrice.unit_amount, discountRaw.percentOff);
+  if (discountedAmount == null) {
+    return { currentPriceLabel: null, currentDiscount: null };
+  }
+
+  return {
+    currentPriceLabel,
+    currentDiscount: { discountedAmount, endAt: discountRaw.endAt },
+  };
+}
+
 async function handleGetDowngradeOptions(req, res) {
   const auth = await requireAuthWithPlan(req, res);
   if (!auth) return;
@@ -703,23 +773,41 @@ async function handleGetDowngradeOptions(req, res) {
       ? stripe.prices.retrieve(item.price.id, { expand: ['product'] })
       : Promise.resolve(null);
     const pendingDowngradePromise = getPendingDowngradeInfo(subscription);
+    const currentDiscountRawPromise = fetchCurrentDiscountRaw(subscription);
 
     const nextRenewalAt = Number.isFinite(subscription.current_period_end)
       ? subscription.current_period_end * 1000
       : null;
+    // cancel_atは月の途中の日付になることがあるため(Customer Portal等で即時
+    // 解約相当の予約をした場合)、current_period_endと同じとはみなさず、
+    // 無ければnextRenewalAtへフォールバックする。
+    const cancelEffectiveAt = isCancelPending(subscription)
+      ? (Number.isFinite(subscription.cancel_at) ? subscription.cancel_at * 1000 : nextRenewalAt)
+      : null;
+
+    const [currentPrice, pendingDowngrade, currentDiscountRaw] = await Promise.all([
+      currentPricePromise,
+      pendingDowngradePromise,
+      currentDiscountRawPromise,
+    ]);
+
+    const { currentPriceLabel, currentDiscount } = buildCurrentPriceDisplay(currentPrice, currentDiscountRaw);
+
+    const base = {
+      currentPlan: limits.plan,
+      currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
+      currentLimits: limits,
+      currentPriceLabel,
+      currentDiscount,
+      nextRenewalAt,
+      cancelEffectiveAt,
+      pendingDowngrade,
+    };
 
     if (isCancelPending(subscription)) {
-      const [currentPrice, pendingDowngrade] = await Promise.all([
-        currentPricePromise,
-        pendingDowngradePromise,
-      ]);
       return res.status(200).json({
-        currentPlan: limits.plan,
-        currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
-        currentLimits: limits,
-        nextRenewalAt,
+        ...base,
         options: [],
-        pendingDowngrade,
         contactOnly: false,
         alreadyLowest: false,
         cancelPending: true,
@@ -733,17 +821,9 @@ async function handleGetDowngradeOptions(req, res) {
     const alreadyLowest = limits.plan === 'light';
 
     if (targets.length === 0) {
-      const [currentPrice, pendingDowngrade] = await Promise.all([
-        currentPricePromise,
-        pendingDowngradePromise,
-      ]);
       return res.status(200).json({
-        currentPlan: limits.plan,
-        currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
-        currentLimits: limits,
-        nextRenewalAt,
+        ...base,
         options: [],
-        pendingDowngrade,
         contactOnly: !alreadyLowest,
         alreadyLowest,
         cancelPending: false,
@@ -785,18 +865,10 @@ async function handleGetDowngradeOptions(req, res) {
     }));
 
     const options = settled.filter(Boolean);
-    const [currentPrice, pendingDowngrade] = await Promise.all([
-      currentPricePromise,
-      pendingDowngradePromise,
-    ]);
 
     return res.status(200).json({
-      currentPlan: limits.plan,
-      currentPlanName: currentPrice ? planDisplayName(currentPrice, limits.plan) : null,
-      currentLimits: limits,
-      nextRenewalAt,
+      ...base,
       options,
-      pendingDowngrade,
       contactOnly: false,
       alreadyLowest: false,
       cancelPending: false,
