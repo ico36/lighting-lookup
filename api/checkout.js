@@ -27,7 +27,6 @@
 
 import Stripe from 'stripe';
 import { requireAuth, requireAuthWithPlan } from './_auth';
-import { isAdminEmail } from '../lib/adminEmails';
 import { redisKey } from '../lib/redis';
 import { getClientIp, checkRateLimit } from '../lib/rateLimit';
 import {
@@ -1075,27 +1074,12 @@ function discountedAmountOrNull(unitAmount, percentOff) {
 // 表示するプラン名・金額・上限値はStripeのPrice/Productから取得し、コード側に
 // プラン名や金額の対応表を持たない(handleGetUpgradeOptionsと同じ方針)。
 //
-// 本番(VERCEL_ENV === 'production')ではロック中である旨(signupLocked: true)だけを
-// 返し、Stripeへの問い合わせ(prices.retrieve等)自体を行わない。ここでは管理者判定も
-// できないため、実際の申し込み可否の最終防衛線は handleCreateCheckout側の管理者ロック
-// (下記)に committed する。ここはモーダルを開いた時点で「申し込めない」と
-// 分からせるためだけの早期リターン。
-//
 // 【emailは任意】フロントは、メール欄が有効な形式になったときだけemailを付けて
 // このactionを呼び直す(確認画面に進む前に、早期割引・回数2倍が「新規」かどうかで
 // 食い違わないようにするため。handleCreateCheckout と同じisNewCustomer判定をここでも
 // 使う)。email無し(未入力・形式不正)のときは「新規かどうか不明」として、
 // 割引・2倍とも出さない安全側で返す。
 async function handleGetSignupPlans(req, res) {
-  if (process.env.VERCEL_ENV === 'production') {
-    return res.status(200).json({
-      signupLocked: true,
-      coupon: { available: false, percentOff: null, durationInMonths: null },
-      campaignWindowActive: false,
-      plans: [],
-    });
-  }
-
   const { email } = req.body || {};
   const hasValidEmail = typeof email === 'string' && isValidEmailFormat(email.trim());
 
@@ -1162,7 +1146,6 @@ async function handleGetSignupPlans(req, res) {
     }));
 
     return res.status(200).json({
-      signupLocked: false,
       // available はメール未入力時の案内文(フロントのsignup-email-hint)が、
       // 終了済みの特典まで案内し続けないようにするために使う(新規かどうかに
       // 関わらず「特典自体が今あるか」を示すだけなので、isNewCustomerとは無関係)。
@@ -1188,11 +1171,6 @@ async function handleGetSignupPlans(req, res) {
 
 // 新規申し込み(未契約者向け)のCheckoutセッション作成。ログイン前なのでrequireAuthは
 // 呼ばない(未契約者はセッションを持てないため)。
-//
-// ADMIN_EMAILSロックは本番(VERCEL_ENV === 'production')のときだけ効かせる。
-// Preview環境は公開前でも管理者以外のアドレスで申し込みフローを検証できるように
-// するため。ローカル開発・テスト実行時はVERCEL_ENVが未定義になるが、これも
-// 本番扱いにはしない(ロックしない)。
 async function handleCreateCheckout(req, res) {
   const { email, plan } = req.body || {};
 
@@ -1207,13 +1185,6 @@ async function handleCreateCheckout(req, res) {
   }
 
   const normalizedEmail = email.trim().toLowerCase();
-
-  if (process.env.VERCEL_ENV === 'production' && !isAdminEmail(normalizedEmail)) {
-    return res.status(403).json({
-      error: 'signup_locked',
-      message: '現在サービス準備中のため、新規登録は受け付けておりません。',
-    });
-  }
 
   const priceId = process.env[PRICE_ID_ENV[plan]];
   if (!priceId) {

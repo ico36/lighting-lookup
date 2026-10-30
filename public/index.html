@@ -80,15 +80,6 @@
     color: var(--accent);
   }
 
-  .badge {
-    font-size: 10px;
-    background: var(--accent2);
-    color: white;
-    padding: 2px 8px;
-    border-radius: 99px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-  }
 
   .header-actions-wrap {
     display: flex;
@@ -1319,7 +1310,6 @@
 <header style="justify-content: space-between;">
   <div style="display: flex; align-items: center; gap: 12px;">
     <div class="logo">照明<span>サーチ</span></div>
-    <div class="badge">β版</div>
   </div>
   <!-- ログイン後のみ表示するボタン群（初期状態は非表示） -->
   <div class="header-actions-wrap">
@@ -1989,14 +1979,12 @@
 
     <!-- 1. メールアドレス入力とプラン選択 -->
     <div id="signup-step-select">
-      <!-- 本番(VERCEL_ENV==='production')でロック中はこれを隠し、#signup-lockedだけ出す -->
       <div id="signup-email-wrap" class="model-input-wrap" style="margin-bottom:14px;">
         <input type="email" id="signup-email-input" placeholder="メールアドレス"
           oninput="updateSignupEmailHint()" onblur="handleSignupEmailBlur()" />
         <div id="signup-email-hint" style="color:var(--text2);font-size:12px;margin-top:6px;">新規お申し込みの方は、メールアドレスを入力すると早期割引と回数2倍の対象かどうかが表示されます</div>
       </div>
       <div id="signup-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
-      <div id="signup-locked" style="display:none;color:var(--text2);font-size:13px;">現在サービス準備中のため、新規登録は受け付けておりません。</div>
       <div id="signup-plans"></div>
     </div>
 
@@ -2005,7 +1993,7 @@
   </div>
 </div>
 
-<footer>照明サーチ β版 — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
+<footer>照明サーチ — AI判定のため、発注前に必ずメーカーサイトで確認してください</footer>
 
 <!-- 案件の保存件数が上限に達したときの通知。案件の作成は4経路(新規案件フォーム・
      検索結果の紐付け・カートの下書き自動作成・見積もりファイルの取り込み)あり、
@@ -3559,8 +3547,6 @@ function resetSignupModal() {
   document.getElementById('signup-title').textContent = '新規お申し込み';
   hideError(document.getElementById('signup-error'));
   document.getElementById('signup-email-input').value = '';
-  document.getElementById('signup-email-wrap').style.display = '';
-  document.getElementById('signup-locked').style.display = 'none';
 
   document.getElementById('signup-step-select').style.display = 'block';
   document.getElementById('signup-step-confirm').style.display = 'none';
@@ -3664,15 +3650,6 @@ async function loadSignupPlans() {
     }
 
     loadingEl.style.display = 'none';
-
-    // 本番ロック中は、確認画面に進める材料(メール入力・プラン一覧)自体を出さない。
-    // 実際の申し込み可否の最終防衛線はhandleCreateCheckout側のロックだが、
-    // ここで先に伝えることで「確認画面まで進んでから拒否される」のを避ける。
-    if (data.signupLocked) {
-      document.getElementById('signup-email-wrap').style.display = 'none';
-      document.getElementById('signup-locked').style.display = 'block';
-      return;
-    }
 
     signupPlansData = data;
     renderSignupPlans(data);

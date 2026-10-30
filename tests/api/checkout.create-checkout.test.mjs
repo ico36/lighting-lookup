@@ -1,7 +1,8 @@
 // tests/api/checkout.create-checkout.test.mjs
 // 新規申し込み導線(api/checkout.jsのaction:'create-checkout'/'get-signup-plans')の回帰。
 // 対象はプランのホワイトリスト検証、クーポンのプラン別ゲート、既存顧客の解決、
-// 二重契約防止、ADMIN_EMAILSロックのVERCEL_ENV分岐に絞る(範囲は合意済み)。
+// 二重契約防止、および撤廃済みの申し込みロック(ADMIN_EMAILS/VERCEL_ENV)が
+// 再発していないことの確認に絞る(範囲は合意済み)。
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +27,6 @@ beforeEach(() => {
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   process.env.STRIPE_COUPON_ID = 'coupon_test';
   delete process.env.VERCEL_ENV;
-  delete process.env.ADMIN_EMAILS;
   delete process.env.CAMPAIGN_2X_SIGNUP_START;
   delete process.env.CAMPAIGN_2X_SIGNUP_END;
 });
@@ -461,29 +461,8 @@ test('get-signup-plans: emailを指定しない照会はレート制限の枠を
   assert.ok(fakeStripe.__getCallLog().includes('customers.list'));
 });
 
-test('本番ロック: VERCEL_ENV=production かつ管理者以外は403', async () => {
+test('申し込みロックは撤廃済み: VERCEL_ENV=production でも管理者以外のメールアドレスで200になる(回帰防止)', async () => {
   process.env.VERCEL_ENV = 'production';
-  noExistingCustomer();
-
-  const res = await callCreateCheckout({ plan: 'light' });
-
-  assert.equal(res.statusCode, 403);
-  assert.equal(res.body.error, 'signup_locked');
-  assert.ok(!fakeStripe.__getCallLog().includes('customers.list'));
-});
-
-test('本番ロック: VERCEL_ENV=production でも管理者アドレスなら通す', async () => {
-  process.env.VERCEL_ENV = 'production';
-  process.env.ADMIN_EMAILS = 'new-user@example.com';
-  noExistingCustomer();
-
-  const res = await callCreateCheckout({ plan: 'light' });
-
-  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
-});
-
-test('本番ロックはVERCEL_ENVがproduction以外(Preview/未定義)のときは効かない', async () => {
-  process.env.VERCEL_ENV = 'preview';
   noExistingCustomer();
 
   const res = await callCreateCheckout({ plan: 'light' });
@@ -499,7 +478,6 @@ test('配線確認: get-signup-plans はライトのcouponEligibleがfalse、sta
   await handler(req, res);
 
   assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
-  assert.equal(res.body.signupLocked, false);
   assert.deepEqual(res.body.plans.map((p) => p.plan), ['light', 'standard', 'pro']);
 
   const light = res.body.plans.find((p) => p.plan === 'light');
@@ -619,7 +597,7 @@ test('get-signup-plans: キャンペーンのみ有効(早期割引は枠切れ)
   assert.equal(res.body.campaignWindowActive, true);
 });
 
-test('get-signup-plans: VERCEL_ENV=production ではsignupLocked:trueを返し、pricesを取得しない', async () => {
+test('get-signup-plans: 申し込みロックは撤廃済み。VERCEL_ENV=production でも実際のプラン一覧を返す(回帰防止)', async () => {
   process.env.VERCEL_ENV = 'production';
 
   const req = fakeReq({ action: 'get-signup-plans' });
@@ -627,20 +605,6 @@ test('get-signup-plans: VERCEL_ENV=production ではsignupLocked:trueを返し�
   await handler(req, res);
 
   assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
-  assert.equal(res.body.signupLocked, true);
-  assert.deepEqual(res.body.plans, []);
-  assert.ok(!fakeStripe.__getCallLog().includes('prices.retrieve'));
-  assert.ok(!fakeStripe.__getCallLog().includes('coupons.retrieve'));
-});
-
-test('get-signup-plans: VERCEL_ENVがproduction以外(Preview/未定義)ではsignupLocked:false', async () => {
-  process.env.VERCEL_ENV = 'preview';
-
-  const req = fakeReq({ action: 'get-signup-plans' });
-  const res = fakeRes();
-  await handler(req, res);
-
-  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
-  assert.equal(res.body.signupLocked, false);
   assert.deepEqual(res.body.plans.map((p) => p.plan), ['light', 'standard', 'pro']);
+  assert.ok(fakeStripe.__getCallLog().includes('prices.retrieve'));
 });
