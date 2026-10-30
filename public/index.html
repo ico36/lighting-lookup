@@ -1392,6 +1392,8 @@
     <a href="/terms.html" target="_blank" rel="noopener" style="color:var(--text2);">利用規約</a>
     ・
     <a href="/privacy.html" target="_blank" rel="noopener" style="color:var(--text2);">プライバシーポリシー</a>
+    ・
+    <a href="/tokushoho.html" target="_blank" rel="noopener" style="color:var(--text2);">特定商取引法に基づく表記</a>
   </div>
 </div>
 
@@ -1402,10 +1404,10 @@
   <div class="input-card">
     <div class="section-label">利用規約・プライバシーポリシーへの同意</div>
     <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:14px;">
-      本サービスの利用には<a href="/terms.html" target="_blank" rel="noopener">利用規約</a>と<a href="/privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a>への同意が必要です。内容をご確認のうえ、よろしければ下のボタンを押してください。
+      本サービスの利用には<a href="/terms.html" target="_blank" rel="noopener">利用規約</a>と<a href="/privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a>への同意が必要です。プライバシーポリシーには、外国にある第三者への個人情報の提供に関する定めが含まれます。内容をご確認のうえ、よろしければ下のボタンを押してください。
     </p>
     <div id="tos-gate-error" style="display:none;color:var(--error);font-size:13px;margin-bottom:10px;"></div>
-    <button class="btn-primary" id="tos-gate-accept-btn" style="width:100%;" onclick="acceptTos()">確認しました</button>
+    <button class="btn-primary" id="tos-gate-accept-btn" style="width:100%;" onclick="acceptTos()">同意して利用を開始する</button>
   </div>
 </div>
 
@@ -1716,6 +1718,7 @@
       <a href="javascript:void(0)" onclick="scrollToHelpSection('help-sec-13')">13. 解約するには</a>
       <a href="/terms.html" target="_blank" rel="noopener">14. 利用規約</a>
       <a href="/privacy.html" target="_blank" rel="noopener">15. プライバシーポリシー</a>
+      <a href="/tokushoho.html" target="_blank" rel="noopener">16. 特定商取引法に基づく表記</a>
     </div>
     <div class="help-content">
       <div class="help-section" id="help-sec-1">
@@ -3814,8 +3817,7 @@ function showSignupConfirm() {
       ご契約は毎月自動で更新され、お申し込み日と同じ日に毎月請求されます。<br>
       解約はアプリのヘルプ「13. 解約するには」からいつでもお手続きいただけ、その請求期間の終わりまでご利用いただけます。<br>
       月の途中で解約された場合も、日割りでの返金はありません。<br>
-      <a href="/terms.html" target="_blank" rel="noopener" style="color:var(--text);">利用規約</a>をご確認ください。
-      <!-- v2公開時に特商法表記へのリンクを追加 -->
+      <a href="/terms.html" target="_blank" rel="noopener" style="color:var(--text);">利用規約</a>・<a href="/tokushoho.html" target="_blank" rel="noopener" style="color:var(--text);">特定商取引法に基づく表記</a>をご確認ください。
     </div>
     <div class="upgrade-note">
       ${durationNote}
@@ -3961,7 +3963,7 @@ async function acceptTos() {
       const response = await authFetch('/api/company', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'accept-tos', version: 'v1' }),
+        body: JSON.stringify({ action: 'accept-tos', version: 'v2' }),
       });
       const data = await response.json();
 

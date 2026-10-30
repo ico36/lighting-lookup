@@ -1304,7 +1304,7 @@ async function handleCreateCheckout(req, res) {
       // 利用規約の同意文言とは表示位置が別なので干渉しない。
       custom_text: {
         terms_of_service_acceptance: {
-          message: `[プライバシーポリシー](${baseUrl}/privacy.html)もあわせてご確認ください。`,
+          message: `[利用規約](${baseUrl}/terms.html)および[プライバシーポリシー](${baseUrl}/privacy.html)（外国にある第三者への個人情報の提供を含みます）に同意します`,
         },
         ...(campaignSubmitMessage ? { submit: { message: campaignSubmitMessage } } : {}),
       },

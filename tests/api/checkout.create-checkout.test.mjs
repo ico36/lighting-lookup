@@ -142,8 +142,13 @@ test('custom_text内のプライバシーポリシーURLはreq.headers.hostか�
   const params = parseSessionParams(res.body.url);
   const message = params.custom_text.terms_of_service_acceptance.message;
 
-  assert.equal(message, `[プライバシーポリシー](https://${previewHost}/privacy.html)もあわせてご確認ください。`);
+  assert.equal(
+    message,
+    `[利用規約](https://${previewHost}/terms.html)および[プライバシーポリシー](https://${previewHost}/privacy.html)` +
+      `（外国にある第三者への個人情報の提供を含みます）に同意します`
+  );
   assert.ok(!message.includes('https://lighting-lookup.vercel.app/privacy.html'));
+  assert.ok(!message.includes('https://lighting-lookup.vercel.app/terms.html'));
 });
 
 test('既存顧客が見つかる場合は customer を渡し、customer_email は渡さない', async () => {
