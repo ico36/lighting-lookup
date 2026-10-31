@@ -3,22 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="only light">
 <title>照明型番サーチ</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #22263a;
-    --border: #2e3250;
-    --accent: #4f8ef7;
-    --accent2: #7c3aed;
-    --text: #e8eaf6;
-    --text2: #8b90b8;
-    --success: #22c55e;
-    --warning: #f59e0b;
-    --error: #ef4444;
+    color-scheme: only light;
+    --bg: #F1F2EF;
+    --surface: #FBFAF8;
+    --surface2: #E9E7E0;
+    --border: rgba(22,48,72,0.2);
+    --accent: #163048;
+    --accent2: #C28953;
+    --text: #1B2A38;
+    --text2: #5B6B78;
+    --success: #1a7f37;
+    --warning: #9a6700;
+    --error: #c00;
     --radius: 12px;
   }
 
@@ -64,7 +66,7 @@
     border-bottom: 1px solid var(--border);
     padding: 6px 20px;
     font-size: 13px;
-    color: #fff;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -329,7 +331,7 @@
   }
   .upload-zone:hover, .upload-zone.drag-over {
     border-color: var(--accent);
-    background: rgba(79,142,247,0.05);
+    background: rgba(22,48,72,0.05);
   }
   .upload-zone input[type="file"] {
     position: absolute;
@@ -453,10 +455,10 @@
     font-weight: 600;
     margin-right: 4px;
   }
-  .tag-green { background: rgba(34,197,94,0.15); color: var(--success); }
-  .tag-yellow { background: rgba(245,158,11,0.15); color: var(--warning); }
-  .tag-blue { background: rgba(79,142,247,0.15); color: var(--accent); }
-  .tag-gray { background: rgba(139,144,184,0.15); color: var(--text2); }
+  .tag-green { background: rgba(26,127,55,0.15); color: var(--success); }
+  .tag-yellow { background: rgba(154,103,0,0.15); color: var(--warning); }
+  .tag-blue { background: rgba(22,48,72,0.15); color: var(--accent); }
+  .tag-gray { background: rgba(91,107,120,0.15); color: var(--text2); }
 
   .order-block {
     background: var(--bg);
@@ -523,12 +525,12 @@
 
   /* 上限到達時の専用メッセージ領域（アップグレード導線を後から入れられるよう箱にしてある） */
   .quota-limit-notice {
-    background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.3);
+    background: rgba(204,0,0,0.1);
+    border: 1px solid rgba(204,0,0,0.3);
     border-radius: var(--radius);
     padding: 16px;
     margin-bottom: 20px;
-    color: #fca5a5;
+    color: var(--error);
     font-size: 14px;
     line-height: 1.6;
   }
@@ -554,7 +556,7 @@
      100と200の間は、将来モーダル内部で要素を重ねたくなったときのために空けてある。
 
      【背景を不透明にしている理由】任意のコンテンツの上に重なるため、検索回数側と
-     同じ半透明の赤(rgba(239,68,68,0.1))だと下の文字が透けて読めなくなる。
+     同じ半透明の赤(rgba(204,0,0,0.1))だと下の文字が透けて読めなくなる。
      背景は --surface で塗り、赤は枠線と文字色で表す。 */
   .case-limit-notice {
     position: fixed;
@@ -568,11 +570,11 @@
     align-items: flex-start;
     gap: 12px;
     background: var(--surface);
-    border: 1px solid rgba(239,68,68,0.5);
+    border: 1px solid rgba(204,0,0,0.5);
     border-radius: var(--radius);
     box-shadow: 0 8px 24px rgba(0,0,0,0.45);
     padding: 16px;
-    color: #fca5a5;
+    color: var(--error);
     font-size: 14px;
     line-height: 1.6;
   }
@@ -699,11 +701,11 @@
   .upgrade-done-icon { font-size: 32px; }
 
   .error-box {
-    background: rgba(239,68,68,0.1);
-    border: 1px solid rgba(239,68,68,0.3);
+    background: rgba(204,0,0,0.1);
+    border: 1px solid rgba(204,0,0,0.3);
     border-radius: 8px;
     padding: 14px 16px;
-    color: #fca5a5;
+    color: var(--error);
     font-size: 14px;
   }
 
@@ -991,8 +993,8 @@
      どちらも工事士だけが見るダーク画面用。施主が読む見積書本体側の免責は
      白背景の .sheet-footer-note を使う（文言も別。あちらはAIに言及しない）。 */
   .disclaimer-note {
-    background: rgba(245,158,11,0.08);
-    border: 1px solid rgba(245,158,11,0.3);
+    background: rgba(154,103,0,0.08);
+    border: 1px solid rgba(154,103,0,0.3);
     border-left-width: 3px;
     border-radius: 8px;
     padding: 12px 14px;
@@ -1012,8 +1014,8 @@
      使用箇所: renderCaseDetail() の案件詳細上部・showEstimateForm() の見積フォーム
      上部（#duplicated-from-warning）。 */
   .warning-note {
-    background: rgba(245,158,11,0.08);
-    border: 1px solid rgba(245,158,11,0.3);
+    background: rgba(154,103,0,0.08);
+    border: 1px solid rgba(154,103,0,0.3);
     border-left-width: 3px;
     border-radius: 8px;
     padding: 12px 14px;
@@ -1173,8 +1175,8 @@
   }
 
   .price-highlight {
-    background: linear-gradient(135deg, rgba(79,142,247,0.15), rgba(124,58,237,0.1));
-    border: 1px solid rgba(79,142,247,0.3);
+    background: linear-gradient(135deg, rgba(22,48,72,0.15), rgba(194,137,83,0.1));
+    border: 1px solid rgba(22,48,72,0.3);
     border-radius: 10px;
     padding: 16px;
     text-align: center;
@@ -1785,7 +1787,7 @@
         <div id="help-pending-downgrade" style="display:none;"></div>
         <p>下のボタンから解約手続き画面（Stripeの契約管理ページ）に進み、案内に従って手続きを行ってください。</p>
         <button onclick="startCancelSubscription()" style="background: none; border: 1px solid var(--border); color: var(--text2); padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: inherit;">解約手続きへ進む</button>
-        <p id="cancel-subscription-error" style="display: none; color: #c0392b; margin-top: 8px;"></p>
+        <p id="cancel-subscription-error" style="display: none; color: var(--error); margin-top: 8px;"></p>
         <!-- 契約情報が見つからなかった(404)ときだけ表示する申し込み導線。
              startCancelSubscription()のerrorElId既定('cancel-subscription-error')から
              呼ばれた場合だけ出す(アップグレードモーダルの支払い方法更新からは出さない)。 -->
@@ -1857,7 +1859,7 @@
            (endsAt/allowedPlans)自体は将来の期間限定告知(材料屋発注機能等)に転用する
            想定のため、DOM要素は残してある。次に使うときは、この要素のid/styleを
            そのまま流用してよい。 -->
-      <div id="archive-search-campaign-banner" style="display:none;font-size:12px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6;margin-top:12px;"></div>
+      <div id="archive-search-campaign-banner" style="display:none;font-size:12px;background:rgba(194,137,83,0.15);color:var(--accent2);padding:8px 12px;border-radius:8px;margin-bottom:10px;line-height:1.6;margin-top:12px;"></div>
       <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;margin-top:12px;">
         <input type="date" id="archive-search-from" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
         <input type="date" id="archive-search-to" style="flex:1;min-width:120px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font-family:inherit;font-size:13px;" />
@@ -4580,7 +4582,7 @@ function renderCasesList() {
     // 条件を1回だけ評価して枠線・絵文字の2箇所で使い回す(CSSクラスに切り出さない
     // のは、行のスタイルがインラインで書かれており優先度の都合で上書きが効かず、
     // クラス化するには行全体のスタイル管理方式を変える必要があるため)。
-    // 背景色による強調はやめた(rgba(79,142,247,0.15)は.tag-blueと同値で、青系の
+    // 背景色による強調はやめた(rgba(22,48,72,0.15)は.tag-blueと同値で、青系の
     // ステータスタグが行の背景に溶けて認識しにくくなるため)。枠線の太さ(1px→2px)
     // だけで強調し、背景は常にvar(--bg)のまま。
     // paddingを1pxずつ減らしているのは、枠線太さの差(上下合計で+2px)を吸収して
@@ -6696,7 +6698,7 @@ function renderResult(r) {
   document.getElementById('result-content').innerHTML = `
     <div class="disclaimer-note">この結果はAIによる推定です。発注前に必ずメーカー・販売店で型番と仕様をご確認ください。（<a href="/terms.html#art2" target="_blank" rel="noopener" style="color:inherit;">利用規約第2条</a>）</div>
     ${replacingItemId ? `
-    <div style="font-size:13px;background:rgba(124,58,237,0.15);color:var(--accent2);padding:10px 14px;border-radius:8px;margin-bottom:16px;line-height:1.6;">
+    <div style="font-size:13px;background:rgba(194,137,83,0.15);color:var(--accent2);padding:10px 14px;border-radius:8px;margin-bottom:16px;line-height:1.6;">
       🔁 「${replacingItem ? escapeHtml(replacingItem.modelNumber) : '対象の器具'}」を差し替える候補を選んでください。
       <button type="button" class="detail-link-btn" style="margin:0 0 0 8px;" onclick="cancelCartItemReplace()">やめる</button>
     </div>` : ''}
