@@ -898,7 +898,7 @@
     margin-top: 4px;
   }
   .sheet-company {
-    text-align: right;
+    text-align: left;
     font-size: 12px;
     color: #333;
     line-height: 1.6;
@@ -6498,6 +6498,8 @@ async function doSearch() {
 
   const btn = document.getElementById('search-btn');
 
+  document.activeElement?.blur();
+
   const resultArea = document.getElementById('result-area');
   const resultContent = document.getElementById('result-content');
   resultArea.style.display = 'block';
@@ -6509,6 +6511,7 @@ async function doSearch() {
       </div>
     </div>
   `;
+  resultContent.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   await withButtonGuard(btn, async () => {
     try {
@@ -6581,7 +6584,7 @@ async function doSearch() {
         </div>
       `;
     }
-  });
+  }, '判定中…');
 
   // withButtonGuard()は終了時に必ず disabled=false へ戻すので、
   // 残り0になった場合のボタン無効化はガードを抜けた後にやり直す。
