@@ -3,11 +3,13 @@
 //
 // 使い方:
 //   KV_REST_API_URL=... KV_REST_API_TOKEN=... node scripts/add-announcement.js "タイトル" "本文"
+//   KV_REST_API_URL=... KV_REST_API_TOKEN=... node scripts/add-announcement.js --clear
 //
 // 環境変数はVercelの「Settings → Environment Variables」に設定されている値と同じもの。
 // `vercel env pull .env.local` で取得したファイルの中身を環境変数として渡して実行してもよい。
 //
 // 新しいお知らせは一覧の先頭に追加される。
+// --clear を指定すると、確認なしで一覧を全消去する(追加は行わない)。
 //
 // 【キーの接頭辞について】
 // api/ と lib/ のRedisキーは lib/redis.js の redisKey() 経由で組み立てており、
@@ -23,10 +25,13 @@
 const { Redis } = require('@upstash/redis');
 const crypto = require('crypto');
 
-const [title, body] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const isClear = args[0] === '--clear';
+const [title, body] = args;
 
-if (!title || !body) {
+if (!isClear && (!title || !body)) {
   console.error('使い方: node scripts/add-announcement.js "タイトル" "本文"');
+  console.error('      node scripts/add-announcement.js --clear');
   process.exit(1);
 }
 
@@ -41,6 +46,12 @@ const redis = new Redis({
 });
 
 async function main() {
+  if (isClear) {
+    await redis.set('announcements', []);
+    console.log('お知らせを全消去しました。');
+    return;
+  }
+
   const announcement = {
     id: crypto.randomUUID(),
     title,
