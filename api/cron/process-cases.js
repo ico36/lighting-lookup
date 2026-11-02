@@ -39,6 +39,7 @@ import {
   getLightPlanRetentionDaysFallback,
   stripe,
   getLightingSearchPriceIds,
+  LIVE_STATUSES,
 } from '../../lib/subscription';
 import { redis } from '../../lib/redis';
 import {
@@ -46,7 +47,7 @@ import {
   processDueOwnerDeletions,
   warnIfOwnerDeletionPreviewGraceEnabled,
 } from '../../lib/ownerDeletion';
-import { assignMemberNoIfMissing } from '../../lib/memberNo';
+import { assignMemberNoIfMissing, getMemberNo } from '../../lib/memberNo';
 
 export default async function handler(req, res) {
   // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
@@ -249,21 +250,33 @@ export default async function handler(req, res) {
   // --- 4. 会員番号の採番(保険) ----------------------------------------
   // Webhook(api/stripe-webhook.js)・ログイン時フォールバック(api/login.js)で
   // 既に付いているはずだが、両方が届かなかった場合の保険として、照明サーチの
-  // 3Priceのアクティブなサブスクを申し込み順(start_date昇順)で走査し、
-  // 未採番のものだけ発番する。assignMemberNoIfMissing()は冪等なので、
-  // 既に採番済みの顧客に対しては何もしない。
+  // 3Priceの有効なサブスクを申し込み順(start_date昇順)で走査し、未採番また
+  // ずれているものだけ発番・修復する。
+  //
+  // 【ステータスをLIVE_STATUSES(active/trialing)にする理由】ログイン可否判定
+  // (lib/subscription.jsのgetActiveSubscriptionWithItem)が「有効」とみなす定義と
+  // 揃える。現状trialingの契約は作っていないが、将来トライアル期間を設定した
+  // 場合に、この保険だけ対象から漏れる(Webhook/ログインは既にLIVE_STATUSESで
+  // 判定しているため漏れない)事故を防ぐ。Stripeのstatusフィルタは1値しか
+  // 渡せないため、Price×ステータスの組ごとに個別に問い合わせる(status:'all'に
+  // すると解約済み等の履歴も全部返ってきてしまい、契約者が増えるほど無駄に
+  // 大きくなるため避ける)。
+  //
+  // 【全件取得】limit:100は1ページあたりの件数で、100件を超えても
+  // autoPagingToArray()が続きのページを自動で取得する(Stripe SDKの機能)。
+  // 上限はlimitオプションで安全装置として10000に設定(実運用でここに達することは
+  // 想定していない)。
   results.memberNo = { checked: 0, errors: [] };
   try {
     const priceIds = [...getLightingSearchPriceIds()];
     const candidates = [];
     for (const priceId of priceIds) {
-      const list = await stripe.subscriptions.list({
-        price: priceId,
-        status: 'active',
-        limit: 100,
-        expand: ['data.customer'],
-      });
-      candidates.push(...list.data);
+      for (const status of LIVE_STATUSES) {
+        const subs = await stripe.subscriptions
+          .list({ price: priceId, status, limit: 100, expand: ['data.customer'] })
+          .autoPagingToArray({ limit: 10000 });
+        candidates.push(...subs);
+      }
     }
     candidates.sort((a, b) => (a.start_date || 0) - (b.start_date || 0));
 
@@ -274,11 +287,16 @@ export default async function handler(req, res) {
       if (!customerId || seenCustomerIds.has(customerId)) continue;
       seenCustomerIds.add(customerId);
 
+      // expandが効いていれば(通常はこちら)、customerオブジェクトから
+      // email・metadataの両方が1回のsubscriptions.listだけで手に入る。
+      // 効いていない場合だけ、customers.retrieve()で両方まとめて取り直す。
       let email = typeof customerRef === 'object' ? customerRef.email : null;
+      let stripeNo = typeof customerRef === 'object' ? (customerRef.metadata?.ls_member_no || null) : null;
       if (!email) {
         try {
           const customer = await stripe.customers.retrieve(customerId);
           email = customer?.email;
+          stripeNo = customer?.metadata?.ls_member_no || null;
         } catch (err) {
           console.error(`[cron/process-cases] customer(${customerId})の取得に失敗しました:`, err);
           results.memberNo.errors.push({ customerId, step: 'member-no-customer', message: err.message });
@@ -288,6 +306,14 @@ export default async function handler(req, res) {
       if (!email) continue;
 
       try {
+        // RedisとStripeの両方に番号があり、かつ一致していれば既に同期済み。
+        // assignMemberNoIfMissing()(Stripeへの往復3回)を呼ばずに済ませる。
+        const redisNo = await getMemberNo(email);
+        if (redisNo && stripeNo && redisNo === stripeNo) {
+          results.memberNo.checked++;
+          continue;
+        }
+
         await assignMemberNoIfMissing(email);
         results.memberNo.checked++;
       } catch (err) {

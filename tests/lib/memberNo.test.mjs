@@ -5,7 +5,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { formatMemberNo, assignMemberNoIfMissing, hasMemberNo } from '../../lib/memberNo.js';
+import { formatMemberNo, assignMemberNoIfMissing, hasMemberNo, getMemberNo } from '../../lib/memberNo.js';
 import * as fakeStripe from '../support/fakes/stripe.mjs';
 import { __resetFakeRedis, redis, redisKey } from '../support/fakes/redis.mjs';
 
@@ -152,6 +152,17 @@ test('hasMemberNo(): 表記ゆれ(大文字・前後空白)でも同じキーを
   await assignMemberNoIfMissing(email);
 
   assert.equal(await hasMemberNo('  Has-Check-Case@Example.com  '), true);
+});
+
+test('getMemberNo(): 未採番ならnull、採番後は生の値(未整形)を返す', async () => {
+  const email = 'get-raw@example.com';
+  wireCustomer(email);
+
+  assert.equal(await getMemberNo(email), null);
+
+  await assignMemberNoIfMissing(email);
+
+  assert.equal(await getMemberNo(email), '1');
 });
 
 test('メールアドレスの大文字・前後空白を正規化してから処理する(表記ゆれで2つの番号が付かない)', async () => {

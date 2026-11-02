@@ -1,14 +1,22 @@
 // tests/api/cron.member-no.test.mjs
 // api/cron/process-cases.js ステップ4(会員番号の採番・保険)のテスト。
 // Webhook/ログイン時フォールバックが両方届かなかった場合の保険として、照明サーチの
-// 3PriceのアクティブなサブスクをStart_date昇順で走査し、未採番のものだけ発番する
-// 挙動を、既存のcron系テストと同じフェイク(fakeStripe・フェイクRedis)で検証する。
+// 3Price×LIVE_STATUSES(active/trialing)の有効なサブスクをStart_date昇順で走査し、
+// 未採番またはStripe写しとずれているものだけ発番・修復する挙動を、既存のcron系
+// テストと同じフェイク(fakeStripe・フェイクRedis)で検証する。
 //
 // 【customers.list/subscriptions.listの差し替えについて】assignMemberNoIfMissing()が
 // 内部で呼ぶgetActiveSubscriptionWithItem()(customer: 絞り込みのsubscriptions.list)と、
 // このステップ自体が呼ぶ候補列挙(price: 絞り込みのsubscriptions.list)は同じフェイクの
 // メソッドを共有するため、wireActiveSubscriptions()で両方の呼び方(price指定/customer指定)
 // に同じ元データから一貫した結果を返すようにしている。
+//
+// 【ページング】フェイクのsubscriptions.list().autoPagingToArray()は、本物のStripe
+// SDKのようにページを分けず、handlerの戻り値(.data)をそのまま返すだけ
+// (tests/support/fakes/stripe.mjs参照)。100件超の実ページングはフェイクでは
+// 再現しないが、production側がautoPagingToArray()を正しく呼んでいることは、
+// 下の全テストが(このメソッド経由でなければ候補が1件も取れず全滅するため)
+// 間接的に検証している。
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,7 +53,7 @@ async function callCron() {
 
 /**
  * @param {Array<{id: string, customerId: string, email: string, startDateSec: number,
- *   priceId?: string, customerAsObject?: boolean}>} entries
+ *   priceId?: string, customerAsObject?: boolean, status?: string, metadata?: object}>} entries
  */
 function wireActiveSubscriptions(entries) {
   const byPrice = {};
@@ -54,15 +62,17 @@ function wireActiveSubscriptions(entries) {
   for (const e of entries) {
     const priceId = e.priceId || 'price_standard_test';
     const customerAsObject = e.customerAsObject !== false;
+    const status = e.status || 'active';
     const sub = {
       id: e.id,
-      customer: customerAsObject ? { id: e.customerId, email: e.email } : e.customerId,
-      status: 'active',
+      customer: customerAsObject ? { id: e.customerId, email: e.email, metadata: e.metadata || {} } : e.customerId,
+      status,
       start_date: e.startDateSec,
       items: { data: [{ id: `si_${e.id}`, price: fakeStripe.__getDefaultPrice(priceId) }] },
     };
     (byPrice[priceId] ||= []).push(sub);
     if (e.email) emailToCustomerId[e.email] = e.customerId;
+    if (e.metadata) fakeStripe.__seedCustomer(e.customerId, { email: e.email, metadata: e.metadata });
   }
 
   fakeStripe.__setHandler('customers.list', async (params) => {
@@ -70,8 +80,16 @@ function wireActiveSubscriptions(entries) {
     return { data: customerId ? [{ id: customerId }] : [] };
   });
 
+  // price指定(このステップ自体の候補列挙): statusも絞り込む(LIVE_STATUSESの
+  // 各値で別々に問い合わせてくるため、ここで絞らないと同じ実体が重複して
+  // 候補に入ってしまう)。
+  // customer指定(assignMemberNoIfMissing内部のgetActiveSubscriptionWithItem):
+  // status:'all'で来るため絞り込まない。
   fakeStripe.__setHandler('subscriptions.list', async (params) => {
-    if (params.price) return { data: byPrice[params.price] || [] };
+    if (params.price) {
+      const list = byPrice[params.price] || [];
+      return { data: params.status ? list.filter((s) => s.status === params.status) : list };
+    }
     if (params.customer) {
       const all = Object.values(byPrice).flat();
       return {
@@ -149,4 +167,49 @@ test('同じ顧客が複数Priceにまたがって出てきても1回しか処�
 
   assert.equal(res.statusCode, 200, JSON.stringify(res.body));
   assert.equal(res.body.memberNo.checked, 1);
+});
+
+test('trialingのサブスクも候補になる(LIVE_STATUSESに合わせる)', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  wireActiveSubscriptions([
+    { id: 'sub_trial', customerId: 'cus_trial', email: 'trial@example.com', startDateSec: now, status: 'trialing' },
+  ]);
+
+  const res = await callCron();
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal(res.body.memberNo.checked, 1);
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', 'trial@example.com')), '1');
+});
+
+test('RedisとStripe写しの両方に番号があり一致していれば、assignMemberNoIfMissing()のStripe往復をスキップする', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const email = 'synced@example.com';
+  await redis.set(redisKey('ls_member_no', 'by_email', email), '42');
+  wireActiveSubscriptions([
+    { id: 'sub_synced', customerId: 'cus_synced', email, startDateSec: now, metadata: { ls_member_no: '42' } },
+  ]);
+
+  const res = await callCron();
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal(res.body.memberNo.checked, 1);
+  const calls = fakeStripe.__getCallLog();
+  assert.ok(!calls.includes('customers.retrieve'), 'customers.retrieveが呼ばれている(スキップできていない)');
+  assert.ok(!calls.includes('customers.update'), 'customers.updateが呼ばれている(スキップできていない)');
+});
+
+test('RedisとStripe写しが食い違っていれば、assignMemberNoIfMissing()を呼んでStripe側を書き直す', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const email = 'drifted@example.com';
+  await redis.set(redisKey('ls_member_no', 'by_email', email), '7');
+  wireActiveSubscriptions([
+    // Stripe側の写しが古い値のまま(手動編集・過去の失敗等を想定)
+    { id: 'sub_drift', customerId: 'cus_drift', email, startDateSec: now, metadata: { ls_member_no: '999' } },
+  ]);
+
+  const res = await callCron();
+
+  assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+  assert.equal(fakeStripe.__peekCustomer('cus_drift').metadata.ls_member_no, '7', 'Redisの値(正)でStripe側が書き直されること');
 });

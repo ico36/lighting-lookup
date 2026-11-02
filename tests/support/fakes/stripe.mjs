@@ -341,7 +341,19 @@ export default function Stripe() {
       update: (...args) => tracked('customers.update', handlers.customers.update, args),
     },
     subscriptions: {
-      list: (...args) => tracked('subscriptions.list', handlers.subscriptions.list, args),
+      // 本物のStripe SDKの list() は、戻り値のPromise自体に autoPagingToArray()/
+      // autoPagingEach() が生えている(ApiListPromise)。フェイクは実際のページングを
+      // 再現しないが、api/cron/process-cases.js がこの形(Promiseに生えたメソッド)を
+      // 使うため、同じ形だけ模す。解決後の値(handlerの戻り値)から.dataを取るだけ。
+      list: (...args) => {
+        const promise = tracked('subscriptions.list', handlers.subscriptions.list, args);
+        promise.autoPagingToArray = async ({ limit } = {}) => {
+          const result = await promise;
+          const data = result.data || [];
+          return Number.isFinite(limit) ? data.slice(0, limit) : data;
+        };
+        return promise;
+      },
       update: (...args) => tracked('subscriptions.update', handlers.subscriptions.update, args),
       retrieve: (...args) => tracked('subscriptions.retrieve', handlers.subscriptions.retrieve, args),
     },
