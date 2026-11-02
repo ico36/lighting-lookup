@@ -42,7 +42,13 @@ async function get(key) {
   return strings.has(key) ? strings.get(key) : null;
 }
 
+// nx: true は「キーが存在しないときだけ設定する」(Upstashの SET ... NX と同じ)。
+// lib/memberNo.js のロック取得(SETNX相当)のために対応する。すでに存在する場合は
+// 何もせずnullを返す(本物のUpstash/Redisと同じ戻り値)。
 async function set(key, value, opts) {
+  if (opts?.nx && strings.has(key)) {
+    return null;
+  }
   strings.set(key, value);
   if (opts?.ex) {
     ttls.set(key, Date.now() + opts.ex * 1000);

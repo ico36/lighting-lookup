@@ -211,3 +211,30 @@ test('管理者でもrequest-otpを経ずにverify-otpだけでは401 CODE_EXPIR
   assert.equal(res.body.code, 'CODE_EXPIRED');
   assert.equal('token' in res.body, false);
 });
+
+// 会員番号(ls_member_no)の採番フォールバック。EMAIL(非admin)を使うため、
+// lib/quota.js の未フェイクの実Redisクライアントへの問い合わせが発生し、
+// 他のテストより数秒遅くなる(ファイル冒頭「管理者アカウントを使う理由」参照)。
+// このテストの主題(Stripeへの近道)の確認にはadminでは代用できないため許容する。
+test('会員番号が既にある場合、ログイン時にStripeの顧客取得・更新は呼ばれない(近道)', async () => {
+  await seedOtp(EMAIL, CODE);
+  await redis.set(redisKey('ls_member_no', 'by_email', EMAIL), '3');
+
+  const res = fakeRes();
+  await handler(req({ action: 'verify-otp', email: EMAIL, code: CODE }), res);
+
+  assert.equal(res.statusCode, 200);
+  const calls = fakeStripe.__getCallLog();
+  assert.ok(!calls.includes('customers.retrieve'), 'customers.retrieveが呼ばれている(近道になっていない)');
+  assert.ok(!calls.includes('customers.update'), 'customers.updateが呼ばれている(近道になっていない)');
+});
+
+test('会員番号が未採番なら、ログイン時にassignMemberNoIfMissing()が動いて番号が付く', async () => {
+  await seedOtp(EMAIL, CODE);
+
+  const res = fakeRes();
+  await handler(req({ action: 'verify-otp', email: EMAIL, code: CODE }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', EMAIL)), '1');
+});

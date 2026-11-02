@@ -82,6 +82,11 @@ const LIB_OWNER_DELETION_JS = path.join(REPO_ROOT, 'lib', 'ownerDeletion.js');
 // (api/login.js・api/checkout.js)は本物のまま読み込む。
 const LIB_RATE_LIMIT_JS = path.join(REPO_ROOT, 'lib', 'rateLimit.js');
 
+// lib/memberNo.js が読む `./redis`(ls_member_no:by_email/counter/lockの読み書き)も
+// 同じフェイクへ。lib/memberNo.js自体・lib/subscription.js(getActiveSubscriptionWithItem
+// 経由のStripe呼び出し)は本物のまま読み込む(本題のロジックをフェイクにしないため)。
+const LIB_MEMBER_NO_JS = path.join(REPO_ROOT, 'lib', 'memberNo.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -119,7 +124,8 @@ export async function resolve(specifier, context, nextResolve) {
       parentPath === LIB_OTP_JS ||
       parentPath === LIB_SUBSCRIPTION_JS ||
       parentPath === LIB_OWNER_DELETION_JS ||
-      parentPath === LIB_RATE_LIMIT_JS
+      parentPath === LIB_RATE_LIMIT_JS ||
+      parentPath === LIB_MEMBER_NO_JS
     ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }

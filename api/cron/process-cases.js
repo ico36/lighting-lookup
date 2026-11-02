@@ -37,6 +37,8 @@ import {
   OWNER_STATUS,
   resolveAutoLoseRetentionDays,
   getLightPlanRetentionDaysFallback,
+  stripe,
+  getLightingSearchPriceIds,
 } from '../../lib/subscription';
 import { redis } from '../../lib/redis';
 import {
@@ -44,6 +46,7 @@ import {
   processDueOwnerDeletions,
   warnIfOwnerDeletionPreviewGraceEnabled,
 } from '../../lib/ownerDeletion';
+import { assignMemberNoIfMissing } from '../../lib/memberNo';
 
 export default async function handler(req, res) {
   // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
@@ -241,6 +244,60 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('[cron/process-cases] owner-deletion failed', err);
     results.errors.push({ step: 'owner-deletion', message: err.message });
+  }
+
+  // --- 4. 会員番号の採番(保険) ----------------------------------------
+  // Webhook(api/stripe-webhook.js)・ログイン時フォールバック(api/login.js)で
+  // 既に付いているはずだが、両方が届かなかった場合の保険として、照明サーチの
+  // 3Priceのアクティブなサブスクを申し込み順(start_date昇順)で走査し、
+  // 未採番のものだけ発番する。assignMemberNoIfMissing()は冪等なので、
+  // 既に採番済みの顧客に対しては何もしない。
+  results.memberNo = { checked: 0, errors: [] };
+  try {
+    const priceIds = [...getLightingSearchPriceIds()];
+    const candidates = [];
+    for (const priceId of priceIds) {
+      const list = await stripe.subscriptions.list({
+        price: priceId,
+        status: 'active',
+        limit: 100,
+        expand: ['data.customer'],
+      });
+      candidates.push(...list.data);
+    }
+    candidates.sort((a, b) => (a.start_date || 0) - (b.start_date || 0));
+
+    const seenCustomerIds = new Set();
+    for (const sub of candidates) {
+      const customerRef = sub.customer;
+      const customerId = typeof customerRef === 'string' ? customerRef : customerRef?.id;
+      if (!customerId || seenCustomerIds.has(customerId)) continue;
+      seenCustomerIds.add(customerId);
+
+      let email = typeof customerRef === 'object' ? customerRef.email : null;
+      if (!email) {
+        try {
+          const customer = await stripe.customers.retrieve(customerId);
+          email = customer?.email;
+        } catch (err) {
+          console.error(`[cron/process-cases] customer(${customerId})の取得に失敗しました:`, err);
+          results.memberNo.errors.push({ customerId, step: 'member-no-customer', message: err.message });
+          continue;
+        }
+      }
+      if (!email) continue;
+
+      try {
+        await assignMemberNoIfMissing(email);
+        results.memberNo.checked++;
+      } catch (err) {
+        console.error(`[cron/process-cases] ${email} の会員番号採番(保険)に失敗しました:`, err);
+        results.memberNo.errors.push({ email, step: 'member-no', message: err.message });
+      }
+    }
+  } catch (err) {
+    console.error('[cron/process-cases] 会員番号採番(保険)のサブスク一覧取得に失敗しました:', err);
+    results.memberNo.errors.push({ step: 'member-no-list', message: err.message });
   }
 
   return res.status(200).json(results);

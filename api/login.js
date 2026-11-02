@@ -18,6 +18,7 @@ import { isAdminEmail } from '../lib/adminEmails';
 import { checkActiveSubscriptionLive, getSubscriptionStateCached } from '../lib/subscription';
 import { readQuota } from '../lib/quota';
 import { getTosConsent, isTosConsentCurrent, detectAndRecordCheckoutConsent } from '../lib/legalConsent';
+import { assignMemberNoIfMissing, hasMemberNo } from '../lib/memberNo';
 import {
   OTP_MAX_ATTEMPTS,
   generateOtpCode,
@@ -247,6 +248,29 @@ async function handleVerifyOtp(req, res) {
   }
 
   const admin = isAdminEmail(normalizedEmail);
+
+  // 会員番号の採番フォールバック。本来はWebhook(api/stripe-webhook.js)で即時に
+  // 付くはずだが、届かなかった場合の保険としてログイン時にも確認する(冪等)。
+  // 管理者はStripe顧客を持たないため対象外(呼んでも何もせず終わるが、不要な
+  // Stripe往復を避けるため先に弾く)。
+  //
+  // 【既に番号がある人への近道】hasMemberNo()はRedisの対応表だけを見るため
+  // Stripeへ一切問い合わせない。これが真ならassignMemberNoIfMissing()
+  // (customers.list・subscriptions.list・customers.retrieveの3往復)を呼ばずに
+  // 済ませる。毎回のログインでStripeに余計な往復をさせないための最適化で、
+  // Stripe側の写しとのずれ直しは日次cronの保険ステップに任せる(そちらは
+  // 番号の有無に関わらず毎回assignMemberNoIfMissing()を呼ぶ)。
+  // 失敗してもログイン自体は継続する。
+  if (!admin) {
+    try {
+      if (!(await hasMemberNo(normalizedEmail))) {
+        await assignMemberNoIfMissing(normalizedEmail);
+      }
+    } catch (err) {
+      console.error(`[login] ${normalizedEmail} の会員番号採番に失敗しました:`, err);
+    }
+  }
+
   const token = createSessionToken(normalizedEmail);
   const quota = await readQuota({ email: normalizedEmail, limits, period, campaign });
   return res.status(200).json({ success: true, admin, token, quota });

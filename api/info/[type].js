@@ -3,11 +3,13 @@
 // GET /api/info/announcements            … お知らせ一覧の取得
 // GET /api/info/contact-config           … お問い合わせフォーム用の宛先・アカウント情報の取得
 // GET /api/info/admin-prefecture-stats   … 管理者向け・都道府県別の登録者数集計
+// GET /api/info/member-no                … 設定画面向け・会員番号の取得
 
 import { requireAuthWithPlan } from '../_auth';
 import { redis, redisKey } from '../../lib/redis';
 import { isAdminEmail } from '../../lib/adminEmails';
 import { buildPrefectureStats } from '../../lib/companyStats';
+import { formatMemberNo } from '../../lib/memberNo';
 
 async function getAnnouncements(req, res) {
   const announcements = (await redis.get(redisKey('announcements'))) || [];
@@ -57,6 +59,15 @@ async function getAdminPrefectureStats(req, res, email) {
   });
 }
 
+// 設定画面の「契約プラン」欄近くに表示する会員番号。Redisの対応表(正)を直接読むだけで、
+// Stripeへの往復は発生させない(表示用の読み取りなので、採番そのものはWebhook/
+// ログイン時フォールバック/日次cronのいずれかが既に済ませている前提)。
+// 未採番(まだ番号が無い・管理者)ならmemberNo: nullを返す。
+async function getMemberNo(req, res, email) {
+  const no = await redis.get(redisKey('ls_member_no', 'by_email', email));
+  return res.status(200).json({ memberNo: formatMemberNo(no) });
+}
+
 async function getContactConfig(req, res, email, limits) {
   return res.status(200).json({
     supportEmail: process.env.SUPPORT_EMAIL || 'support@example.com',
@@ -92,6 +103,7 @@ export default async function handler(req, res) {
   if (type === 'announcements') return getAnnouncements(req, res);
   if (type === 'contact-config') return getContactConfig(req, res, email, limits);
   if (type === 'admin-prefecture-stats') return getAdminPrefectureStats(req, res, email);
+  if (type === 'member-no') return getMemberNo(req, res, email);
 
   return res.status(404).json({ error: 'Not found' });
 }

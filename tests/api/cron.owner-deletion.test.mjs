@@ -122,6 +122,10 @@ test('Pass3a: 既に削除予定登録済みのオーナーはStripeに問い合
   await setCompany(email);
   const farFuture = Date.now() + 200 * DAY_MS;
   await redis.zadd(OWNER_DELETION_SCHEDULE_KEY, { score: farFuture, member: email });
+  // ステップ4(会員番号採番の保険)がデフォルトのサブスクを候補として拾ってしまい、
+  // このテストが検証したいPass3a側の「Stripeに問い合わせない」という主張と無関係に
+  // customers.listが呼ばれてしまうため、候補なしにしてステップ4を素通りさせる。
+  fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] }));
 
   const res = await callCron();
 
@@ -495,6 +499,86 @@ test('猶予短縮が有効なときは、cron実行のたびにconsole.warnで�
     warnMessages.some((msg) => msg.includes('猶予期間の短縮') && msg.includes('15')),
     'console.warnで猶予短縮の有効化と分数が通知されるはず'
   );
+});
+
+// --- 会員番号(ls_member_no)の削除 ------------------------------------------
+// 利用規約v2「メールアドレスに紐づく情報をすべて削除する」に合わせ、Redisの
+// 対応表とStripe顧客metadataの写しの両方を消すことを確認する(決定事項)。
+
+test('Pass3b: ドライラン時、hasMemberNoがdryRunTargetsに含まれる', async () => {
+  const email = 'dryrun-memberno@example.com';
+  await setCompany(email);
+  await redis.set(redisKey('ls_member_no', 'by_email', email), '3');
+  await redis.zadd(OWNER_DELETION_SCHEDULE_KEY, { score: Date.now() - 1000, member: email });
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [] }));
+
+  const res = await callCron();
+
+  assert.equal(res.body.ownerDeletion.dryRunTargets.length, 1);
+  assert.equal(res.body.ownerDeletion.dryRunTargets[0].hasMemberNo, true);
+  // ドライランなので実際には消えていない
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), '3');
+});
+
+test('Pass3b: 実削除時、Redisの対応表とStripe顧客metadataの写しの両方が消える', async () => {
+  process.env.OWNER_DELETION_DRY_RUN = 'false';
+  const email = 'real-memberno@example.com';
+  await setCompany(email);
+  await redis.set(redisKey('ls_member_no', 'by_email', email), '3');
+  await redis.zadd(OWNER_DELETION_SCHEDULE_KEY, { score: Date.now() - 1000, member: email });
+
+  fakeStripe.__seedCustomer('cus_memberno', { metadata: { ls_member_no: '3' } });
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_memberno' }] }));
+  // resolveOwnerDeletionRecheck()もlistStripeCustomerIdsByEmail()経由で同じ顧客IDを
+  // 見るため、サブスクが無い(=解約済み・削除してよい)状態にしておく。
+  fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] }));
+
+  const res = await callCron();
+
+  assert.deepEqual(res.body.ownerDeletion.deleted, [email]);
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), null, 'Redisの対応表が消えること');
+  assert.equal(fakeStripe.__peekCustomer('cus_memberno').metadata.ls_member_no, '', 'Stripe側の写しが空文字で上書きされること');
+});
+
+test('Pass3b: 同じメールに複数のStripe顧客が紐づいていれば、全員のls_member_noを消す', async () => {
+  process.env.OWNER_DELETION_DRY_RUN = 'false';
+  const email = 'multi-customer-memberno@example.com';
+  await setCompany(email);
+  await redis.set(redisKey('ls_member_no', 'by_email', email), '9');
+  await redis.zadd(OWNER_DELETION_SCHEDULE_KEY, { score: Date.now() - 1000, member: email });
+
+  fakeStripe.__seedCustomer('cus_old', { metadata: { ls_member_no: '9' } });
+  fakeStripe.__seedCustomer('cus_dup', { metadata: { ls_member_no: '9' } });
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_old' }, { id: 'cus_dup' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] }));
+
+  const res = await callCron();
+
+  assert.deepEqual(res.body.ownerDeletion.deleted, [email]);
+  assert.equal(fakeStripe.__peekCustomer('cus_old').metadata.ls_member_no, '');
+  assert.equal(fakeStripe.__peekCustomer('cus_dup').metadata.ls_member_no, '');
+});
+
+test('Pass3b: Stripe顧客のls_member_no削除が失敗したら、予定を残して翌日再試行する', async () => {
+  process.env.OWNER_DELETION_DRY_RUN = 'false';
+  const email = 'memberno-fail@example.com';
+  await setCompany(email);
+  await redis.set(redisKey('ls_member_no', 'by_email', email), '4');
+  await redis.zadd(OWNER_DELETION_SCHEDULE_KEY, { score: Date.now() - 1000, member: email });
+
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_fail' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] }));
+  fakeStripe.__setHandler('customers.update', async () => {
+    throw new Error('stripe unavailable (test)');
+  });
+
+  const res = await callCron();
+
+  assert.deepEqual(res.body.ownerDeletion.deleted, [], '会員番号削除が失敗したので完了にしない');
+  assert.ok(res.body.ownerDeletion.errors.some((e) => e.step === 'stripe-member-no'));
+  assert.ok(__getZScore(OWNER_DELETION_SCHEDULE_KEY, email) !== null, '予定は残る(翌日再試行のため)');
+  // Redis側(company等)は先に消えてしまっているが、会員番号削除の失敗で
+  // 全体としては「未完了」のまま翌日再試行される(既存のhasNonBlobFailureと同じ扱い)。
 });
 
 test('猶予短縮が無効(production)なら、それらしいconsole.warnは出ない', async () => {

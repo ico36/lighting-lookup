@@ -30,6 +30,8 @@ function defaultHandlers() {
     },
     customers: {
       list: async () => ({ data: [{ id: 'cus_test' }] }),
+      retrieve: async (id) => defaultCustomerRetrieve(id),
+      update: async (id, params) => defaultCustomerUpdate(id, params),
     },
     subscriptions: {
       list: async () => ({ data: [defaultSubscription()] }),
@@ -68,6 +70,26 @@ function defaultHandlers() {
 // __reset()で必ずクリアする(テスト間の汚染防止)。
 let scheduleStore = new Map();
 let scheduleIdCounter = 0;
+
+// customers.retrieve/updateのフェイク永続化(インメモリ)。lib/memberNo.jsが
+// 「取得→metadataを見る→必要なら更新」を1回のテスト内で行うため、update()の
+// 結果を後続のretrieve()が見られるよう簡易的なMapで状態を持つ。__reset()で
+// 必ずクリアする(テスト間の汚染防止)。
+let customerStore = new Map();
+
+function defaultCustomerRetrieve(id) {
+  if (!customerStore.has(id)) {
+    customerStore.set(id, { id, email: `${id}@example.com`, metadata: {} });
+  }
+  return customerStore.get(id);
+}
+
+function defaultCustomerUpdate(id, params) {
+  const existing = customerStore.get(id) || { id, email: `${id}@example.com`, metadata: {} };
+  const updated = { ...existing, metadata: { ...existing.metadata, ...(params?.metadata || {}) } };
+  customerStore.set(id, updated);
+  return updated;
+}
 
 function defaultScheduleCreate(params) {
   const nowSec = Math.floor(Date.now() / 1000);
@@ -211,6 +233,7 @@ export function __reset() {
   maxConcurrent = 0;
   scheduleStore = new Map();
   scheduleIdCounter = 0;
+  customerStore = new Map();
   handlers = defaultHandlers();
 }
 __reset();
@@ -281,6 +304,20 @@ export function __getMaxConcurrent() {
   return maxConcurrent;
 }
 
+/**
+ * customers.retrieve()/update()を経由せず、既に存在する顧客として
+ * ストアへ直接登録する(例: 「Stripe側にls_member_noの写しが既にある」状態を
+ * 呼び出し履歴を汚さずに作るため)。
+ */
+export function __seedCustomer(id, data = {}) {
+  customerStore.set(id, { id, email: `${id}@example.com`, metadata: {}, ...data });
+}
+
+/** テストの検証用。customers.retrieve()と違い呼び出しログに乗らない。 */
+export function __peekCustomer(id) {
+  return customerStore.get(id) || null;
+}
+
 async function tracked(name, fn, args) {
   concurrent += 1;
   maxConcurrent = Math.max(maxConcurrent, concurrent);
@@ -300,6 +337,8 @@ export default function Stripe() {
     },
     customers: {
       list: (...args) => tracked('customers.list', handlers.customers.list, args),
+      retrieve: (...args) => tracked('customers.retrieve', handlers.customers.retrieve, args),
+      update: (...args) => tracked('customers.update', handlers.customers.update, args),
     },
     subscriptions: {
       list: (...args) => tracked('subscriptions.list', handlers.subscriptions.list, args),

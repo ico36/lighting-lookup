@@ -1628,6 +1628,9 @@
          レスポンスから描画するため、ここには一切書かない(アップグレードモーダルと
          同じ方針)。 -->
     <div class="modal-section-label" style="margin-top:0;">契約プラン</div>
+    <!-- 会員番号。/api/info/member-noから取得して表示専用で出すだけ(未採番・管理者は
+         何も表示しない)。refreshSettingsMemberNo()が描画する。 -->
+    <div id="settings-member-no" style="display:none;font-size:13px;color:var(--text2);margin-bottom:8px;"></div>
     <!-- 現在のプラン・月額・次回更新日(または解約予定日)。get-downgrade-optionsの
          レスポンスからrenderCurrentPlanInto()が描画する。契約が無い(管理者等、
          404 subscription_not_found)場合は何も表示しない。 -->
@@ -3158,6 +3161,29 @@ async function refreshSettingsPendingDowngrade() {
   renderPendingDowngradeInto('settings-pending-downgrade', data?.pendingDowngrade || null);
 }
 
+// 設定画面の会員番号。未採番(発番前・管理者)ならmemberNoがnullで返るので、
+// その場合は何も表示しない。
+async function refreshSettingsMemberNo() {
+  const el = document.getElementById('settings-member-no');
+  if (!el) return;
+  try {
+    const response = await authFetch('/api/info/member-no');
+    if (!response.ok) {
+      el.style.display = 'none';
+      return;
+    }
+    const data = await response.json();
+    if (!data.memberNo) {
+      el.style.display = 'none';
+      return;
+    }
+    el.textContent = `会員番号：${data.memberNo}`;
+    el.style.display = 'block';
+  } catch (err) {
+    el.style.display = 'none';
+  }
+}
+
 async function refreshHelpPendingDowngrade() {
   const pendingDowngrade = await fetchPendingDowngrade();
   renderPendingDowngradeInto('help-pending-downgrade', pendingDowngrade, {
@@ -4008,6 +4034,7 @@ function openCompanySettings() {
   document.getElementById('settings-error').style.display = 'none';
   document.getElementById('company-settings-overlay').classList.add('open');
   refreshSettingsPendingDowngrade();
+  refreshSettingsMemberNo();
 }
 
 function closeCompanySettings() {
