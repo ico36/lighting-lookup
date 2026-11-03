@@ -113,7 +113,17 @@ test('persistEstimateForm(): estimateFormSaveキーでcustomerNameとestimateMet
     persistEstimateFormBody.includes('estimateMeta: {'),
     'estimateMetaキーが見つからない'
   );
-  const ESTIMATE_META_FIELDS = ['clientName', 'clientSite', 'laborPrice', 'visitPrice', 'bizNote', 'extraItems'];
+  const ESTIMATE_META_FIELDS = [
+    'clientName',
+    'clientSite',
+    'laborPrice',
+    'visitPrice',
+    'laborLabel',
+    'visitLabel',
+    'issueDate',
+    'bizNote',
+    'extraItems',
+  ];
   for (const field of ESTIMATE_META_FIELDS) {
     assert.ok(
       persistEstimateFormBody.includes(field),

@@ -759,11 +759,9 @@
   .estimate-form-row .field-key {
     min-width: 90px;
   }
-  /* 施工費・出張費と任意費用項目で金額欄を同じ列に固定する。Flexboxでは、枠線付きの
-     テキスト入力欄と枠線なしのラベルで最小幅の扱いが異なり、同じflex:6/4でも金額欄の
-     実測幅がずれることがある。3列Grid（項目名/金額/削除ボタンまたはスペーサー）に
-     統一し、金額欄を必ず第2列に置く。minmax(0, ...)にして入力欄の既定最小幅が列配分を
-     押し広げないようにする。 */
+  /* 施工費・出張費と任意費用項目で金額欄を同じ列に固定する。3列Grid（項目名/金額/
+     削除ボタンまたはスペーサー）に統一し、金額欄を必ず第2列に置く。minmax(0, ...)に
+     して入力欄の既定最小幅が列配分を押し広げないようにする。 */
   .estimate-price-row {
     display: grid;
     grid-template-columns: minmax(0, 6fr) minmax(0, 4fr) 28px;
@@ -771,7 +769,6 @@
     align-items: center;
     margin-bottom: 10px;
   }
-  .estimate-price-row > .field-key,
   .estimate-price-row > .stacked-input,
   .estimate-price-row > .yen-prefix {
     min-width: 0;
@@ -1513,6 +1510,12 @@
         <input type="text" id="client-name" placeholder="お客様名（例：山田）" />
         <input type="text" id="client-site" placeholder="工事場所（例：リビング照明）" />
       </div>
+      <!-- 提出日(issueDate)。空欄なら見積書生成時の今日の日付を使う(todayStrと同じ)。
+           保存済みの値があっても次回フォームを開いたときは自動で埋めない
+           (showEstimateForm()参照)。数日後に同じ案件の見積書を作り直したとき、
+           古い日付が初期値として残って気づかず古いままになる事故を避けるため。 -->
+      <div class="section-label" style="margin-top:4px;">提出日（空欄なら今日の日付）</div>
+      <input type="date" id="estimate-issue-date" class="stacked-input" style="margin-bottom:0;" />
     </div>
 
     <div class="input-card">
@@ -1548,28 +1551,23 @@
 
     <div class="input-card">
       <div class="section-label">金額入力</div>
-      <!-- flex:6/4・font-size/color・末尾のスペーサーはすべてインライン上書き(CSSルール
-           本体は変更しない)。.estimate-form-row .field-keyのmin-width:90px・font-size:
-           12px・color:var(--text2)は材料費小計の行にも効いており、そちらは金額入力行
-           ではないため巻き込みたくない。目的はどれも同じで、施工費・出張費・追加した
-           費用項目(extraItems)の4行の金額欄を縦に揃え、見た目の強さも揃えること。
-           - 3列Grid: 施工費・出張費と追加行で同じ列定義を使い、金額欄を第2列に固定する
-           - font-size:14px;color:var(--text);: 隣の追加項目の入力欄(.stacked-input)と
-             同じ見た目にする。ここだけ12px・グレーで弱く見えていたため
-           - padding-left:15px: .extra-item-labelが継承する.stacked-inputのpadding-left
-             (14px)+border(1px)の合計。ラベル(span、枠無し)は左端から文字が始まるが、
-             追加行の項目名(input、枠あり)は内側から始まるため、そのままだと文字の頭が
-             ずれる。この値で文字の開始位置を揃える
+      <!-- 施工費・出張費・追加した費用項目(extraItems)の4行の金額欄を縦に揃え、見た目の
+           強さも揃える。
+           - 3列Grid(.estimate-price-row): 施工費・出張費と追加行で同じ列定義を使い、
+             金額欄を第2列に固定する
+           - 項目名(1列目)はlaborLabel/visitLabelの編集欄(.stacked-input)。
+             .extra-item-labelと同じ見た目・同じmaxlength="50"にすることで、
+             「施工費」「出張費」も任意の費用項目と同じ扱いで編集できることを示す
            - 末尾の.remove-btn-spacer: 追加行は[項目名][金額][✕ボタン]の3要素構成だが
              こちらは[項目名][金額]の2要素構成のため、ボタン幅ぶん金額欄の位置がずれる。
              見えないスペーサーで幅だけ合わせる -->
       <div class="estimate-price-row">
-        <span class="field-key" style="font-size:14px;color:var(--text);padding-left:15px;">施工費</span>
+        <input type="text" class="stacked-input" id="labor-label-input" placeholder="施工費" maxlength="50" style="margin-bottom:0;" />
         <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-labor" placeholder="0" oninput="updateEstimatePreview()" /></div>
         <span class="remove-btn-spacer"></span>
       </div>
       <div class="estimate-price-row">
-        <span class="field-key" style="font-size:14px;color:var(--text);padding-left:15px;">出張費</span>
+        <input type="text" class="stacked-input" id="visit-label-input" placeholder="出張費" maxlength="50" style="margin-bottom:0;" />
         <div class="yen-prefix"><span>¥</span><input type="number" class="num-input" id="price-visit" placeholder="0" oninput="updateEstimatePreview()" /></div>
         <span class="remove-btn-spacer"></span>
       </div>
@@ -6977,8 +6975,8 @@ function showEstimateForm() {
   hideError(document.getElementById('estimate-form-error'));
   document.getElementById('estimate-form-save-msg').textContent = '';
 
-  // 案件名(customerName)・お客様名・工事場所・施工費・出張費・備考・任意の費用項目
-  // (extraItems)の書き戻しは、estimateFormCaseId(前回この関数がフォームに反映した
+  // 案件名(customerName)・お客様名・工事場所・施工費/出張費の金額とラベル・備考・
+  // 任意の費用項目(extraItems)の書き戻しは、estimateFormCaseId(前回この関数がフォームに反映した
   // 案件のID)がcurrentCartCaseId(これから開こうとしている案件のID)と一致する間は
   // スキップする。この関数はopenEstimateFromCaseDetail()・openEstimateFromCart()の
   // 両方から「フォームを開き直す」ために呼ばれるため、一致時にもここを無条件に
@@ -6997,10 +6995,11 @@ function showEstimateForm() {
   // なる) → カートから見積書を作成(openEstimateFromCart())、という最も守りたい
   // 経路が「非表示を経由した」という理由だけでスキップされず、入力が消えたままに
   // なってしまう。estimateFormCaseIdとcurrentCartCaseIdの一致判定だけで十分なのは、
-  // 6欄+extraItemsへの書き込みがこの関数一箇所に閉じているため(下記参照)。
+  // 9欄+extraItemsへの書き込みがこの関数一箇所に閉じているため(下記参照)。
   //
-  // 【この設計の前提】client-name・client-site・price-labor・price-visit・biz-note・
-  // estimate-case-name-inputの6欄への.value書き込みと、extraItemsの行の再構築
+  // 【この設計の前提】client-name・client-site・price-labor・price-visit・
+  // labor-label-input・visit-label-input・biz-note・estimate-case-name-input・
+  // estimate-issue-dateの9欄への.value書き込みと、extraItemsの行の再構築
   // (renderExtraItemRows())は、リポジトリ全体でこの関数一箇所に閉じている
   // (previewArchivedEstimate()はこれらの欄に触れず、buildEstimateSheetHTML()へ値を
   // 渡すだけ。handleImportFile()・doLogout()も触れない)。今後どこかにこれらへの
@@ -7009,14 +7008,23 @@ function showEstimateForm() {
   if (estimateFormCaseId !== currentCartCaseId) {
     document.getElementById('estimate-case-name-input').value = (cartCase && cartCase.customerName) || '';
 
-    // 案件に保存済みのお客様名・工事場所・施工費・出張費・備考・任意の費用項目を引き継ぐ
+    // 案件に保存済みのお客様名・工事場所・施工費/出張費の金額とラベル・備考・
+    // 任意の費用項目を引き継ぐ
     const meta = (cartCase && cartCase.estimateMeta) || {};
     document.getElementById('client-name').value = meta.clientName || '';
     document.getElementById('client-site').value = meta.clientSite || '';
     document.getElementById('price-labor').value = meta.laborPrice || '';
     document.getElementById('price-visit').value = meta.visitPrice || '';
+    document.getElementById('labor-label-input').value = meta.laborLabel || DEFAULT_LABOR_LABEL;
+    document.getElementById('visit-label-input').value = meta.visitLabel || DEFAULT_VISIT_LABEL;
     document.getElementById('biz-note').value = meta.bizNote || '';
     renderExtraItemRows(meta.extraItems || []);
+
+    // 提出日(estimate-issue-date)だけは他の7欄と違い、meta.issueDateを初期値として
+    // 入れない。保存した日付を次回開いたときの初期値として自動で埋めると、数日後に
+    // 同じ案件の見積書を作り直したときに古い日付が残ったまま気づかず生成してしまう
+    // 事故につながる。空欄＝生成した時点の今日の日付を使う、が既定の動作であるべき。
+    document.getElementById('estimate-issue-date').value = '';
   }
 
   updateEstimatePreview();
@@ -7065,6 +7073,13 @@ async function persistEstimateForm() {
   const clientSite = document.getElementById('client-site').value.trim();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
+  const laborLabel = document.getElementById('labor-label-input').value.trim();
+  const visitLabel = document.getElementById('visit-label-input').value.trim();
+  // type="date"の.valueは常に'YYYY-MM-DD'または空文字。空欄のまま保存すると、以前
+  // 保存されていたissueDateも空文字に上書きされる(showEstimateForm()が開くたびに
+  // この欄を空欄に戻すため、意図的に未入力にしたのか前回の値を消し忘れただけかを
+  // ここで区別できない。「空欄＝今日の日付を使う」を既定の動作として常に優先する)。
+  const issueDate = document.getElementById('estimate-issue-date').value;
   const bizNote = document.getElementById('biz-note').value.trim();
   const extraItems = readExtraItemsFromDOM();
 
@@ -7074,7 +7089,7 @@ async function persistEstimateForm() {
     body: JSON.stringify({
       estimateFormSave: {
         customerName,
-        estimateMeta: { clientName, clientSite, laborPrice, visitPrice, bizNote, extraItems }
+        estimateMeta: { clientName, clientSite, laborPrice, visitPrice, laborLabel, visitLabel, issueDate, bizNote, extraItems }
       }
     })
   });
@@ -7144,10 +7159,12 @@ function closeEstimateSheet() {
 // 案件がカート対象になることはない。以後の「カートに追加」は従来どおり現在
 // アクティブな案件に対して行われる）。persistEstimateForm()も呼ばない＝一切書き込まない。
 //
-// issueDateは案件のcreatedAtを使う。ここは「PDF保存／印刷」も使える閲覧経路のため、
-// 今日の日付にすると、数年前の金額のまま今日付けの見積書が出力されてしまい、
-// 施主に渡すと現在有効な見積書に見えかねない。作成日を出すことで、その紙自体が
-// 過去の記録だと分かるようにする。
+// issueDateは、案件にestimateMeta.issueDate(見積書生成時に入力された提出日)が
+// 保存されていればそれを使い、無ければ案件のcreatedAtを使う。ここは「PDF保存／印刷」も
+// 使える閲覧経路のため、今日の日付にすると、数年前の金額のまま今日付けの見積書が
+// 出力されてしまい、施主に渡すと現在有効な見積書に見えかねない。estimateMeta.issueDateが
+// 無い(旧データ、または提出日を未入力のまま生成した)場合は、作成日を出すことで、
+// その紙自体が過去の記録だと分かるようにする。
 function previewArchivedEstimate(caseId) {
   const c = currentCaseDetailData;
   if (!c || c.id !== caseId) {
@@ -7156,7 +7173,9 @@ function previewArchivedEstimate(caseId) {
     return;
   }
 
-  const issueDate = new Date(c.createdAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+  const issueDate = c.estimateMeta?.issueDate
+    ? formatIssueDate(c.estimateMeta.issueDate)
+    : new Date(c.createdAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
 
   document.getElementById('estimate-sheet').innerHTML = buildEstimateSheetHTML({
     items: c.cartItems,
@@ -7164,6 +7183,8 @@ function previewArchivedEstimate(caseId) {
     clientSite: c.estimateMeta?.clientSite,
     laborPrice: c.estimateMeta?.laborPrice,
     visitPrice: c.estimateMeta?.visitPrice,
+    laborLabel: c.estimateMeta?.laborLabel,
+    visitLabel: c.estimateMeta?.visitLabel,
     extraItems: c.estimateMeta?.extraItems,
     bizNote: c.estimateMeta?.bizNote,
     companyInfo,
@@ -7209,6 +7230,18 @@ function yen(n) {
 function cartMaterialSubtotal() {
   const items = (cartCase && cartCase.cartItems) || [];
   return items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+}
+
+// 'YYYY-MM-DD'形式の提出日(issueDate)を、見積書に表示する形式(todayStrと同じ
+// 'ja-JP'のyear/month/day numeric、例: 2026年11月2日)に変換する。
+// new Date('YYYY-MM-DD')はUTC深夜0時として解釈されるため、日本時間ではこの
+// オフセット分だけ日付がずれる(アーカイブ検索の日付範囲で過去に起きた不具合と
+// 同じ罠、lib/dateMath.js参照)。年・月・日に分けてnew Date(year, month-1, day)
+// (数値引数3つのコンストラクタはローカル時刻として解釈される。todayStrの
+// new Date()と同じ解釈のため、表示が食い違わない)を組み立てることでこの罠を避ける。
+function formatIssueDate(dateOnlyStr) {
+  const [year, month, day] = dateOnlyStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 // 見積書フォームの任意の費用項目(extraItems)行1つぶんのHTML。renderExtraItemRows()
@@ -7301,6 +7334,13 @@ function updateEstimatePreview() {
   if (el) el.textContent = yen(total);
 }
 
+// 施工費・出張費のラベル(laborLabel/visitLabel)の初期値。lib/cases.jsの
+// DEFAULT_LABOR_LABEL/DEFAULT_VISIT_LABELと同じ文字列(見た目を変えないため)。
+// フロントとサーバーは別プロセス(public/index.htmlはビルドステップなしのvanilla JS
+// なので共通モジュールをimportできない)のため、値の重複は承知のうえで両方に持つ。
+const DEFAULT_LABOR_LABEL = '施工費';
+const DEFAULT_VISIT_LABEL = '出張費';
+
 // 見積書(#estimate-sheet)のHTMLを組み立てる純粋関数。document/window/getElementByIdは
 // 一切参照しない。値を「DOMから読むか、案件レコードから読むか」は呼び出し側の責務、
 // 「読み取った値が空だったときにどう表示するか（例: お客様名が空なら『お客様』にする）」は
@@ -7310,7 +7350,7 @@ function updateEstimatePreview() {
 // 構造的に保証する。issueDateは呼び出し側で計算して渡す（ここでは new Date() を呼ばない）。
 // 「見積書に表示する日付」という意味の中立的な名前で、何の日付にするか（今日か、
 // 案件の作成日か等）は呼び出し側が決める。
-function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, extraItems, bizNote, companyInfo, issueDate }) {
+function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, visitPrice, laborLabel, visitLabel, extraItems, bizNote, companyInfo, issueDate }) {
   // laborPrice/visitPriceが空文字・undefinedだと以降の加算がNaNに化けるため、
   // clientNameと同じ理屈で数値も冒頭で正規化する。itemsが配列でない場合も空配列に倒す。
   // 以降はこの正規化後の値(labor/visit/list/extra)だけを参照し、生の引数は直接使わない。
@@ -7318,6 +7358,12 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
   const visit = Number(visitPrice) || 0;
   const list = Array.isArray(items) ? items : [];
   const extra = Array.isArray(extraItems) ? extraItems : [];
+
+  // laborLabel/visitLabelが空欄・未設定(旧データ)のときは初期値にフォールバックする。
+  // lib/cases.js normalizeEstimateMetaLabels()と同じ方針(50文字切り詰めはサーバー側で
+  // 保存時に済んでいるため、ここでは空欄フォールバックのみ行う)。
+  const displayLaborLabel = String(laborLabel || '').trim() || DEFAULT_LABOR_LABEL;
+  const displayVisitLabel = String(visitLabel || '').trim() || DEFAULT_VISIT_LABEL;
 
   const displayClientName = String(clientName || '').trim() || 'お客様';
   const displayClientSite = String(clientSite || '').trim();
@@ -7351,7 +7397,8 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
   `).join('');
 
   // extraItems(任意の費用項目)は施工費/出張費と違い、金額の符号に関わらず必ず表示する
-  // (出張費の`visit > 0`と同じ書き方をすると、マイナスの値引き行が消えてしまうため)。
+  // (施工費・出張費の`labor > 0`/`visit > 0`と同じ書き方をすると、マイナスの値引き行が
+  // 消えてしまうため)。
   // labelが空の行(金額だけ入力された行)はescapeHtml(item.label || '（項目名未設定）')の
   // 順で処理する。escapeHtml(x) || fallbackという書き方(escapeHtml()が空文字を返す前提に
   // 寄りかかる、既存3箇所にある慣習)を新しいコードで増やさないため、フォールバックは
@@ -7390,13 +7437,14 @@ function buildEstimateSheetHTML({ items, clientName, clientSite, laborPrice, vis
       </thead>
       <tbody>
         ${itemRowsHTML}
+        ${labor > 0 ? `
         <tr>
-          <td><div class="sheet-item-name">施工費</div></td>
+          <td><div class="sheet-item-name">${escapeHtml(displayLaborLabel)}</div></td>
           <td class="num-cell">${yen(labor)}</td>
-        </tr>
+        </tr>` : ''}
         ${visit > 0 ? `
         <tr>
-          <td><div class="sheet-item-name">出張費</div></td>
+          <td><div class="sheet-item-name">${escapeHtml(displayVisitLabel)}</div></td>
           <td class="num-cell">${yen(visit)}</td>
         </tr>` : ''}
         ${extraItemRowsHTML}
@@ -7461,6 +7509,8 @@ async function generateEstimateSheet(btn) {
   const materialSubtotal = cartMaterialSubtotal();
   const laborPrice = Number(document.getElementById('price-labor').value || 0);
   const visitPrice = Number(document.getElementById('price-visit').value || 0);
+  const laborLabel = document.getElementById('labor-label-input').value.trim() || DEFAULT_LABOR_LABEL;
+  const visitLabel = document.getElementById('visit-label-input').value.trim() || DEFAULT_VISIT_LABEL;
   // persistEstimateForm()が送るestimateMeta.extraItemsと同じ値にするため、同じ
   // readExtraItemsFromDOM()を呼ぶ(独自に読み直すと空行の除外条件が二重管理になる)。
   const extraItems = readExtraItemsFromDOM();
@@ -7470,6 +7520,11 @@ async function generateEstimateSheet(btn) {
   const total = subtotal + tax;
 
   const todayStr = new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' });
+  // 提出日(estimate-issue-date)が入力されていればその日付を、空欄なら今日の日付
+  // (todayStr)を使う。type="date"の.valueは常に'YYYY-MM-DD'または空文字なので、
+  // isDateOnlyString()相当の形式チェックは不要(ブラウザのdate inputが保証する)。
+  const issueDateInput = document.getElementById('estimate-issue-date').value;
+  const issueDateDisplay = issueDateInput ? formatIssueDate(issueDateInput) : todayStr;
 
   // clientName/clientSiteは上で既に.trim()済みの変数(window._lastEstimateTextの
   // テキストコピー用テンプレートで使う)なので、buildEstimateSheetHTML()には
@@ -7481,10 +7536,12 @@ async function generateEstimateSheet(btn) {
     clientSite: document.getElementById('client-site').value,
     laborPrice,
     visitPrice,
+    laborLabel,
+    visitLabel,
     extraItems,
     bizNote: document.getElementById('biz-note').value,
     companyInfo,
-    issueDate: todayStr,
+    issueDate: issueDateDisplay,
   });
 
   // .sheet-actionsはこの通常生成と previewArchivedEstimate()（閲覧専用プレビュー）の
@@ -7504,20 +7561,21 @@ async function generateEstimateSheet(btn) {
   ).join('\n');
 
   // HTML版のextraItemRowsHTMLと同じく、金額の符号に関わらず必ず表示する
-  // (出張費の`visitPrice > 0`と同じ書き方はしない)。テキストなのでescapeHtml()は不要。
+  // (施工費・出張費の`laborPrice > 0`/`visitPrice > 0`と同じ書き方はしない)。
+  // テキストなのでescapeHtml()は不要。
   const extraItemsText = extraItems.length
     ? extraItems.map(item => `${item.label || '（項目名未設定）'}：${yen(item.amount)}`).join('\n') + '\n'
     : '';
 
   window._lastEstimateText = `
-御見積書（${todayStr}）
+御見積書（${issueDateDisplay}）
 ━━━━━━━━━━━━━━
 ${clientName} 様
 ${clientSite ? '工事場所：' + clientSite + '\n' : ''}
 【内容】
 ${itemsText}
-施工費：${yen(laborPrice)}
-${visitPrice > 0 ? '出張費：' + yen(visitPrice) + '\n' : ''}
+${laborPrice > 0 ? laborLabel + '：' + yen(laborPrice) + '\n' : ''}
+${visitPrice > 0 ? visitLabel + '：' + yen(visitPrice) + '\n' : ''}
 ${extraItemsText}小計：${yen(subtotal)}
 消費税（10%）：${yen(tax)}
 合計：${yen(total)}

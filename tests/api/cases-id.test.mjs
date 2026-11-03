@@ -285,6 +285,9 @@ test('PATCH { estimateFormSave: { customerName, estimateMeta } }: 両方同時�
     visitPrice: 1000,
     bizNote: '備考テキスト',
     extraItems: [],
+    issueDate: '',
+    laborLabel: '施工費',
+    visitLabel: '出張費',
   });
 });
 
@@ -303,7 +306,17 @@ test('PATCH { estimateFormSave: { customerName } }: customerNameのみ指定時�
   assert.equal(res.body.case.customerName, '名前だけ変更様');
   assert.deepEqual(
     res.body.case.estimateMeta,
-    { clientName: '', clientSite: '', laborPrice: 0, visitPrice: 0, bizNote: '', extraItems: [] },
+    {
+      clientName: '',
+      clientSite: '',
+      laborPrice: 0,
+      visitPrice: 0,
+      bizNote: '',
+      extraItems: [],
+      issueDate: '',
+      laborLabel: '施工費',
+      visitLabel: '出張費',
+    },
     'estimateMetaを指定していないのに変化している'
   );
 });
@@ -569,4 +582,279 @@ test('estimateMeta更新(applyEstimateMeta())とrestoreImport(restoreCaseFromImp
     res2.body.case.estimateMeta.extraItems,
     '2つの経路で正規化結果が食い違っている(二重管理の再発の疑い)'
   );
+});
+
+// ----- laborLabel/visitLabel(施工費・出張費の項目名を編集可能にする) -----
+// extraItemsのlabelと同じ検証方針(50文字切り詰め・空欄/不正値は初期値へフォールバック)を
+// normalizeEstimateMetaLabels()に集約し、applyEstimateMeta()・restoreCaseFromImport()の
+// 両方から呼ぶ。normalizeEstimateMetaLabels()自体はexportされていない(lib/cases.jsの
+// 既存の慣習として、lib層の検証ロジックはAPIハンドラ経由のみでテストする)ため、
+// このファイルの慣習(APIハンドラを叩く)に揃える。
+
+test('PATCH { estimateFormSave: { estimateMeta: { laborLabel, visitLabel } } }: 50文字に切り詰められる', async () => {
+  const created = await createNormalCase('ラベル切り詰めテスト様');
+  setPlan('light');
+
+  const longLaborLabel = '工'.repeat(60);
+  const longVisitLabel = '出'.repeat(60);
+  const req = fakeReq(
+    {
+      estimateFormSave: {
+        estimateMeta: { laborLabel: longLaborLabel, visitLabel: longVisitLabel },
+      },
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(
+    res.body.case.estimateMeta.laborLabel,
+    longLaborLabel.slice(0, 50),
+    'laborLabelが50文字に切り詰められていない'
+  );
+  assert.equal(
+    res.body.case.estimateMeta.visitLabel,
+    longVisitLabel.slice(0, 50),
+    'visitLabelが50文字に切り詰められていない'
+  );
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { laborLabel, visitLabel } } }: 空欄・空白のみは初期値(施工費/出張費)にフォールバックする', async () => {
+  const created = await createNormalCase('ラベル空欄テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    {
+      estimateFormSave: {
+        estimateMeta: { laborLabel: '   ', visitLabel: '' },
+      },
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.estimateMeta.laborLabel, '施工費', '空白のみのlaborLabelが初期値にフォールバックしていない');
+  assert.equal(res.body.case.estimateMeta.visitLabel, '出張費', '空文字のvisitLabelが初期値にフォールバックしていない');
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { laborLabel } } }: laborLabelのみ指定時はvisitLabelを変更しない', async () => {
+  const created = await createNormalCase('片方だけ変更テスト様');
+  setPlan('light');
+
+  const req1 = fakeReq(
+    { estimateFormSave: { estimateMeta: { visitLabel: '出張・駐車場費' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  await handler(req1, fakeRes());
+
+  const req2 = fakeReq(
+    { estimateFormSave: { estimateMeta: { laborLabel: '作業費' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res2 = fakeRes();
+  await handler(req2, res2);
+
+  assert.equal(res2.statusCode, 200);
+  assert.equal(res2.body.case.estimateMeta.laborLabel, '作業費');
+  assert.equal(
+    res2.body.case.estimateMeta.visitLabel,
+    '出張・駐車場費',
+    'laborLabelだけ指定したのにvisitLabelが変化している'
+  );
+});
+
+test('PATCH { restoreImport: { estimateMeta } }: laborLabel/visitLabelを含むestimateMetaがそのまま復元される', async () => {
+  const created = await createNormalCase('ラベル復元テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    {
+      restoreImport: {
+        estimateMeta: { laborLabel: '作業費', visitLabel: '駐車場代' },
+      },
+    },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.estimateMeta.laborLabel, '作業費');
+  assert.equal(res.body.case.estimateMeta.visitLabel, '駐車場代');
+});
+
+test('estimateMeta更新(applyEstimateMeta())とrestoreImport(restoreCaseFromImport())で、同じlaborLabel/visitLabel入力が同じ結果に正規化される', async () => {
+  const rawLabels = { laborLabel: '工'.repeat(60), visitLabel: '   ' };
+  const expected = { laborLabel: '工'.repeat(50), visitLabel: '出張費' };
+
+  const viaEstimateMeta = await createNormalCase('ラベル経路比較A様');
+  setPlan('light');
+  const req1 = fakeReq(
+    { estimateFormSave: { estimateMeta: rawLabels } },
+    { method: 'PATCH', query: { id: viaEstimateMeta.id } }
+  );
+  const res1 = fakeRes();
+  await handler(req1, res1);
+
+  const viaRestoreImport = await createNormalCase('ラベル経路比較B様');
+  const req2 = fakeReq(
+    { restoreImport: { estimateMeta: rawLabels } },
+    { method: 'PATCH', query: { id: viaRestoreImport.id } }
+  );
+  const res2 = fakeRes();
+  await handler(req2, res2);
+
+  assert.equal(res1.statusCode, 200);
+  assert.equal(res2.statusCode, 200);
+  assert.equal(res1.body.case.estimateMeta.laborLabel, expected.laborLabel, 'estimateMeta経路のlaborLabelが期待と異なる');
+  assert.equal(res1.body.case.estimateMeta.visitLabel, expected.visitLabel, 'estimateMeta経路のvisitLabelが期待と異なる');
+  assert.equal(res2.body.case.estimateMeta.laborLabel, expected.laborLabel, 'restoreImport経路のlaborLabelが期待と異なる');
+  assert.equal(res2.body.case.estimateMeta.visitLabel, expected.visitLabel, 'restoreImport経路のvisitLabelが期待と異なる');
+});
+
+// ----- issueDate(見積書の提出日を編集可能にする) -----
+// 'YYYY-MM-DD'形式のみ許容し、不正な形式はエラーにせず空文字に補正する方針を
+// normalizeEstimateMetaFields()に集約し、applyEstimateMeta()・restoreCaseFromImport()の
+// 両方から呼ぶ。normalizeEstimateMetaFields()自体はexportされていない(lib/cases.jsの
+// 既存の慣習として、lib層の検証ロジックはAPIハンドラ経由のみでテストする)ため、
+// このファイルの慣習(APIハンドラを叩く)に揃える。
+
+test('PATCH { estimateFormSave: { estimateMeta: { issueDate } } }: "YYYY-MM-DD"形式はそのまま保存される', async () => {
+  const created = await createNormalCase('提出日テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { estimateFormSave: { estimateMeta: { issueDate: '2026-11-02' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.estimateMeta.issueDate, '2026-11-02');
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { issueDate } } }: 不正な形式は空文字に補正される(エラーにしない)', async () => {
+  const created = await createNormalCase('提出日不正値テスト様');
+  setPlan('light');
+
+  const invalidValues = [
+    '2026/11/02', // 区切り文字が違う
+    '2026-11-2', // 日が1桁
+    '26-11-02', // 年が2桁
+    'not-a-date',
+    '2026-11-02T00:00:00+09:00', // 時刻付き(日付だけではない)
+  ];
+
+  for (const invalid of invalidValues) {
+    const req = fakeReq(
+      { estimateFormSave: { estimateMeta: { issueDate: invalid } } },
+      { method: 'PATCH', query: { id: created.id } }
+    );
+    const res = fakeRes();
+    await handler(req, res);
+
+    assert.equal(res.statusCode, 200, `不正値でエラーになっている: ${invalid}`);
+    assert.equal(res.body.case.estimateMeta.issueDate, '', `不正値が空文字に補正されていない: ${invalid}`);
+  }
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { issueDate } } }: 空文字を明示的に送ると空文字のまま保存される(クリア)', async () => {
+  const created = await createNormalCase('提出日クリアテスト様');
+  setPlan('light');
+
+  const req1 = fakeReq(
+    { estimateFormSave: { estimateMeta: { issueDate: '2026-11-02' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  await handler(req1, fakeRes());
+
+  const req2 = fakeReq(
+    { estimateFormSave: { estimateMeta: { issueDate: '' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res2 = fakeRes();
+  await handler(req2, res2);
+
+  assert.equal(res2.statusCode, 200);
+  assert.equal(res2.body.case.estimateMeta.issueDate, '', '明示的な空文字がクリアされず前回の値が残っている');
+});
+
+test('PATCH { estimateFormSave: { estimateMeta: { issueDate } } }: issueDateを指定しないときは変更しない', async () => {
+  const created = await createNormalCase('提出日未指定テスト様');
+  setPlan('light');
+
+  const req1 = fakeReq(
+    { estimateFormSave: { estimateMeta: { issueDate: '2026-11-02' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  await handler(req1, fakeRes());
+
+  const req2 = fakeReq(
+    { estimateFormSave: { estimateMeta: { clientName: 'お客様太郎' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res2 = fakeRes();
+  await handler(req2, res2);
+
+  assert.equal(res2.statusCode, 200);
+  assert.equal(res2.body.case.estimateMeta.clientName, 'お客様太郎');
+  assert.equal(
+    res2.body.case.estimateMeta.issueDate,
+    '2026-11-02',
+    'issueDateを指定していないのに変化している'
+  );
+});
+
+test('PATCH { restoreImport: { estimateMeta } }: issueDateを含むestimateMetaがそのまま復元される', async () => {
+  const created = await createNormalCase('提出日復元テスト様');
+  setPlan('light');
+
+  const req = fakeReq(
+    { restoreImport: { estimateMeta: { issueDate: '2026-01-15' } } },
+    { method: 'PATCH', query: { id: created.id } }
+  );
+  const res = fakeRes();
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.case.estimateMeta.issueDate, '2026-01-15');
+});
+
+test('estimateMeta更新(applyEstimateMeta())とrestoreImport(restoreCaseFromImport())で、同じissueDate入力が同じ結果に正規化される', async () => {
+  const rawValues = ['2026-11-02', '2026/11/02', ''];
+
+  // caseLimit(light: 5件)に当たらないよう、案件は経路ごとに1件だけ作って使い回す
+  // (値を変えて何度もPATCHするだけなら、同じ案件に対して送っても正規化結果の
+  // 検証としては問題ない)。
+  const viaEstimateMeta = await createNormalCase('提出日経路比較A様');
+  setPlan('light');
+  const viaRestoreImport = await createNormalCase('提出日経路比較B様');
+
+  for (const raw of rawValues) {
+    const expected = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+
+    const req1 = fakeReq(
+      { estimateFormSave: { estimateMeta: { issueDate: raw } } },
+      { method: 'PATCH', query: { id: viaEstimateMeta.id } }
+    );
+    const res1 = fakeRes();
+    await handler(req1, res1);
+
+    const req2 = fakeReq(
+      { restoreImport: { estimateMeta: { issueDate: raw } } },
+      { method: 'PATCH', query: { id: viaRestoreImport.id } }
+    );
+    const res2 = fakeRes();
+    await handler(req2, res2);
+
+    assert.equal(res1.statusCode, 200);
+    assert.equal(res2.statusCode, 200);
+    assert.equal(res1.body.case.estimateMeta.issueDate, expected, `estimateMeta経路の正規化結果が期待と異なる: ${JSON.stringify(raw)}`);
+    assert.equal(res2.body.case.estimateMeta.issueDate, expected, `restoreImport経路の正規化結果が期待と異なる: ${JSON.stringify(raw)}`);
+  }
 });
