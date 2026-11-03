@@ -53,6 +53,13 @@ const LIB_OTP_JS = path.join(REPO_ROOT, 'lib', 'otp.js');
 // 本物のまま読み込む(契約チェックはフェイクStripe経由で実ロジックごとテストする)。
 const LOGIN_JS = path.join(REPO_ROOT, 'api', 'login.js');
 
+// api/company.js が読む `./_auth`・`../lib/redis` も同じ考え方でフェイクへ。
+// requireAuthWithPlan(limits.plan)をテストから直接差し込めるようにするため
+// (CHECKOUT_JSのルールと同じ理由)、company:{email}の読み書きを実ネットワークに
+// 出さないため(LOGIN_JSのルールと同じ理由)。api/company.js自体・
+// lib/subscription.js(Stripe経由の契約チェック)は本物のまま読み込む。
+const COMPANY_JS = path.join(REPO_ROOT, 'api', 'company.js');
+
 // lib/subscription.js が読む `./redis`(subcheck:{version}:{email}キャッシュの
 // 読み書き)も同じフェイクへ。ここを差し替えないと、非管理者メールで
 // getSubscriptionStateCached()を呼ぶテストが実クライアント(KV_REST_API_URL/TOKEN
@@ -94,12 +101,12 @@ export async function resolve(specifier, context, nextResolve) {
     return { url: new URL('stripe.mjs', FAKES_DIR).href, shortCircuit: true };
   }
 
-  // 2. api/checkout.js が読む `./_auth` だけをフェイクへ。
-  //    requireAuthWithPlan の中身（Redis・Stripeの再照会）はE-5の対象外のため、
+  // 2. api/checkout.js・api/company.js が読む `./_auth` をフェイクへ。
+  //    requireAuthWithPlan の中身（Redis・Stripeの再照会）はテスト対象外のため、
   //    テストが直接 { email, limits } を差し込めるようにする。
   if (specifier === './_auth' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
-    if (parentPath === CHECKOUT_JS) {
+    if (parentPath === CHECKOUT_JS || parentPath === COMPANY_JS) {
       return { url: new URL('auth.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
@@ -140,10 +147,10 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
 
-  // 2e. api/login.js が読む `../lib/redis` も同じフェイクへ。
+  // 2e. api/login.js・api/company.js が読む `../lib/redis` も同じフェイクへ。
   if (specifier === '../lib/redis' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
-    if (parentPath === LOGIN_JS) {
+    if (parentPath === LOGIN_JS || parentPath === COMPANY_JS) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }

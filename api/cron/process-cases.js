@@ -41,7 +41,7 @@ import {
   getLightingSearchPriceIds,
   LIVE_STATUSES,
 } from '../../lib/subscription';
-import { redis } from '../../lib/redis';
+import { redis, redisKey } from '../../lib/redis';
 import {
   discoverAndScheduleOwnerDeletions,
   processDueOwnerDeletions,
@@ -267,6 +267,10 @@ export default async function handler(req, res) {
   // 上限はlimitオプションで安全装置として10000に設定(実運用でここに達することは
   // 想定していない)。
   results.memberNo = { checked: 0, errors: [] };
+  // 自社情報の社名(company:{email}.name)のStripe同期(保険)。会員番号の採番と
+  // 同じcandidates(照明サーチの有効な契約者)を使い回すため、Stripeへの追加往復は
+  // 発生しない(customerオブジェクトは既にexpand/retrieve済み)。
+  results.companyNameSync = { checked: 0, synced: 0, errors: [] };
   try {
     const priceIds = [...getLightingSearchPriceIds()];
     const candidates = [];
@@ -290,13 +294,18 @@ export default async function handler(req, res) {
       // expandが効いていれば(通常はこちら)、customerオブジェクトから
       // email・metadataの両方が1回のsubscriptions.listだけで手に入る。
       // 効いていない場合だけ、customers.retrieve()で両方まとめて取り直す。
+      // customerNameは会員番号採番(保険)では使わないが、自社情報の社名同期(保険)が
+      // Stripeへ追加で往復しなくて済むよう、同じexpand/retrieveの結果からここで
+      // 一緒に取り出しておく。
       let email = typeof customerRef === 'object' ? customerRef.email : null;
       let stripeNo = typeof customerRef === 'object' ? (customerRef.metadata?.ls_member_no || null) : null;
+      let customerName = typeof customerRef === 'object' ? (customerRef.name || null) : null;
       if (!email) {
         try {
           const customer = await stripe.customers.retrieve(customerId);
           email = customer?.email;
           stripeNo = customer?.metadata?.ls_member_no || null;
+          customerName = customer?.name || null;
         } catch (err) {
           console.error(`[cron/process-cases] customer(${customerId})の取得に失敗しました:`, err);
           results.memberNo.errors.push({ customerId, step: 'member-no-customer', message: err.message });
@@ -304,6 +313,25 @@ export default async function handler(req, res) {
         }
       }
       if (!email) continue;
+
+      // 自社情報(company:{email})の社名をStripe顧客のcustomer.nameに同期する(保険)。
+      // api/company.jsの保存時に即時反映されるはずだが、既に自社情報を登録済みの
+      // 契約者(機能追加前からの既存データ)には、次に自社情報を保存するまで反映され
+      // ないため、その保険としてここで1日1回確認する。キーの組み立てはapi/company.js
+      // と同じredisKey('company', email)を使う(Preview接頭辞の扱いも揃う)。
+      // 会員番号の採番ロジック(上記)には影響させないよう、独立したtry/catchにする
+      // (失敗しても後続の会員番号処理・次の契約者の処理は続ける)。
+      try {
+        const company = await redis.get(redisKey('company', email));
+        results.companyNameSync.checked++;
+        if (company?.name && company.name !== customerName) {
+          await stripe.customers.update(customerId, { name: company.name });
+          results.companyNameSync.synced++;
+        }
+      } catch (err) {
+        console.error(`[cron/process-cases] ${email} の自社情報のStripe同期(保険)に失敗しました:`, err);
+        results.companyNameSync.errors.push({ email, step: 'company-name-sync', message: err.message });
+      }
 
       try {
         // RedisとStripeの両方に番号があり、かつ一致していれば既に同期済み。
@@ -324,6 +352,7 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('[cron/process-cases] 会員番号採番(保険)のサブスク一覧取得に失敗しました:', err);
     results.memberNo.errors.push({ step: 'member-no-list', message: err.message });
+    results.companyNameSync.errors.push({ step: 'company-name-sync-list', message: err.message });
   }
 
   return res.status(200).json(results);

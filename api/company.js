@@ -7,6 +7,7 @@ import { redis, redisKey } from '../lib/redis';
 import { readQuota } from '../lib/quota';
 import { getTosConsent, isTosConsentCurrent, recordTosConsent, CURRENT_TOS_VERSION } from '../lib/legalConsent';
 import { PREFECTURES } from '../lib/prefectures';
+import { stripe, getActiveSubscriptionWithItem } from '../lib/subscription';
 
 const PREFECTURE_SET = new Set(PREFECTURES);
 
@@ -95,6 +96,31 @@ export default async function handler(req, res) {
     };
 
     await redis.set(key, company);
+
+    // 社名をStripe顧客のcustomer.nameにも書き込む(以降の請求書・領収書の宛名が
+    // 会社名になるようにするため)。失敗してもログだけに残し、自社情報の保存
+    // 自体・レスポンスには影響させない(api/login.jsの会員番号採番と同じ形。
+    // :264-272参照)。
+    //
+    // 管理者(limits.plan === 'admin')はStripe顧客を持たないため、不要な
+    // Stripe往復を避けるために先に弾く(login.jsが管理者をhasMemberNo()より前で
+    // 弾いているのと同じ考え方)。
+    if (limits.plan !== 'admin') {
+      try {
+        const { customerId, subscription } = await getActiveSubscriptionWithItem(email);
+        // subscriptionがnull(KYノートのみの契約・解約済み等)、または
+        // customerIdが無い場合は何もしない。getActiveSubscriptionWithItem()が
+        // 照明サーチの3Priceへの絞り込みと有効ステータス判定を既に行っている
+        // ため、ここでは結果だけを見る(lib/memberNo.jsのassignMemberNoIfMissing()
+        // と同じ判定)。
+        if (subscription && customerId) {
+          await stripe.customers.update(customerId, { name: company.name });
+        }
+      } catch (err) {
+        console.error(`[company] ${email} のStripe顧客名の同期に失敗しました:`, err);
+      }
+    }
+
     return res.status(200).json({ success: true, company });
   }
 

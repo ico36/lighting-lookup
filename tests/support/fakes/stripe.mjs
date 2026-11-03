@@ -86,7 +86,10 @@ function defaultCustomerRetrieve(id) {
 
 function defaultCustomerUpdate(id, params) {
   const existing = customerStore.get(id) || { id, email: `${id}@example.com`, metadata: {} };
-  const updated = { ...existing, metadata: { ...existing.metadata, ...(params?.metadata || {}) } };
+  // metadataは従来どおりマージ(既存キーを消さない)。name等のトップレベルの
+  // フィールドは実際のStripe customers.update()と同じく、渡された値でそのまま
+  // 上書きする(他のフィールドは既存の値を保つ)。
+  const updated = { ...existing, ...params, metadata: { ...existing.metadata, ...(params?.metadata || {}) } };
   customerStore.set(id, updated);
   return updated;
 }
