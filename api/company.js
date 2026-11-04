@@ -40,8 +40,10 @@ export default async function handler(req, res) {
     // (セッションは30日有効)は api/login.js を通らないため、ここで返さないと
     // 次に検索するまで「残り○回」を表示できない。カウントは増やさない読み取り専用。
     const quota = await readQuota({ email, limits, period, campaign });
-    // 規約同意の状態も一緒に返す。専用エンドポイントは作らない方針(api配下は
-    // 12ファイル上限、api/login.jsと同じ理由)のため、ここに相乗りさせる。
+    // 規約同意の状態も一緒に返す。専用エンドポイントは作らず、ここに相乗りさせる方針
+    // (当時はapi配下の12ファイル上限が理由で、api/login.jsと同じ事情だった。
+    // 2026-11-01にProへ移行しこの上限は無くなったが、相乗りさせる構成はそのまま
+    // 変えていない)。
     const tosAccepted = isTosConsentCurrent(await getTosConsent(email));
     return res.status(200).json({ company: company || null, quota, tosAccepted });
   }

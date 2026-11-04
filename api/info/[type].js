@@ -1,5 +1,7 @@
 // api/info/[type].js
-// 軽量な参照専用エンドポイントをまとめたもの（Vercel HobbyプランのServerless Function数上限対策）
+// 軽量な参照専用エンドポイントをまとめたもの（当時はVercel HobbyプランのServerless
+// Function数上限対策だった。2026-11-01にProへ移行しこの上限は無くなったが、
+// まとめる構成はそのまま変えていない）
 // GET /api/info/announcements            … お知らせ一覧の取得
 // GET /api/info/contact-config           … お問い合わせフォーム用の宛先・アカウント情報の取得
 // GET /api/info/admin-prefecture-stats   … 管理者向け・都道府県別の登録者数集計
