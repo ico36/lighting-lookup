@@ -21,6 +21,7 @@ Anthropic API（Claude + web_search ツール） / Stripe / Upstash Redis / Verc
 - **認証**: メールアドレス＋Stripeサブスク状態のその場確認（`api/login.js`）。ログイン成功でHMAC署名付きセッショントークン（有効期限30日）を発行し、以後は `Authorization: Bearer <token>` で送信。検証は `api/_auth.js` の `requireAuth()` を各APIの先頭で呼ぶ。
 - **DB**: Upstash Redis（`@upstash/redis`）。用途は2つ — ログインのレート制限カウンター（`ratelimit:login:*`）と、自社情報の保存（`company:{email}` にJSON）。
 - **ファイル保存**: Vercel Blob（`@vercel/blob`）。現状の用途はロゴ画像のみ（`api/company-logo.js`）。
+- **Vercelプラン**: 2026-11-01にHobbyからProへ移行済み。Serverless Functionの**12個上限は無くなった**。Hobby時代はこの上限のために「新規APIエンドポイントを増やさず既存ファイルに機能を相乗りさせる」という設計判断を複数の箇所でしていた（`lib/ownerDeletion.js`、`api/company.js`、`api/info/[type].js`、`api/cron/process-cases.js` 等のコメント参照）。これらのコメントは移行前の制約を理由にしたものなので、新規APIファイルを追加するかどうかの判断では**この上限はもう考慮しなくてよい**（既存コメントの文言はまだ更新していない箇所がある）。
 
 ## 設計方針（変更時に矛盾させないこと）
 
