@@ -1,5 +1,7 @@
 // tests/api/stripe-webhook.test.mjs
 // api/stripe-webhook.js の handleSubscriptionEvent() の単体テスト。
+// 会員番号(ls_member_no)の採番と、そのあとに行うウェルカムメール(lib/welcomeEmail.js)
+// の送信確認の両方を対象にする。
 //
 // 【raw body・署名検証(handler本体)はここでは検証しない】テストハーネスの
 // fakeReq/fakeResは生のHTTPストリームを再現しないため、stripe.webhooks.constructEvent
@@ -7,13 +9,20 @@
 // 振る舞い」(handleSubscriptionEvent、exportされている)だけを、フェイクStripe/
 // フェイクRedisで検証する。raw body・署名検証はStripe CLI(stripe trigger等)での
 // 実機確認が必要(デプロイ後に確認すること)。
+//
+// 【ウェルカムメールのResend送信】lib/welcomeEmail.jsのsendWelcomeEmail()はグローバル
+// fetchを直接呼ぶため、loader.mjsでは差し替えられない。tests/lib/otpMail.test.mjsと
+// 同じ方式でglobalThis.fetch自体をこのテストの中だけスタブに差し替える
+// (afterEachで必ず元に戻す)。
 
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { handleSubscriptionEvent } from '../../api/stripe-webhook.js';
 import * as fakeStripe from '../support/fakes/stripe.mjs';
 import { __resetFakeRedis, redis, redisKey } from '../support/fakes/redis.mjs';
+
+const REAL_FETCH = globalThis.fetch;
 
 beforeEach(() => {
   fakeStripe.__reset();
@@ -21,6 +30,14 @@ beforeEach(() => {
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
+  process.env.RESEND_API_KEY = 'test-resend-api-key';
+  process.env.MAIL_FROM = '照明サーチ <noreply@example.com>';
+  // 既定は成功レスポンス。失敗時の挙動を見るテストだけ個別に差し替える。
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ id: 'email_test' }) });
+});
+
+afterEach(() => {
+  globalThis.fetch = REAL_FETCH;
 });
 
 function wireCustomer(email, { customerId = `cus_${email}`, priceId = 'price_standard_test', status = 'active' } = {}) {
@@ -133,4 +150,59 @@ test('customerがオブジェクト形式(expand済み)でも customer.id から
   });
 
   assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), '1');
+});
+
+test('customer.subscription.created: 会員番号採番のあとにウェルカムメールを送る', async () => {
+  const email = 'webhook-welcome@example.com';
+  const customerId = wireCustomer(email);
+  fakeStripe.__seedCustomer(customerId, { email });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ id: 'email_test' }) };
+  };
+
+  await handleSubscriptionEvent(subscriptionCreatedEvent(customerId));
+
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), '1');
+  assert.equal(fetchCalls.length, 1);
+  const body = JSON.parse(fetchCalls[0].options.body);
+  assert.match(body.text, /会員番号：LS-000001/);
+  assert.equal(await redis.get(redisKey('welcome-email', 'sent', `sub_${customerId}`)), '1');
+});
+
+test('ウェルカムメールの送信に失敗しても、会員番号の採番結果やhandleSubscriptionEvent自体には影響しない', async () => {
+  const email = 'webhook-welcome-fail@example.com';
+  const customerId = wireCustomer(email);
+  fakeStripe.__seedCustomer(customerId, { email });
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+
+  await assert.doesNotReject(() => handleSubscriptionEvent(subscriptionCreatedEvent(customerId)));
+
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), '1', '会員番号の採番は成功している');
+  assert.equal(await redis.get(redisKey('welcome-email', 'sent', `sub_${customerId}`)), null, '送信失敗時はフラグを立てない');
+});
+
+test('プラン変更(同じsubscription.idのまま)で再度updatedが届いても、ウェルカムメールは二重送信しない', async () => {
+  const email = 'webhook-welcome-no-resend@example.com';
+  const customerId = wireCustomer(email);
+  fakeStripe.__seedCustomer(customerId, { email });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ id: 'email_test' }) };
+  };
+
+  await handleSubscriptionEvent(subscriptionCreatedEvent(customerId));
+  assert.equal(fetchCalls.length, 1);
+
+  // プラン変更後もsubscription.idは変わらない(同じcustomerId・同じsub_${customerId})。
+  // priceだけ別のPriceに差し替えてupdatedイベントを再度送る想定。
+  wireCustomer(email, { customerId, priceId: 'price_pro_test' });
+  await handleSubscriptionEvent({
+    type: 'customer.subscription.updated',
+    data: { object: { id: `sub_${customerId}`, customer: customerId, status: 'active' } },
+  });
+
+  assert.equal(fetchCalls.length, 1, 'プラン変更の再通知では追加送信されない');
 });

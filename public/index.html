@@ -6226,15 +6226,23 @@ window.addEventListener('DOMContentLoaded', () => {
     checkCompanyAndRoute();
   }
 
-  // Stripeポータルでの解約操作後、return_urlの?help=cancelを見て
-  // ヘルプの「解約するには」セクションへ自動的に戻す。
-  // 送り元は api/checkout.js の return_url（?help=cancel）。あちらは 'cancel' という
-  // 意味名で送ってくるので、番号との対応付けはここだけにある。ヘルプの節を増減して
+  // ?helpパラメータ(値を問わない)でヘルプモーダルを開く。ログイン前でも開ける
+  // (openHelpModal()は#help-overlayのclass切り替えだけで、中身は静的HTMLとして
+  // 既にページ内にあるため、ログイン状態に依存しない)。ウェルカムメール
+  // (lib/welcomeEmail.js)のヘルプURLはこの仕組みを使う固定URL
+  // (https://lighting.ma-system.co.jp/?help)。
+  //
+  // value === 'cancel' のときだけ、ヘルプの「解約するには」セクションへ自動的に
+  // スクロールする。送り元は api/checkout.js の return_url（?help=cancel、
+  // Stripeポータルでの解約操作後の戻り先）。あちらは 'cancel' という意味名で
+  // 送ってくるので、番号との対応付けはここだけにある。ヘルプの節を増減して
   // 番号を振り直すときは、この行の追従を忘れないこと（無言でスクロール先がずれる）。
   const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('help') === 'cancel') {
+  if (urlParams.has('help')) {
     openHelpModal();
-    scrollToHelpSection('help-sec-13');
+    if (urlParams.get('help') === 'cancel') {
+      scrollToHelpSection('help-sec-13');
+    }
     urlParams.delete('help');
     const remaining = urlParams.toString();
     const cleanUrl = window.location.pathname + (remaining ? `?${remaining}` : '');

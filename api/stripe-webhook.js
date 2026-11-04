@@ -1,16 +1,20 @@
 // api/stripe-webhook.js
-// Stripeの会社アカウント全体のWebhookを受ける。現時点の用途は会員番号(ls_member_no)の
-// 即時採番のみ(customer.subscription.created / customer.subscription.updated)。
+// Stripeの会社アカウント全体のWebhookを受ける。現時点の用途は、会員番号(ls_member_no)の
+// 即時採番と、ウェルカムメールの送信(customer.subscription.created / updated)。
 //
 // 【他のイベント・他製品(KYノート等)は無視する】ここでは何もフィルタしない。
-// handleSubscriptionEvent() が呼ぶ assignMemberNoIfMissing() の内部で、
-// 照明サーチの3Priceへの絞り込み・有効ステータス判定を行っているため、
-// 対象外のイベント/顧客は自動的に何もせず終わる(lib/memberNo.js参照)。
+// handleSubscriptionEvent() が呼ぶ assignMemberNoIfMissing()・maybeSendWelcomeEmail()の
+// 内部で、照明サーチの3Priceへの絞り込み・有効ステータス判定を行っているため、
+// 対象外のイベント/顧客は自動的に何もせず終わる(lib/memberNo.js・lib/welcomeEmail.js参照)。
 //
 // 【created/updatedの両方を受ける理由】Checkout完了直後は決済が同期的に確定する
 // (createdの時点でactive)ケースが大半だが、3Dセキュア等で確認が遅れる場合は
 // created時点でincompleteのままで、後からupdatedでactiveに変わる。createdだけだと
 // そのケースを拾えずログイン/cronフォールバックのみに依存してしまうため、両方を受ける。
+//
+// 【ウェルカムメールは会員番号の採番のあとに送る】本文に会員番号を載せるため。
+// 送信に失敗しても会員番号の採番やこのハンドラの他の処理には影響させない
+// (個別のtry/catchで受け止める。lib/welcomeEmail.jsが送信済みフラグの管理まで担う)。
 //
 // 【raw bodyが必要】署名検証(stripe.webhooks.constructEvent)には生のリクエストボディが
 // 要る。Vercel既定のJSONパースを無効化するため、下のconfig exportが必須。
@@ -20,6 +24,7 @@
 
 import { stripe } from '../lib/subscription';
 import { assignMemberNoIfMissing } from '../lib/memberNo';
+import { maybeSendWelcomeEmail } from '../lib/welcomeEmail';
 
 export const config = {
   api: {
@@ -67,6 +72,14 @@ export async function handleSubscriptionEvent(event) {
     await assignMemberNoIfMissing(email);
   } catch (err) {
     console.error(`[stripe-webhook] ${email} の会員番号採番に失敗しました:`, err);
+  }
+
+  // 会員番号の採番のあとに、ウェルカムメールの送信を検討する。失敗してもここまでの
+  // 処理(会員番号の採番)やこのハンドラ自体の正常終了には影響させない。
+  try {
+    await maybeSendWelcomeEmail(email);
+  } catch (err) {
+    console.error(`[stripe-webhook] ${email} のウェルカムメール送信確認に失敗しました:`, err);
   }
 }
 

@@ -10,6 +10,8 @@
 //      移行しこの上限は無くなったが、構成はそのまま変えていない)
 //   4. 未決済の申し込みで作られたStripe顧客を、7日経っても契約が無ければ掃除する
 //      (lib/signupCustomerCleanup.js)
+//   5. 会員番号の採番(保険)と合わせて、ウェルカムメールの送信保険も行う
+//      (lib/welcomeEmail.js。Webhookが届かなかった/送信に失敗した場合の再試行)
 //
 // 【2で見るのは案件に焼き込まれた retentionDays だけ】所有者のプランは引かない。
 // 走査対象は全アカウントの完了/失注案件なので、ここでプランを引くと案件数だけ
@@ -52,6 +54,7 @@ import {
 } from '../../lib/ownerDeletion';
 import { processPendingSignupCustomers } from '../../lib/signupCustomerCleanup';
 import { assignMemberNoIfMissing, getMemberNo } from '../../lib/memberNo';
+import { maybeSendWelcomeEmail, welcomeEmailSentKey } from '../../lib/welcomeEmail';
 
 export default async function handler(req, res) {
   // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
@@ -286,6 +289,9 @@ export default async function handler(req, res) {
   // 同じcandidates(照明サーチの有効な契約者)を使い回すため、Stripeへの追加往復は
   // 発生しない(customerオブジェクトは既にexpand/retrieve済み)。
   results.companyNameSync = { checked: 0, synced: 0, errors: [] };
+  // ウェルカムメールの送信保険(lib/welcomeEmail.js)。会員番号の採番と同じ
+  // candidatesを使い回すため、Stripeへの追加往復は発生しない。
+  results.welcomeEmail = { checked: 0, sent: 0, errors: [] };
   try {
     const priceIds = [...getLightingSearchPriceIds()];
     const candidates = [];
@@ -354,20 +360,40 @@ export default async function handler(req, res) {
         const redisNo = await getMemberNo(email);
         if (redisNo && stripeNo && redisNo === stripeNo) {
           results.memberNo.checked++;
-          continue;
+        } else {
+          await assignMemberNoIfMissing(email);
+          results.memberNo.checked++;
         }
-
-        await assignMemberNoIfMissing(email);
-        results.memberNo.checked++;
       } catch (err) {
         console.error(`[cron/process-cases] ${email} の会員番号採番(保険)に失敗しました:`, err);
         results.memberNo.errors.push({ email, step: 'member-no', message: err.message });
+      }
+
+      // ウェルカムメールの送信保険(lib/welcomeEmail.js)。会員番号の採番(上記)の
+      // あとに行う。独立したtry/catchにして、失敗しても次の契約者の処理は続ける。
+      //
+      // 【送信済みフラグを先に見る】maybeSendWelcomeEmail()は呼ぶたびにStripeへ
+      // 契約を取り直すため、送信済みの契約者にも毎日Stripeへ問い合わせてしまう
+      // (2026-11-02の「cronのStripe問い合わせを減らす」方針と食い違う)。候補一覧
+      // (candidates、ここのsub)が既に持つsubscription.id(sub.id)でフラグだけを
+      // 先に確認し、無い場合だけmaybeSendWelcomeEmail()を呼ぶ。
+      try {
+        results.welcomeEmail.checked++;
+        const alreadySent = await redis.get(welcomeEmailSentKey(sub.id));
+        if (!alreadySent) {
+          const result = await maybeSendWelcomeEmail(email);
+          if (result.sent) results.welcomeEmail.sent++;
+        }
+      } catch (err) {
+        console.error(`[cron/process-cases] ${email} のウェルカムメール送信確認(保険)に失敗しました:`, err);
+        results.welcomeEmail.errors.push({ email, step: 'welcome-email', message: err.message });
       }
     }
   } catch (err) {
     console.error('[cron/process-cases] 会員番号採番(保険)のサブスク一覧取得に失敗しました:', err);
     results.memberNo.errors.push({ step: 'member-no-list', message: err.message });
     results.companyNameSync.errors.push({ step: 'company-name-sync-list', message: err.message });
+    results.welcomeEmail.errors.push({ step: 'welcome-email-list', message: err.message });
   }
 
   return res.status(200).json(results);

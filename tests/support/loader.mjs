@@ -100,6 +100,13 @@ const LIB_MEMBER_NO_JS = path.join(REPO_ROOT, 'lib', 'memberNo.js');
 // 本物のまま読み込む。
 const LIB_SIGNUP_CUSTOMER_CLEANUP_JS = path.join(REPO_ROOT, 'lib', 'signupCustomerCleanup.js');
 
+// lib/welcomeEmail.js が読む `./redis`(welcome-email:lock/sentの読み書き)も同じ
+// フェイクへ。`./subscription`経由のstripeはルール1、`./memberNo`経由のredisは
+// LIB_MEMBER_NO_JSのルールでそれぞれ既にフェイクを受け取るため、ここでは触らない。
+// Resend送信(fetch)はグローバルfetchのスタブ(テスト側でglobalThis.fetchを差し替え)で
+// 対応する。lib/welcomeEmail.js自体は本物のまま読み込む。
+const LIB_WELCOME_EMAIL_JS = path.join(REPO_ROOT, 'lib', 'welcomeEmail.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -139,7 +146,8 @@ export async function resolve(specifier, context, nextResolve) {
       parentPath === LIB_OWNER_DELETION_JS ||
       parentPath === LIB_RATE_LIMIT_JS ||
       parentPath === LIB_MEMBER_NO_JS ||
-      parentPath === LIB_SIGNUP_CUSTOMER_CLEANUP_JS
+      parentPath === LIB_SIGNUP_CUSTOMER_CLEANUP_JS ||
+      parentPath === LIB_WELCOME_EMAIL_JS
     ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
