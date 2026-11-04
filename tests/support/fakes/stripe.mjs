@@ -31,7 +31,9 @@ function defaultHandlers() {
     customers: {
       list: async () => ({ data: [{ id: 'cus_test' }] }),
       retrieve: async (id) => defaultCustomerRetrieve(id),
+      create: async (params) => defaultCustomerCreate(params),
       update: async (id, params) => defaultCustomerUpdate(id, params),
+      del: async (id) => defaultCustomerDel(id),
     },
     subscriptions: {
       list: async () => ({ data: [defaultSubscription()] }),
@@ -71,17 +73,25 @@ function defaultHandlers() {
 let scheduleStore = new Map();
 let scheduleIdCounter = 0;
 
-// customers.retrieve/updateのフェイク永続化(インメモリ)。lib/memberNo.jsが
+// customers.retrieve/create/update/delのフェイク永続化(インメモリ)。lib/memberNo.jsが
 // 「取得→metadataを見る→必要なら更新」を1回のテスト内で行うため、update()の
 // 結果を後続のretrieve()が見られるよう簡易的なMapで状態を持つ。__reset()で
 // 必ずクリアする(テスト間の汚染防止)。
 let customerStore = new Map();
+let customerIdCounter = 0;
 
 function defaultCustomerRetrieve(id) {
   if (!customerStore.has(id)) {
     customerStore.set(id, { id, email: `${id}@example.com`, metadata: {} });
   }
   return customerStore.get(id);
+}
+
+function defaultCustomerCreate(params) {
+  const id = `cus_test_${++customerIdCounter}`;
+  const created = { ...params, id, metadata: { ...(params?.metadata || {}) } };
+  customerStore.set(id, created);
+  return created;
 }
 
 function defaultCustomerUpdate(id, params) {
@@ -92,6 +102,11 @@ function defaultCustomerUpdate(id, params) {
   const updated = { ...existing, ...params, metadata: { ...existing.metadata, ...(params?.metadata || {}) } };
   customerStore.set(id, updated);
   return updated;
+}
+
+function defaultCustomerDel(id) {
+  customerStore.delete(id);
+  return { id, deleted: true };
 }
 
 function defaultScheduleCreate(params) {
@@ -341,7 +356,9 @@ export default function Stripe() {
     customers: {
       list: (...args) => tracked('customers.list', handlers.customers.list, args),
       retrieve: (...args) => tracked('customers.retrieve', handlers.customers.retrieve, args),
+      create: (...args) => tracked('customers.create', handlers.customers.create, args),
       update: (...args) => tracked('customers.update', handlers.customers.update, args),
+      del: (...args) => tracked('customers.del', handlers.customers.del, args),
     },
     subscriptions: {
       // 本物のStripe SDKの list() は、戻り値のPromise自体に autoPagingToArray()/

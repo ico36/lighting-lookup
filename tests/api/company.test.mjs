@@ -125,3 +125,51 @@ test('customers.updateが失敗しても200を返し、自社情報(Redis)は保
   const saved = await redis.get(redisKey('company', EMAIL));
   assert.equal(saved.name, '株式会社テスト工業', 'customers.update失敗時に自社情報(Redis)が保存されていない');
 });
+
+// GET: 自社情報が未保存のとき、申し込み時に入力した社名(customer.metadata.
+// signup_company_name。api/checkout.jsのhandleCreateCheckout参照)をsuggestedName
+// として返すことの検証。
+
+test('GET: 自社情報が未保存なら、customer.metadata.signup_company_nameをsuggestedNameとして返す', async () => {
+  fakeStripe.__seedCustomer('cus_test', { metadata: { signup_company_name: '申込時工業' } });
+
+  const req = fakeReq(undefined, { method: 'GET' });
+  const res = fakeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.company, null);
+  assert.equal(res.body.suggestedName, '申込時工業');
+});
+
+test('GET: 自社情報が既に保存済みなら、Stripeへ追加で問い合わせずsuggestedNameはnull', async () => {
+  await redis.set(redisKey('company', EMAIL), {
+    name: '既存の社名',
+    tel: '', license: '', logoUrl: '', postalCode: '1234567', prefecture: '東京都', addressLine: '1-1-1',
+    updatedAt: Date.now(),
+  });
+
+  const req = fakeReq(undefined, { method: 'GET' });
+  const res = fakeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.company.name, '既存の社名');
+  assert.equal(res.body.suggestedName, null);
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.retrieve'), '保存済みならStripeへ追加で問い合わせない');
+});
+
+test('GET: 管理者はStripe顧客を持たないため、suggestedNameの取得を試みない', async () => {
+  __setAuth({ email: EMAIL, limits: { plan: 'admin', searchLimit: -1, caseLimit: -1, retentionDays: -1 } });
+
+  const req = fakeReq(undefined, { method: 'GET' });
+  const res = fakeRes();
+
+  await handler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.suggestedName, null);
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.list'));
+});

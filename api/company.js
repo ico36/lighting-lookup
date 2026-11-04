@@ -45,7 +45,27 @@ export default async function handler(req, res) {
     // 2026-11-01にProへ移行しこの上限は無くなったが、相乗りさせる構成はそのまま
     // 変えていない)。
     const tosAccepted = isTosConsentCurrent(await getTosConsent(email));
-    return res.status(200).json({ company: company || null, quota, tosAccepted });
+
+    // 自社情報が未保存のときだけ、申し込み時に入力した社名(customer.metadata.
+    // signup_company_name。api/checkout.jsのhandleCreateCheckout参照)を初期値の
+    // 候補として返す。保存済みならcompany.nameが既にあるので不要
+    // (Stripeへの往復を増やさないため、保存済みの利用者ではここを通らない)。
+    // 管理者はStripe顧客を持たないため対象外(POSTハンドラのStripe同期と同じ判定)。
+    let suggestedName = null;
+    if (!company && limits.plan !== 'admin') {
+      try {
+        const { customerId } = await getActiveSubscriptionWithItem(email);
+        if (customerId) {
+          const customer = await stripe.customers.retrieve(customerId);
+          const fromSignup = customer?.metadata?.signup_company_name;
+          suggestedName = isNonEmptyString(fromSignup) ? fromSignup.trim() : null;
+        }
+      } catch (err) {
+        console.error(`[company] ${email} の申し込み時の社名取得に失敗しました:`, err);
+      }
+    }
+
+    return res.status(200).json({ company: company || null, quota, tosAccepted, suggestedName });
   }
 
   if (req.method === 'POST') {

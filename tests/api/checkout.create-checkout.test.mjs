@@ -32,7 +32,10 @@ beforeEach(() => {
 });
 
 async function callCreateCheckout(body, overrides = {}) {
-  const req = fakeReq({ action: 'create-checkout', email: 'new-user@example.com', plan: 'light', ...body }, overrides);
+  const req = fakeReq(
+    { action: 'create-checkout', email: 'new-user@example.com', plan: 'light', companyName: 'テスト工業', ...body },
+    overrides
+  );
   const res = fakeRes();
   await handler(req, res);
   return res;
@@ -163,17 +166,95 @@ test('既存顧客が見つかる場合は customer を渡し、customer_email �
   assert.equal(params.customer_email, undefined);
 });
 
-test('既存顧客が見つからない場合は customer_email を渡す（新規Customerを作らせる）', async () => {
+test('既存顧客が見つからない場合はcustomers.createで社名入りのCustomerを先に作り、それをcustomerとして渡す(customer_emailは使わない)', async () => {
   noExistingCustomer();
 
-  const res = await callCreateCheckout({ plan: 'light' });
+  const res = await callCreateCheckout({ plan: 'light', companyName: '新規工業' });
 
-  assert.equal(res.statusCode, 200);
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
   const params = parseSessionParams(res.body.url);
-  assert.equal(params.customer_email, 'new-user@example.com');
-  assert.equal(params.customer, undefined);
+  assert.equal(params.customer_email, undefined);
+  assert.ok(params.customer, 'customerが渡されているはず');
+
+  assert.ok(fakeStripe.__getCallLog().includes('customers.create'));
+  const created = fakeStripe.__peekCustomer(params.customer);
+  assert.equal(created.email, 'new-user@example.com');
+  assert.equal(created.name, '新規工業');
+  assert.equal(created.metadata.signup_company_name, '新規工業');
+
   // 顧客が無い時点で有効な契約もあり得ないので、subscriptions.list を呼ぶ必要が無い
   assert.ok(!fakeStripe.__getCallLog().includes('subscriptions.list'));
+});
+
+test('社名・屋号が未入力の場合は400 invalid_company_nameで、Stripeへ問い合わせない', async () => {
+  noExistingCustomer();
+
+  const res = await callCreateCheckout({ plan: 'light', companyName: '   ' });
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error, 'invalid_company_name');
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.list'));
+});
+
+test('既存顧客が見つかる場合はcustomers.updateで社名をcustomer.nameとmetadata.signup_company_nameに反映する(customer_updateは指定しない)', async () => {
+  fakeStripe.__setHandler('customers.list', async () => ({ data: [{ id: 'cus_existing' }] }));
+  fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] })); // 有効な契約は無し
+
+  const res = await callCreateCheckout({ plan: 'light', companyName: '既存工業' });
+
+  assert.equal(res.statusCode, 200, `200を期待したが実際は ${res.statusCode}: ${JSON.stringify(res.body)}`);
+  const params = parseSessionParams(res.body.url);
+  assert.equal(params.customer, 'cus_existing');
+  assert.equal(params.customer_update, undefined);
+
+  assert.ok(fakeStripe.__getCallLog().includes('customers.update'));
+  const updated = fakeStripe.__peekCustomer('cus_existing');
+  assert.equal(updated.name, '既存工業');
+  assert.equal(updated.metadata.signup_company_name, '既存工業');
+});
+
+test('既存顧客に有効なサブスクがある場合は、customers.update/createのどちらも呼ばない(契約中の顧客には書き込まない)', async () => {
+  // 既定(fakes/stripe.mjs)の customers.list / subscriptions.list がそのまま
+  // 「顧客あり・有効なサブスクあり」を返す
+  const res = await callCreateCheckout({ plan: 'standard', companyName: '契約中工業' });
+
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.error, 'already_subscribed');
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.update'));
+  assert.ok(!fakeStripe.__getCallLog().includes('customers.create'));
+  assert.ok(!fakeStripe.__getCallLog().includes('checkout.sessions.create'));
+});
+
+test('並行して同一メールでcreate-checkoutを呼んでも、Stripe顧客は1件しか作られない(メール単位ロックで直列化)', async () => {
+  // customers.listを「作成済みの顧客があればそれを返す」という、実際のStripeに近い
+  // 状態を持つ挙動に差し替える(既定のnoExistingCustomer()は常に空を返すため、
+  // ロックが機能していてもこのテストでは重複作成を検出できない)。
+  let createdCustomerId = null;
+  let createCallCount = 0;
+
+  fakeStripe.__setHandler('customers.list', async () => ({
+    data: createdCustomerId ? [{ id: createdCustomerId }] : [],
+  }));
+  fakeStripe.__setHandler('customers.create', async (params) => {
+    createCallCount += 1;
+    createdCustomerId = `cus_concurrent_${createCallCount}`;
+    return { id: createdCustomerId, metadata: {}, ...params };
+  });
+  fakeStripe.__setHandler('subscriptions.list', async () => ({ data: [] }));
+
+  const [res1, res2] = await Promise.all([
+    callCreateCheckout({ plan: 'light', companyName: '同時実行株式会社' }),
+    callCreateCheckout({ plan: 'light', companyName: '同時実行株式会社' }),
+  ]);
+
+  assert.equal(res1.statusCode, 200, `1件目は200を期待: ${JSON.stringify(res1.body)}`);
+  assert.equal(res2.statusCode, 200, `2件目は200を期待: ${JSON.stringify(res2.body)}`);
+  assert.equal(createCallCount, 1, '並行に呼んでもcustomers.createは1回だけのはず');
+
+  const params1 = parseSessionParams(res1.body.url);
+  const params2 = parseSessionParams(res2.body.url);
+  assert.equal(params1.customer, createdCustomerId);
+  assert.equal(params2.customer, createdCustomerId);
 });
 
 test('既存顧客に有効なサブスクがある場合はCheckoutを作らず409', async () => {

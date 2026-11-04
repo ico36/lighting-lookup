@@ -1987,6 +1987,9 @@
           oninput="updateSignupEmailHint()" onblur="handleSignupEmailBlur()" />
         <div id="signup-email-hint" style="color:var(--text2);font-size:12px;margin-top:6px;">新規お申し込みの方は、メールアドレスを入力すると早期割引と回数2倍の対象かどうかが表示されます</div>
       </div>
+      <div id="signup-company-wrap" class="model-input-wrap" style="margin-bottom:14px;">
+        <input type="text" id="signup-company-input" placeholder="社名・屋号（必須）" />
+      </div>
       <div id="signup-loading" style="color:var(--text2);font-size:13px;">プラン情報を読み込んでいます...</div>
       <div id="signup-plans"></div>
     </div>
@@ -3573,6 +3576,7 @@ function resetSignupModal() {
   document.getElementById('signup-title').textContent = '新規お申し込み';
   hideError(document.getElementById('signup-error'));
   document.getElementById('signup-email-input').value = '';
+  document.getElementById('signup-company-input').value = '';
 
   document.getElementById('signup-step-select').style.display = 'block';
   document.getElementById('signup-step-confirm').style.display = 'none';
@@ -3754,6 +3758,11 @@ function isSignupEmailValid() {
   return input.value.trim() !== '' && input.checkValidity();
 }
 
+// 社名・屋号は必須(api/company.jsのname検証と同じ規則。空文字のみ拒否、上限文字数は無し)。
+function isSignupCompanyNameValid() {
+  return document.getElementById('signup-company-input').value.trim() !== '';
+}
+
 function selectSignupPlan(index) {
   // プランカードはsetSignupPlansInteractive(false)でdisabledになり通常はクリックが
   // 発生しないが、念のためフラグでも二重に防ぐ(再取得中の古い表示での選択を防ぐ)。
@@ -3762,6 +3771,10 @@ function selectSignupPlan(index) {
 
   if (!isSignupEmailValid()) {
     showError(document.getElementById('signup-error'), 'メールアドレスの形式が正しくありません');
+    return;
+  }
+  if (!isSignupCompanyNameValid()) {
+    showError(document.getElementById('signup-error'), '社名・屋号を入力してください');
     return;
   }
   hideError(document.getElementById('signup-error'));
@@ -3850,10 +3863,11 @@ async function submitSignup(btn) {
     signupInFlight = true;
     try {
       const email = document.getElementById('signup-email-input').value.trim();
+      const companyName = document.getElementById('signup-company-input').value.trim();
       const response = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create-checkout', email, plan: selectedSignupPlan.plan }),
+        body: JSON.stringify({ action: 'create-checkout', email, companyName, plan: selectedSignupPlan.plan }),
       });
       const data = await response.json();
 
@@ -3875,6 +3889,9 @@ async function submitSignup(btn) {
 // ===== 自社情報（社名・電話番号・登録番号・ロゴ・住所）の保存・再利用 =====
 
 let companyInfo = null;
+// 申し込み時に入力した社名(api/company.jsのGETが返すsuggestedName)。自社情報が
+// 未保存(真の初回)のときだけ初回設定画面の社名欄の初期値に使う(二度入力を防ぐ)。
+let companySignupSuggestedName = null;
 let pendingLogo = { setup: null, settings: null };
 let logoRemoved = { setup: false, settings: false };
 
@@ -3916,6 +3933,7 @@ async function checkCompanyAndRoute() {
     }
 
     companyInfo = data.company;
+    companySignupSuggestedName = data.suggestedName || null;
     // ログイン済みのまま画面を開き直した場合はここが「残り○回」の初期表示になる
     updateQuota(data.quota);
     document.getElementById('logout-btn').style.display = 'block';
@@ -4005,8 +4023,9 @@ function showCompanySetupGate() {
   // 住所必須化より前に登録した既存アカウントがここに戻された場合、既に保存済みの
   // 社名・電話番号・登録番号・ロゴを空欄に戻すと再入力の手間と「消えた」という
   // 誤解を招くため、companyInfoがあれば事前入力する(真の初回はcompanyInfoがnullなので
-  // 全欄が空のまま)。
-  document.getElementById('setup-biz-name').value = companyInfo?.name || '';
+  // 全欄が空のまま)。社名だけは、真の初回でもcompanySignupSuggestedName(申し込み時に
+  // 入力した社名)があればそれを初期値にする(二度入力を防ぐ)。
+  document.getElementById('setup-biz-name').value = companyInfo?.name || companySignupSuggestedName || '';
   document.getElementById('setup-biz-tel').value = companyInfo?.tel || '';
   document.getElementById('setup-biz-license').value = companyInfo?.license || '';
   document.getElementById('setup-biz-postal').value = companyInfo?.postalCode || '';

@@ -8,6 +8,8 @@
 //      (lib/ownerDeletion.js。当時はVercel HobbyのFunction数上限12/12のため
 //      新規APIエンドポイントを作れず既存cronへ統合した。2026-11-01にProへ
 //      移行しこの上限は無くなったが、構成はそのまま変えていない)
+//   4. 未決済の申し込みで作られたStripe顧客を、7日経っても契約が無ければ掃除する
+//      (lib/signupCustomerCleanup.js)
 //
 // 【2で見るのは案件に焼き込まれた retentionDays だけ】所有者のプランは引かない。
 // 走査対象は全アカウントの完了/失注案件なので、ここでプランを引くと案件数だけ
@@ -48,6 +50,7 @@ import {
   processDueOwnerDeletions,
   warnIfOwnerDeletionPreviewGraceEnabled,
 } from '../../lib/ownerDeletion';
+import { processPendingSignupCustomers } from '../../lib/signupCustomerCleanup';
 import { assignMemberNoIfMissing, getMemberNo } from '../../lib/memberNo';
 
 export default async function handler(req, res) {
@@ -248,7 +251,18 @@ export default async function handler(req, res) {
     results.errors.push({ step: 'owner-deletion', message: err.message });
   }
 
-  // --- 4. 会員番号の採番(保険) ----------------------------------------
+  // --- 4. 未決済の申し込みで作られたStripe顧客の掃除 -------------------
+  // lib/signupCustomerCleanup.js のコメント参照。ステップ1〜3とは独立した処理で、
+  // 失敗してもここまでの結果には影響させない。
+  try {
+    const cleaned = await processPendingSignupCustomers({ now });
+    results.signupCustomerCleanup = cleaned;
+  } catch (err) {
+    console.error('[cron/process-cases] signup-customer-cleanup failed', err);
+    results.errors.push({ step: 'signup-customer-cleanup', message: err.message });
+  }
+
+  // --- 5. 会員番号の採番(保険) ----------------------------------------
   // Webhook(api/stripe-webhook.js)・ログイン時フォールバック(api/login.js)で
   // 既に付いているはずだが、両方が届かなかった場合の保険として、照明サーチの
   // 3Priceの有効なサブスクを申し込み順(start_date昇順)で走査し、未採番また

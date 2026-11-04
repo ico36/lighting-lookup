@@ -27,7 +27,7 @@
 
 import Stripe from 'stripe';
 import { requireAuth, requireAuthWithPlan } from './_auth';
-import { redisKey } from '../lib/redis';
+import { redis, redisKey } from '../lib/redis';
 import { getClientIp, checkRateLimit } from '../lib/rateLimit';
 import {
   getStripeCustomerIdByEmail,
@@ -46,6 +46,7 @@ import {
   verifyUpgradeQuote,
   idempotencyKeyFromQuote,
 } from '../lib/upgradeQuote';
+import { registerPendingSignupCustomer } from '../lib/signupCustomerCleanup';
 
 const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -1026,6 +1027,42 @@ function isValidEmailFormat(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// api/company.jsのname検証と同じ規則(空文字のみ拒否。上限文字数は無し)。
+function isNonEmptyString(v) {
+  return typeof v === 'string' && v.trim().length > 0;
+}
+
+/**
+ * 同一メールでのcreate-checkoutを直列化するロック。lib/memberNo.jsの
+ * ls_member_no:lockと同じSETNX+TTL方式(redis.set({nx:true, ex}))。
+ *
+ * 【なぜ要るか】handleCreateCheckoutは「契約中かの確認→既存顧客があればupdate、
+ * 無ければcreate→Checkoutセッション作成」をこの順で行う。二重送信や並行リクエストが
+ * このブロックを同時に走ると、どちらも「既存顧客なし」と判定して2回customers.create()
+ * してしまい、同じメールに空のStripe Customerが複数できる(契約済みの顧客を
+ * getStripeCustomerIdByEmail()の先頭1件取得が見落とす事故につながる)。
+ *
+ * ロックが取れなかった場合は一度だけ短く待って再試行し、それでも取れなければ
+ * 呼び出し側に処理中であることを返させる(無限リトライはしない)。
+ */
+const SIGNUP_CUSTOMER_LOCK_TTL_SECONDS = 10;
+const SIGNUP_CUSTOMER_LOCK_RETRY_DELAY_MS = 300;
+
+async function acquireSignupCustomerLock(email) {
+  const lockKey = redisKey('signup-customer', 'lock', email);
+
+  const first = await redis.set(lockKey, '1', { nx: true, ex: SIGNUP_CUSTOMER_LOCK_TTL_SECONDS });
+  if (first) return lockKey;
+
+  await new Promise((resolve) => setTimeout(resolve, SIGNUP_CUSTOMER_LOCK_RETRY_DELAY_MS));
+  const retry = await redis.set(lockKey, '1', { nx: true, ex: SIGNUP_CUSTOMER_LOCK_TTL_SECONDS });
+  return retry ? lockKey : null;
+}
+
+async function releaseSignupCustomerLock(lockKey) {
+  await redis.del(lockKey);
+}
+
 // 申し込み可能なプランの一覧。PRICE_ID_ENVのキー(light/standard/pro)と常に一致させる
 // (別の配列を持つとプランを増減したときに片方だけ直す事故になる)。
 const SIGNUP_PLANS = Object.keys(PRICE_ID_ENV);
@@ -1172,7 +1209,7 @@ async function handleGetSignupPlans(req, res) {
 // 新規申し込み(未契約者向け)のCheckoutセッション作成。ログイン前なのでrequireAuthは
 // 呼ばない(未契約者はセッションを持てないため)。
 async function handleCreateCheckout(req, res) {
-  const { email, plan } = req.body || {};
+  const { email, plan, companyName } = req.body || {};
 
   if (!isValidEmailFormat(email)) {
     return res.status(400).json({ error: 'invalid_email', message: 'メールアドレスの形式が正しくありません' });
@@ -1183,13 +1220,27 @@ async function handleCreateCheckout(req, res) {
       message: `plan は ${SIGNUP_PLANS.join(' / ')} のいずれかを指定してください`,
     });
   }
+  if (!isNonEmptyString(companyName)) {
+    return res.status(400).json({ error: 'invalid_company_name', message: '社名・屋号を入力してください' });
+  }
 
   const normalizedEmail = email.trim().toLowerCase();
+  const normalizedCompanyName = companyName.trim();
 
   const priceId = process.env[PRICE_ID_ENV[plan]];
   if (!priceId) {
     console.error(`[checkout] ${PRICE_ID_ENV[plan]} が未設定のため、申し込み(plan=${plan})を作成できません。`);
     return res.status(500).json({ error: 'internal_error', message: '決済画面の生成に失敗しました' });
+  }
+
+  // 顧客の検索〜作成/更新〜Checkoutセッション作成を1つの処理として直列化する
+  // (acquireSignupCustomerLock()のコメント参照)。
+  const lockKey = await acquireSignupCustomerLock(normalizedEmail);
+  if (!lockKey) {
+    return res.status(409).json({
+      error: 'processing',
+      message: '処理中です。少し待ってから再度お試しください',
+    });
   }
 
   try {
@@ -1202,6 +1253,29 @@ async function handleCreateCheckout(req, res) {
         error: 'already_subscribed',
         message: 'すでにご契約があります。ログインしてください',
       });
+    }
+
+    // ここまでで契約中でないことを確認できた。これより後だけが顧客オブジェクトに
+    // 書き込む(契約中の顧客には一切書き込まない)。社名をcustomer.nameに反映し、
+    // 初回の請求書・領収書の宛名を決済画面のカード名義ではなく社名にするための対応
+    // (customer_updateは指定しない=既定のnever。Checkoutがカード名義で上書きするのを防ぐ)。
+    let resolvedCustomerId;
+    if (customerId) {
+      await stripe.customers.update(customerId, {
+        name: normalizedCompanyName,
+        metadata: { signup_company_name: normalizedCompanyName },
+      });
+      resolvedCustomerId = customerId;
+    } else {
+      const createdCustomer = await stripe.customers.create({
+        email: normalizedEmail,
+        name: normalizedCompanyName,
+        metadata: { signup_company_name: normalizedCompanyName },
+      });
+      resolvedCustomerId = createdCustomer.id;
+      // 決済を完了しないまま放置された場合の掃除対象として登録する
+      // (lib/signupCustomerCleanup.js。7日経っても契約が無ければ削除候補になる)。
+      await registerPendingSignupCustomer(resolvedCustomerId);
     }
 
     // 「新規」= 照明サーチのPriceでの契約履歴が一度もない(解約済みも含む)。
@@ -1249,9 +1323,10 @@ async function handleCreateCheckout(req, res) {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'subscription',
-      // 既存顧客が見つかればcustomerを渡す(同一メールでの顧客重複作成を防ぐ)。
-      // 見つからない場合だけcustomer_emailで新規顧客を作らせる。
-      ...(customerId ? { customer: customerId } : { customer_email: normalizedEmail }),
+      // 顧客は上で確定済み(既存ならupdate、無ければcreate)。customer_emailは使わない
+      // (customer_emailを使うとCheckout自身が新規Customerを作ってしまい、社名を
+      // 先にcustomer.nameへ入れておく今回の対応と衝突する)。
+      customer: resolvedCustomerId,
       line_items: [{ price: priceId, quantity: 1 }],
       ...(discounts ? { discounts } : {}),
       // Checkout完了後に実際に作られるサブスクリプションのmetadataへそのまま
@@ -1287,5 +1362,7 @@ async function handleCreateCheckout(req, res) {
   } catch (err) {
     console.error('[checkout] 新規申し込みのCheckoutセッション作成に失敗しました:', err);
     return res.status(500).json({ error: 'internal_error', message: '決済画面の生成に失敗しました' });
+  } finally {
+    await releaseSignupCustomerLock(lockKey);
   }
 }

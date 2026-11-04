@@ -94,6 +94,12 @@ const LIB_RATE_LIMIT_JS = path.join(REPO_ROOT, 'lib', 'rateLimit.js');
 // 経由のStripe呼び出し)は本物のまま読み込む(本題のロジックをフェイクにしないため)。
 const LIB_MEMBER_NO_JS = path.join(REPO_ROOT, 'lib', 'memberNo.js');
 
+// lib/signupCustomerCleanup.js が読む `./redis`(signup:pending-customerのZSET操作)も
+// 同じフェイクへ。`./subscription`経由のstripeは既にstripeパッケージ全体のフェイク
+// (ルール1)を受け取るため、ここでは触らない。lib/signupCustomerCleanup.js自体は
+// 本物のまま読み込む。
+const LIB_SIGNUP_CUSTOMER_CLEANUP_JS = path.join(REPO_ROOT, 'lib', 'signupCustomerCleanup.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -132,7 +138,8 @@ export async function resolve(specifier, context, nextResolve) {
       parentPath === LIB_SUBSCRIPTION_JS ||
       parentPath === LIB_OWNER_DELETION_JS ||
       parentPath === LIB_RATE_LIMIT_JS ||
-      parentPath === LIB_MEMBER_NO_JS
+      parentPath === LIB_MEMBER_NO_JS ||
+      parentPath === LIB_SIGNUP_CUSTOMER_CLEANUP_JS
     ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
@@ -147,10 +154,12 @@ export async function resolve(specifier, context, nextResolve) {
     }
   }
 
-  // 2e. api/login.js・api/company.js が読む `../lib/redis` も同じフェイクへ。
+  // 2e. api/login.js・api/company.js・api/checkout.js が読む `../lib/redis` も
+  //     同じフェイクへ。api/checkout.jsは同一メールでのcreate-checkoutを直列化する
+  //     ロック(signup-customer:lock:{email})のRedis操作で使う。
   if (specifier === '../lib/redis' && context.parentURL) {
     const parentPath = fileURLToPath(context.parentURL);
-    if (parentPath === LOGIN_JS || parentPath === COMPANY_JS) {
+    if (parentPath === LOGIN_JS || parentPath === COMPANY_JS || parentPath === CHECKOUT_JS) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }
   }
