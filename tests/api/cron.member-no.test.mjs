@@ -18,7 +18,7 @@
 // 下の全テストが(このメソッド経由でなければ候補が1件も取れず全滅するため)
 // 間接的に検証している。
 
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import handler from '../../api/cron/process-cases.js';
@@ -28,6 +28,7 @@ import { __resetFakeRedis, redis, redisKey } from '../support/fakes/redis.mjs';
 import { fakeReq, fakeRes } from '../support/fakeHttp.mjs';
 
 const CRON_SECRET = 'test-cron-secret';
+const REAL_FETCH = globalThis.fetch;
 
 beforeEach(() => {
   fakeStripe.__reset();
@@ -38,10 +39,20 @@ beforeEach(() => {
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
+  process.env.RESEND_API_KEY = 'test-resend-api-key';
+  process.env.MAIL_FROM = '照明サーチ <noreply@example.com>';
   delete process.env.VERCEL_ENV;
   // 会員番号の対象データが無い既定状態では、ステップ3(owner-deletion)はcompany:*/tos:*が
   // 空なのでStripeへ問い合わせない。customers.list/subscriptions.listは
   // wireActiveSubscriptions()で都度上書きする。
+  // ステップ5のウェルカムメール送信保険(lib/welcomeEmail.js)がResendへ実際に
+  // 問い合わせないよう、globalThis.fetchをスタブする(このファイルの主題ではないが、
+  // 候補として有効なサブスクを作る以上必ず経由するため)。
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ id: 'email_test' }) });
+});
+
+afterEach(() => {
+  globalThis.fetch = REAL_FETCH;
 });
 
 async function callCron() {

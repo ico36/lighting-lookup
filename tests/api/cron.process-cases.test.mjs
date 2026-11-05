@@ -17,7 +17,7 @@
 // getSubscriptionStateCached() が実クライアントへの接続を試み、テストごとに
 // 数秒かかる(tests/api/login.verify-otp.test.mjsの既存コメント参照)。
 
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import handler from '../../api/cron/process-cases.js';
@@ -40,6 +40,7 @@ import {
 const CRON_SECRET = 'test-cron-secret';
 const LIGHT_RETENTION_DAYS = 30; // fakes/stripe.mjs の price_light_test.metadata.retention_days
 const STANDARD_RETENTION_DAYS = 365; // 同 price_standard_test
+const REAL_FETCH = globalThis.fetch;
 
 beforeEach(() => {
   fakeStripe.__reset();
@@ -51,7 +52,17 @@ beforeEach(() => {
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
   process.env.ADMIN_EMAILS = 'admin@example.com';
+  process.env.RESEND_API_KEY = 'test-resend-api-key';
+  process.env.MAIL_FROM = '照明サーチ <noreply@example.com>';
   delete process.env.VERCEL_ENV;
+  // ステップ5のウェルカムメール送信保険(lib/welcomeEmail.js)がResendへ実際に
+  // 問い合わせないよう、globalThis.fetchをスタブする(このファイルの主題ではないが、
+  // 既定のfakeStripeが返す候補が有効なサブスクである以上必ず経由するため)。
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ id: 'email_test' }) });
+});
+
+afterEach(() => {
+  globalThis.fetch = REAL_FETCH;
 });
 
 async function callCron() {

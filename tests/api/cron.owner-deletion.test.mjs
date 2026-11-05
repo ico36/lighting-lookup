@@ -6,7 +6,7 @@
 // 検証する。日付は Date.now() を基準にした相対オフセットで組み立て、実行時刻に
 // 依存させない(既存テストの流儀と同じ)。
 
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import handler from '../../api/cron/process-cases.js';
@@ -24,6 +24,7 @@ import {
 
 const CRON_SECRET = 'test-cron-secret';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const REAL_FETCH = globalThis.fetch;
 
 beforeEach(() => {
   fakeStripe.__reset();
@@ -39,9 +40,19 @@ beforeEach(() => {
   process.env.STRIPE_PRICE_ID_LIGHT = 'price_light_test';
   process.env.STRIPE_PRICE_ID_STANDARD = 'price_standard_test';
   process.env.STRIPE_PRICE_ID_PRO = 'price_pro_test';
+  process.env.RESEND_API_KEY = 'test-resend-api-key';
+  process.env.MAIL_FROM = '照明サーチ <noreply@example.com>';
   delete process.env.VERCEL_ENV;
   delete process.env.OWNER_DELETION_DRY_RUN; // 既定 = ドライラン
   delete process.env.OWNER_DELETION_PREVIEW_GRACE_MINUTES;
+  // ステップ5のウェルカムメール送信保険(lib/welcomeEmail.js)がResendへ実際に
+  // 問い合わせないよう、globalThis.fetchをスタブする(このファイルの主題ではないが、
+  // 候補として有効なサブスクを作る以上必ず経由するため)。
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ id: 'email_test' }) });
+});
+
+afterEach(() => {
+  globalThis.fetch = REAL_FETCH;
 });
 
 async function callCron() {
