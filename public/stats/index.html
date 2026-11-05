@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>経営統計</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --panel: #ffffff;
+    --border: #e2e2e5;
+    --text: #1a1a1a;
+    --text2: #6b6b70;
+    --accent: #2f6fed;
+    --positive: #1a7f37;
+    --negative: #c23b3b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0 0 20px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  input[type="email"], input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 16px;
+    margin-bottom: 10px;
+  }
+  button {
+    width: 100%;
+    padding: 10px 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  button.secondary {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text2);
+  }
+  .error {
+    color: var(--negative);
+    font-size: 13px;
+    margin-top: -4px;
+    margin-bottom: 10px;
+    display: none;
+  }
+  .section-title {
+    font-size: 13px;
+    color: var(--text2);
+    margin: 0 0 10px;
+  }
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .summary-row:last-child { border-bottom: none; }
+  .summary-row .value { font-weight: 600; }
+  .delta-plus { color: var(--positive); }
+  .delta-minus { color: var(--negative); }
+  .delta-zero { color: var(--text2); }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 90px;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .bar-track {
+    background: var(--bg);
+    border-radius: 4px;
+    height: 14px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    background: var(--accent);
+    height: 100%;
+  }
+  .bar-count { text-align: right; white-space: nowrap; }
+  .history-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 80px;
+  }
+  .history-bar {
+    flex: 1;
+    background: var(--accent);
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+    position: relative;
+  }
+  .history-labels {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .history-label {
+    flex: 1;
+    font-size: 10px;
+    color: var(--text2);
+    text-align: center;
+  }
+  .logout-link {
+    display: block;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: 10px;
+    cursor: pointer;
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--text2);
+    margin-top: -4px;
+    margin-bottom: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>経営統計</h1>
+
+  <div class="panel" id="login-email-panel">
+    <p class="section-title">ご登録のメールアドレスを入力してください</p>
+    <input type="email" id="login-email-input" placeholder="メールアドレス" autocomplete="email">
+    <div class="error" id="login-email-error"></div>
+    <button id="login-email-btn" onclick="requestOtp()">確認コードを送る</button>
+  </div>
+
+  <div class="panel" id="login-code-panel" style="display:none;">
+    <p class="section-title">メールで届いた確認コードを入力してください</p>
+    <input type="text" id="login-code-input" placeholder="6桁のコード" inputmode="numeric" maxlength="6">
+    <div class="error" id="login-code-error"></div>
+    <button id="login-code-btn" onclick="verifyOtp()">ログイン</button>
+    <div class="logout-link" onclick="backToEmailStep()">メールアドレスを変更する</div>
+  </div>
+
+  <div id="dashboard" style="display:none;">
+    <div class="panel">
+      <p class="section-title">合計</p>
+      <div class="summary-row">
+        <span>有効な契約</span>
+        <span class="value" id="summary-total"></span>
+      </div>
+      <div class="summary-row">
+        <span>都道府県未登録</span>
+        <span class="value" id="summary-unregistered"></span>
+      </div>
+      <div class="summary-row">
+        <span>解約済み・削除待ち</span>
+        <span class="value" id="summary-pending-deletion"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="section-title" id="prefecture-section-title">都道府県別（北から順）</p>
+      <div id="prefecture-list"></div>
+    </div>
+
+    <div class="panel" id="history-panel" style="display:none;">
+      <p class="section-title">契約数の推移</p>
+      <div class="history-chart" id="history-chart"></div>
+      <div class="history-labels" id="history-labels"></div>
+    </div>
+
+    <div class="logout-link" onclick="logout()">ログアウト</div>
+  </div>
+</div>
+
+<script>
+// 都道府県の47件リスト(北から順)。lib/prefectures.jsと同じ並び。フロントは静的
+// ファイルのためモジュール共有ではなく別途定義している(public/index.htmlの
+// PREFECTURE_OPTIONSと同じ事情)。増減があれば両方を直すこと。
+const PREFECTURES = [
+  '北海道', '青森県', '岩手県', '宮城県', '秋田県', '山形県', '福島県',
+  '茨城県', '栃木県', '群馬県', '埼玉県', '千葉県', '東京都', '神奈川県',
+  '新潟県', '富山県', '石川県', '福井県', '山梨県', '長野県', '岐阜県',
+  '静岡県', '愛知県', '三重県', '滋賀県', '京都府', '大阪府', '兵庫県',
+  '奈良県', '和歌山県', '鳥取県', '島根県', '岡山県', '広島県', '山口県',
+  '徳島県', '香川県', '愛媛県', '高知県', '福岡県', '佐賀県', '長崎県',
+  '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
+];
+
+const TOKEN_STORAGE_KEY = 'statsSessionToken';
+let pendingEmail = '';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+function showError(elId, message) {
+  const el = document.getElementById(elId);
+  el.textContent = message;
+  el.style.display = 'block';
+}
+
+function hideError(elId) {
+  document.getElementById(elId).style.display = 'none';
+}
+
+async function requestOtp() {
+  const email = document.getElementById('login-email-input').value.trim();
+  hideError('login-email-error');
+
+  if (!email) {
+    showError('login-email-error', 'メールアドレスを入力してください');
+    return;
+  }
+
+  const btn = document.getElementById('login-email-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/stats/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'request-otp', email }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showError('login-email-error', data.error || 'コードの送信に失敗しました');
+      return;
+    }
+    pendingEmail = email;
+    document.getElementById('login-email-panel').style.display = 'none';
+    document.getElementById('login-code-panel').style.display = 'block';
+    document.getElementById('login-code-input').value = '';
+    hideError('login-code-error');
+  } catch (err) {
+    showError('login-email-error', '通信エラーが発生しました。もう一度お試しください');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function backToEmailStep() {
+  document.getElementById('login-code-panel').style.display = 'none';
+  document.getElementById('login-email-panel').style.display = 'block';
+}
+
+async function verifyOtp() {
+  const code = document.getElementById('login-code-input').value.trim();
+  hideError('login-code-error');
+
+  if (!code) {
+    showError('login-code-error', 'コードを入力してください');
+    return;
+  }
+
+  const btn = document.getElementById('login-code-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/stats/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'verify-otp', email: pendingEmail, code }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.token) {
+      showError('login-code-error', data.error || 'ログインに失敗しました');
+      return;
+    }
+    localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+    document.getElementById('login-code-panel').style.display = 'none';
+    await loadOverview();
+  } catch (err) {
+    showError('login-code-error', '通信エラーが発生しました。もう一度お試しください');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function logout() {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('login-email-panel').style.display = 'block';
+  document.getElementById('login-email-input').value = '';
+}
+
+// "YYYY-MM-DD" を "M/D（曜）" に整形する。日付だけの文字列をnew Date()に素直に
+// 渡すとUTC解釈されうるため、年月日を分けてローカル日時として組み立てる。
+function formatDateWithWeekday(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const weekdayNames = ['日', '月', '火', '水', '木', '金', '土'];
+  return `${m}/${d}（${weekdayNames[date.getDay()]}）`;
+}
+
+function formatDelta(delta) {
+  if (delta === null || delta === undefined) return '';
+  if (delta > 0) return { text: `+${delta}`, cls: 'delta-plus' };
+  if (delta < 0) return { text: `${delta}`, cls: 'delta-minus' };
+  return { text: '±0', cls: 'delta-zero' };
+}
+
+function renderSummary(data) {
+  const { current, pendingDeletion, comparison } = data;
+
+  const totalDelta = formatDelta(comparison.totalDelta);
+  document.getElementById('summary-total').innerHTML = comparison.baselineDate
+    ? `${current.total}件（<span class="${totalDelta.cls}">${totalDelta.text}</span>）`
+    : `${current.total}件`;
+
+  document.getElementById('summary-unregistered').textContent = `${current.unregistered}件`;
+  document.getElementById('summary-pending-deletion').textContent = `${pendingDeletion}件`;
+
+  const titleEl = document.getElementById('prefecture-section-title');
+  titleEl.textContent = comparison.baselineDate
+    ? `都道府県別（北から順・${formatDateWithWeekday(comparison.baselineDate)}時点から）`
+    : '都道府県別（北から順）';
+}
+
+function renderPrefectureList(data) {
+  const { current, comparison } = data;
+  const byPrefectureDelta = comparison.byPrefectureDelta || {};
+  const maxCount = Math.max(1, ...Object.values(current.byPrefecture));
+
+  const rows = PREFECTURES
+    .filter((prefecture) => current.byPrefecture[prefecture])
+    .map((prefecture) => {
+      const count = current.byPrefecture[prefecture];
+      const pct = Math.round((count / maxCount) * 100);
+      const delta = comparison.baselineDate ? formatDelta(byPrefectureDelta[prefecture] || 0) : null;
+      const deltaHtml = delta ? ` <span class="${delta.cls}">${delta.text}</span>` : '';
+      return `
+        <div class="bar-row">
+          <span>${prefecture}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+          <span class="bar-count">${count}件${deltaHtml}</span>
+        </div>`;
+    })
+    .join('');
+
+  document.getElementById('prefecture-list').innerHTML = rows || '<p class="hint">該当する契約がまだありません</p>';
+}
+
+function renderHistory(data) {
+  const { history } = data;
+  const panel = document.getElementById('history-panel');
+  if (!history || history.length < 2) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+
+  const maxTotal = Math.max(1, ...history.map((h) => h.total));
+  document.getElementById('history-chart').innerHTML = history
+    .map((h) => `<div class="history-bar" style="height:${Math.round((h.total / maxTotal) * 100)}%" title="${h.date}: ${h.total}件"></div>`)
+    .join('');
+  document.getElementById('history-labels').innerHTML = history
+    .map((h) => `<div class="history-label">${h.date.slice(5).replace('-', '/')}</div>`)
+    .join('');
+}
+
+async function loadOverview() {
+  const token = getToken();
+  if (!token) return;
+
+  try {
+    const res = await fetch('/api/stats/overview', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401) {
+      logout();
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      showError('login-email-error', data.error || '統計の取得に失敗しました');
+      document.getElementById('login-email-panel').style.display = 'block';
+      return;
+    }
+
+    document.getElementById('dashboard').style.display = 'block';
+    renderSummary(data);
+    renderPrefectureList(data);
+    renderHistory(data);
+  } catch (err) {
+    document.getElementById('login-email-panel').style.display = 'block';
+    showError('login-email-error', '通信エラーが発生しました。もう一度お試しください');
+  }
+}
+
+if (getToken()) {
+  loadOverview();
+}
+</script>
+</body>
+</html>

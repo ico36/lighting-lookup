@@ -128,3 +128,36 @@ test('canResendOtp()/markOtpSent() は送信直後クールダウン中はfalse�
 test('OTP_MAX_ATTEMPTS は5', () => {
   assert.equal(OTP_MAX_ATTEMPTS, 5);
 });
+
+// 【namespaceオプション】api/stats/login.js がnamespace:'stats-otp'で同じロジックを
+// 使い回すための拡張。既定(namespace省略)の挙動は上のテスト群でそのまま固定済みなので、
+// ここでは「別のnamespaceを指定すると別のキーになり、互いに干渉しない」ことだけを確認する。
+test('namespace指定時は otp:{email} ではなく {namespace}:{email} に保存される', async () => {
+  await storeOtp(EMAIL, hashOtpCode(EMAIL, '123456'), { namespace: 'stats-otp' });
+
+  assert.equal(await readOtp(EMAIL), null, '既定(otp)名前空間には保存されていない');
+  assert.notEqual(await readOtp(EMAIL, { namespace: 'stats-otp' }), null, 'stats-otp名前空間に保存されている');
+});
+
+test('namespaceが違えば、同じメールアドレスでもクールダウン・試行回数カウンタが干渉しない', async () => {
+  await markOtpSent(EMAIL); // 既定(otp)側だけクールダウンに入れる
+
+  assert.equal(await canResendOtp(EMAIL), false, '既定(otp)側はクールダウン中のはず');
+  assert.equal(await canResendOtp(EMAIL, { namespace: 'stats-otp' }), true, 'stats-otp側は影響を受けていないはず');
+
+  await incrementOtpAttempts(EMAIL, { namespace: 'stats-otp' });
+  await incrementOtpAttempts(EMAIL, { namespace: 'stats-otp' });
+
+  assert.equal(await incrementOtpAttempts(EMAIL), 1, '既定(otp)側の試行回数は増えていない');
+  assert.equal(await incrementOtpAttempts(EMAIL, { namespace: 'stats-otp' }), 3, 'stats-otp側は3回目');
+});
+
+test('clearOtpState()はnamespace指定分だけ削除し、他のnamespaceには影響しない', async () => {
+  await storeOtp(EMAIL, hashOtpCode(EMAIL, '123456'));
+  await storeOtp(EMAIL, hashOtpCode(EMAIL, '654321'), { namespace: 'stats-otp' });
+
+  await clearOtpState(EMAIL, { namespace: 'stats-otp' });
+
+  assert.equal(await readOtp(EMAIL, { namespace: 'stats-otp' }), null);
+  assert.notEqual(await readOtp(EMAIL), null, '既定(otp)側は消えていないはず');
+});

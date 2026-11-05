@@ -28,6 +28,7 @@ export { redisKey } from '../../../lib/redis.js';
 const strings = new Map();
 const lists = new Map();
 const zsets = new Map();
+const sets = new Map();
 // TTLは実タイマーで自動失効させない(テストが実時間の経過を待たずに済むように)。
 // 「TTL経過後」を検証したいテストは __expireKey() で明示的に消す。ここではあくまで
 // 「いつ失効する予定か」を記録するだけ(__getTTLSeconds() での確認用)。
@@ -40,6 +41,13 @@ function getZset(key) {
 
 async function get(key) {
   return strings.has(key) ? strings.get(key) : null;
+}
+
+// lib/contractStats.js の buildActiveContractPrefectureStats() が
+// company:{email} をまとめて読むために使う。本物の@upstash/redisと同じく、
+// 存在しないキーはnullとして返す(配列の長さはkeysと同じ)。
+async function mget(...keys) {
+  return keys.map((key) => (strings.has(key) ? strings.get(key) : null));
 }
 
 // nx: true は「キーが存在しないときだけ設定する」(Upstashの SET ... NX と同じ)。
@@ -91,9 +99,47 @@ async function del(...keys) {
     if (strings.delete(key)) count++;
     if (lists.delete(key)) count++;
     if (zsets.delete(key)) count++;
+    if (sets.delete(key)) count++;
     ttls.delete(key);
   }
   return count;
+}
+
+function getSet(key) {
+  if (!sets.has(key)) sets.set(key, new Set());
+  return sets.get(key);
+}
+
+// lib/contractStats.js の CONTRACT_STATUS_ACTIVE_KEY で使うSET操作。
+// 本物のUpstash/Redisと同様、追加済みの要素を再度addしても増えない。
+async function sadd(key, ...members) {
+  const s = getSet(key);
+  let added = 0;
+  for (const member of members) {
+    if (!s.has(member)) {
+      s.add(member);
+      added++;
+    }
+  }
+  return added;
+}
+
+async function srem(key, ...members) {
+  const s = sets.get(key);
+  if (!s) return 0;
+  let removed = 0;
+  for (const member of members) {
+    if (s.delete(member)) removed++;
+  }
+  return removed;
+}
+
+async function smembers(key) {
+  return [...(sets.get(key) || new Set())];
+}
+
+async function scard(key) {
+  return (sets.get(key) || new Set()).size;
 }
 
 // SCANのmatchはこのリポジトリでは常に前方一致+ワイルドカード(例: 'company:*')の
@@ -105,7 +151,7 @@ function globToRegExp(pattern) {
 }
 
 async function scan(cursor, { match, count } = {}) {
-  const allKeys = new Set([...strings.keys(), ...lists.keys(), ...zsets.keys()]);
+  const allKeys = new Set([...strings.keys(), ...lists.keys(), ...zsets.keys(), ...sets.keys()]);
   const regex = match ? globToRegExp(match) : /.*/;
   const matched = [...allKeys].filter((key) => regex.test(key));
   return ['0', matched];
@@ -177,12 +223,16 @@ function pipeline() {
   return chain;
 }
 
-export const redis = { get, set, incr, expire, del, rpush, lrange, zadd, zrem, zcard, zrange, scan, pipeline };
+export const redis = {
+  get, set, incr, expire, del, rpush, lrange, zadd, zrem, zcard, zrange, scan, pipeline, mget,
+  sadd, srem, smembers, scard,
+};
 
 export function __resetFakeRedis() {
   strings.clear();
   lists.clear();
   zsets.clear();
+  sets.clear();
   ttls.clear();
   delFailureKeys.clear();
 }

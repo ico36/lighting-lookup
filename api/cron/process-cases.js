@@ -12,6 +12,9 @@
 //      (lib/signupCustomerCleanup.js)
 //   5. 会員番号の採番(保険)と合わせて、ウェルカムメールの送信保険も行う
 //      (lib/welcomeEmail.js。Webhookが届かなかった/送信に失敗した場合の再試行)
+//   6. 経営統計(lib/contractStats.js)の「現在有効」SETの保険(バックフィル・
+//      取りこぼしの除去)。ステップ5と同じcandidatesを使い回す
+//   7. 経営統計の週次レポート(lib/statsWeeklyEmail.js)。JST月曜だけ動く
 //
 // 【2で見るのは案件に焼き込まれた retentionDays だけ】所有者のプランは引かない。
 // 走査対象は全アカウントの完了/失注案件なので、ここでプランを引くと案件数だけ
@@ -55,6 +58,8 @@ import {
 import { processPendingSignupCustomers } from '../../lib/signupCustomerCleanup';
 import { assignMemberNoIfMissing, getMemberNo } from '../../lib/memberNo';
 import { maybeSendWelcomeEmail, welcomeEmailSentKey } from '../../lib/welcomeEmail';
+import { CONTRACT_STATUS_ACTIVE_KEY, reconcileActiveSet } from '../../lib/contractStats';
+import { runWeeklyStatsEmail } from '../../lib/statsWeeklyEmail';
 
 export default async function handler(req, res) {
   // CRON_SECRET が未設定/空文字だと、比較対象の期待値が文字列
@@ -306,6 +311,10 @@ export default async function handler(req, res) {
     candidates.sort((a, b) => (a.start_date || 0) - (b.start_date || 0));
 
     const seenCustomerIds = new Set();
+    // 経営統計(lib/contractStats.js)の「現在有効」SETの保険(ステップ6)用。
+    // このcron実行で「現在有効」と確認できたメールアドレスを集め、ループの後で
+    // reconcileActiveSet()に渡す(SETに残り続けている取りこぼしを除去するため)。
+    const seenEmails = new Set();
     for (const sub of candidates) {
       const customerRef = sub.customer;
       const customerId = typeof customerRef === 'string' ? customerRef : customerRef?.id;
@@ -334,6 +343,12 @@ export default async function handler(req, res) {
         }
       }
       if (!email) continue;
+
+      seenEmails.add(email);
+      // 経営統計(lib/contractStats.js)の「現在有効」SETへの追加(ステップ6の
+      // バックフィル本体)。candidatesは既にStripeから取得済みのため、追加の
+      // Stripe往復は発生しない。
+      await redis.sadd(CONTRACT_STATUS_ACTIVE_KEY, email);
 
       // 自社情報(company:{email})の社名をStripe顧客のcustomer.nameに同期する(保険)。
       // api/company.jsの保存時に即時反映されるはずだが、既に自社情報を登録済みの
@@ -389,11 +404,35 @@ export default async function handler(req, res) {
         results.welcomeEmail.errors.push({ email, step: 'welcome-email', message: err.message });
       }
     }
+
+    // --- 6. 経営統計「現在有効」SETの保険(取りこぼしの除去) -----------
+    // Webhook(customer.subscription.deleted等)が届かず、既に有効でなくなった
+    // 契約がSETに残り続けるのを防ぐ。今回のcandidatesに出てこなかった
+    // メールアドレスだけをSREMする(追加のStripe往復は発生しない)。
+    try {
+      const reconciled = await reconcileActiveSet(seenEmails);
+      results.contractStatusReconcile = reconciled;
+    } catch (err) {
+      console.error('[cron/process-cases] 経営統計の「現在有効」SETの保険に失敗しました:', err);
+      results.errors.push({ step: 'contract-status-reconcile', message: err.message });
+    }
   } catch (err) {
     console.error('[cron/process-cases] 会員番号採番(保険)のサブスク一覧取得に失敗しました:', err);
     results.memberNo.errors.push({ step: 'member-no-list', message: err.message });
     results.companyNameSync.errors.push({ step: 'company-name-sync-list', message: err.message });
     results.welcomeEmail.errors.push({ step: 'welcome-email-list', message: err.message });
+  }
+
+  // --- 7. 経営統計の週次レポート ---------------------------------------
+  // lib/statsWeeklyEmail.js のコメント参照。JST月曜以外は何もしない。
+  // ステップ1〜6とは独立した処理で、失敗してもここまでの結果には影響させない。
+  // 宛先ごとの成否・エラーはresults.weeklyStatsEmailにそのまま残し、Vercelの
+  // Logsで確認できるようにする。
+  try {
+    results.weeklyStatsEmail = await runWeeklyStatsEmail({ now });
+  } catch (err) {
+    console.error('[cron/process-cases] 経営統計の週次レポートに失敗しました:', err);
+    results.errors.push({ step: 'weekly-stats-email', message: err.message });
   }
 
   return res.status(200).json(results);

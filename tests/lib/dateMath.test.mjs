@@ -11,7 +11,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { addCalendarMonthsJST, isDateOnlyString, jstDateOnlyToEpochMs } from '../../lib/dateMath.js';
+import {
+  addCalendarMonthsJST,
+  isDateOnlyString,
+  jstDateOnlyToEpochMs,
+  isJstMonday,
+  jstDateOnlyString,
+} from '../../lib/dateMath.js';
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
@@ -63,4 +69,33 @@ test('jstDateOnlyToEpochMs(): 既定(endOfDayなし)はその日のJST 00:00:00'
 test('jstDateOnlyToEpochMs(): endOfDay:trueはその日のJST 23:59:59', () => {
   const result = jstDateOnlyToEpochMs('2026-10-28', { endOfDay: true });
   assert.equal(result, jst(2026, 10, 28, 23, 59, 59));
+});
+
+test('isJstMonday(): JSTで月曜日ならtrue', () => {
+  assert.equal(isJstMonday(jst(2026, 11, 9, 3, 0, 0)), true); // 2026-11-09は月曜
+});
+
+test('isJstMonday(): JSTで月曜日以外(火曜・日曜)ならfalse', () => {
+  assert.equal(isJstMonday(jst(2026, 11, 10, 3, 0, 0)), false); // 火曜
+  assert.equal(isJstMonday(jst(2026, 11, 8, 3, 0, 0)), false); // 日曜
+});
+
+test('isJstMonday(): UTCの日付跨ぎ(UTC日曜深夜＝JST月曜早朝)も正しくJSTで判定する', () => {
+  // UTC 2026-11-08 16:00 = JST 2026-11-09 01:00(月曜)。UTCの曜日だけで判定すると
+  // 日曜のまま誤判定してしまう罠を踏んでいないことを確認する。
+  const utcSundayNight = Date.UTC(2026, 10, 8, 16, 0, 0);
+  assert.equal(isJstMonday(utcSundayNight), true);
+});
+
+test('jstDateOnlyString(): JSTの日付を"YYYY-MM-DD"で返す', () => {
+  assert.equal(jstDateOnlyString(jst(2026, 11, 9, 3, 0, 0)), '2026-11-09');
+});
+
+test('jstDateOnlyString(): UTCの日付跨ぎでもJSTの日付文字列を返す(UTC日曜深夜＝JST月曜)', () => {
+  const utcSundayNight = Date.UTC(2026, 10, 8, 16, 0, 0);
+  assert.equal(jstDateOnlyString(utcSundayNight), '2026-11-09');
+});
+
+test('jstDateOnlyString(): 月・日は常に2桁(先頭ゼロ埋め)', () => {
+  assert.equal(jstDateOnlyString(jst(2026, 1, 5, 0, 0, 0)), '2026-01-05');
 });

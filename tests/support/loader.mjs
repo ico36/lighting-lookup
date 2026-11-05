@@ -107,6 +107,21 @@ const LIB_SIGNUP_CUSTOMER_CLEANUP_JS = path.join(REPO_ROOT, 'lib', 'signupCustom
 // 対応する。lib/welcomeEmail.js自体は本物のまま読み込む。
 const LIB_WELCOME_EMAIL_JS = path.join(REPO_ROOT, 'lib', 'welcomeEmail.js');
 
+// lib/contractStats.js が読む `./redis`(contract-status:activeのSET操作)も同じ
+// フェイクへ。`./subscription`はルール1(Stripe)経由で、`./ownerDeletion`経由の
+// OWNER_DELETION_SCHEDULE_KEYは定数のみ(ownerDeletion.js自体は本物のまま読み込む)
+// なので触らない。lib/contractStats.js自体は本物のまま読み込む。
+const LIB_CONTRACT_STATS_JS = path.join(REPO_ROOT, 'lib', 'contractStats.js');
+
+// lib/statsSnapshots.js が読む `./redis`(stats:weekly:*・stats:weekly-indexの
+// 読み書き)も同じフェイクへ。lib/statsSnapshots.js自体は本物のまま読み込む。
+const LIB_STATS_SNAPSHOTS_JS = path.join(REPO_ROOT, 'lib', 'statsSnapshots.js');
+
+// lib/statsWeeklyEmail.js が読む `./redis`(stats:weekly-email:sent:{date}の
+// SETNX)も同じフェイクへ。Resend送信(fetch)はグローバルfetchのスタブで対応する
+// (lib/welcomeEmail.jsと同じ方式)。lib/statsWeeklyEmail.js自体は本物のまま読み込む。
+const LIB_STATS_WEEKLY_EMAIL_JS = path.join(REPO_ROOT, 'lib', 'statsWeeklyEmail.js');
+
 export async function resolve(specifier, context, nextResolve) {
   // 1. Stripe SDK 全体をフェイクへ。実SDKは一切ロードしない
   //    （ネットワークに出ず、呼び出し内容をテストが検証できるようにするため）。
@@ -147,7 +162,10 @@ export async function resolve(specifier, context, nextResolve) {
       parentPath === LIB_RATE_LIMIT_JS ||
       parentPath === LIB_MEMBER_NO_JS ||
       parentPath === LIB_SIGNUP_CUSTOMER_CLEANUP_JS ||
-      parentPath === LIB_WELCOME_EMAIL_JS
+      parentPath === LIB_WELCOME_EMAIL_JS ||
+      parentPath === LIB_CONTRACT_STATS_JS ||
+      parentPath === LIB_STATS_SNAPSHOTS_JS ||
+      parentPath === LIB_STATS_WEEKLY_EMAIL_JS
     ) {
       return { url: new URL('redis.mjs', FAKES_DIR).href, shortCircuit: true };
     }

@@ -19,6 +19,8 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { handleSubscriptionEvent } from '../../api/stripe-webhook.js';
+import { CONTRACT_STATUS_ACTIVE_KEY } from '../../lib/contractStats.js';
+import { welcomeEmailSentKey } from '../../lib/welcomeEmail.js';
 import * as fakeStripe from '../support/fakes/stripe.mjs';
 import { __resetFakeRedis, redis, redisKey } from '../support/fakes/redis.mjs';
 
@@ -93,13 +95,16 @@ test('customer.subscription.updated: created同様に扱う(3Dセキュア確認
 });
 
 test('対象外のイベント種別は無視する', async () => {
+  // customer.subscription.deletedは経営統計(contract-status:active)対応で
+  // HANDLED_EVENT_TYPESに追加したため、このテストでは対象外のままの種別
+  // (customer.subscription.trial_will_end)を使う。
   const email = 'webhook-ignored@example.com';
   const customerId = wireCustomer(email);
   fakeStripe.__seedCustomer(customerId, { email });
 
   await handleSubscriptionEvent({
-    type: 'customer.subscription.deleted',
-    data: { object: { id: `sub_${customerId}`, customer: customerId, status: 'canceled' } },
+    type: 'customer.subscription.trial_will_end',
+    data: { object: { id: `sub_${customerId}`, customer: customerId, status: 'trialing' } },
   });
 
   assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), null);
@@ -205,4 +210,56 @@ test('プラン変更(同じsubscription.idのまま)で再度updatedが届い�
   });
 
   assert.equal(fetchCalls.length, 1, 'プラン変更の再通知では追加送信されない');
+});
+
+// --- 経営統計(contract-status:active)の同期 ---
+
+test('customer.subscription.created: 照明サーチの有効な契約なら contract-status:active に追加する', async () => {
+  const email = 'webhook-contract-active@example.com';
+  const customerId = wireCustomer(email);
+  fakeStripe.__seedCustomer(customerId, { email });
+
+  await handleSubscriptionEvent(subscriptionCreatedEvent(customerId));
+
+  assert.deepEqual(await redis.smembers(CONTRACT_STATUS_ACTIVE_KEY), [email]);
+});
+
+test('customer.subscription.deleted: 契約が実際に終了したら contract-status:active から外す', async () => {
+  const email = 'webhook-contract-deleted@example.com';
+  const customerId = wireCustomer(email);
+  fakeStripe.__seedCustomer(customerId, { email });
+
+  // 一度activeで登録されたあと、解約が確定(status: canceled)してdeletedイベントが届く想定。
+  await handleSubscriptionEvent(subscriptionCreatedEvent(customerId));
+  assert.deepEqual(await redis.smembers(CONTRACT_STATUS_ACTIVE_KEY), [email]);
+
+  wireCustomer(email, { customerId, status: 'canceled' });
+  await handleSubscriptionEvent({
+    type: 'customer.subscription.deleted',
+    data: { object: { id: `sub_${customerId}`, customer: customerId, status: 'canceled' } },
+  });
+
+  assert.deepEqual(await redis.smembers(CONTRACT_STATUS_ACTIVE_KEY), []);
+});
+
+test('customer.subscription.deleted: 会員番号・ウェルカムメールには影響しない(有効な契約が無いので何もしない)', async () => {
+  const email = 'webhook-deleted-no-op@example.com';
+  const customerId = wireCustomer(email, { status: 'canceled' });
+  fakeStripe.__seedCustomer(customerId, { email });
+  const fetchCalls = [];
+  globalThis.fetch = async (url, options) => {
+    fetchCalls.push({ url, options });
+    return { ok: true, status: 200, json: async () => ({ id: 'email_test' }) };
+  };
+
+  await assert.doesNotReject(() =>
+    handleSubscriptionEvent({
+      type: 'customer.subscription.deleted',
+      data: { object: { id: `sub_${customerId}`, customer: customerId, status: 'canceled' } },
+    })
+  );
+
+  assert.equal(await redis.get(redisKey('ls_member_no', 'by_email', email)), null, '会員番号は採番されない');
+  assert.equal(fetchCalls.length, 0, 'ウェルカムメール(Resend)は送られない');
+  assert.equal(await redis.get(welcomeEmailSentKey(`sub_${customerId}`)), null, '送信済みフラグも立たない');
 });
