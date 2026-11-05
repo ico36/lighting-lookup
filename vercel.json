@@ -6,11 +6,12 @@
       "schedule": "0 18 * * *"
     }
   ],
-  "rewrites": [
+  "redirects": [
     {
       "source": "/",
       "has": [{ "type": "host", "value": "stats.ma-system.co.jp" }],
-      "destination": "/stats/index.html"
+      "destination": "/stats/",
+      "permanent": false
     }
   ]
 }

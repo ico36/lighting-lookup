@@ -25,7 +25,7 @@ Anthropic API（Claude + web_search ツール） / Stripe / Upstash Redis / Verc
 
 ## 経営統計ページ（stats.ma-system.co.jp）
 
-- 共同経営者が都道府県別の契約状況を個人で確認するための、照明サーチ本体とは別の画面。照明サーチのアプリ内（`public/index.html`）には一切出さない。同じVercelプロジェクト・同じドメイン群内だが、`vercel.json`の`rewrites`で**ホストが`stats.ma-system.co.jp`のときだけ**`/`を`/stats/index.html`へ書き換えて提供する（新しいVercelプロジェクトは作らない）。
+- 共同経営者が都道府県別の契約状況を個人で確認するための、照明サーチ本体とは別の画面。照明サーチのアプリ内（`public/index.html`）には一切出さない。同じVercelプロジェクト・同じドメイン群内だが、`vercel.json`の`redirects`で**ホストが`stats.ma-system.co.jp`のときだけ**`/`を`/stats/`へ転送(307)して提供する（新しいVercelプロジェクトは作らない）。**`rewrites`では実在するファイル（`public/index.html`）にファイルシステムの優先度が勝ってしまい動かないため`redirects`を使う**（Vercel公式ドキュメント「rewritesのsourceを既存ファイルのパスにしてはいけない、ファイルシステムがrewritesより優先されるため」「redirectsはrewritesより先に評価される」との記載どおり。2026-11のPreview確認で実際にこの挙動を踏んだ）。
 - 実体ファイルは`public/stats/index.html`・`api/stats/*.js`・`lib/stats*.js`・`lib/contractStats.js`で、照明サーチ本体のファイル（`api/login.js`・`api/_auth.js`・`lib/otp.js`の既存呼び出し等）には影響を与えない設計にしている。`lib/otp.js`だけはnamespaceオプションを追加したが、既定値は元の挙動と完全に同一（既存呼び出し側は変更不要）。
 - ログインは確認コード方式だが、本体とは別の許可リスト（`STATS_VIEWER_EMAILS`。`ADMIN_EMAILS`とは別物）と別の署名鍵（`STATS_SESSION_SECRET`。`SESSION_SECRET`とは別物）を使う。どちらも未設定時はfail-closed（ログイン・APIともに失敗する側に倒す）。
 - 「現在、照明サーチの契約が有効(LIVE_STATUSES)かどうか」は、表示・集計のたびにStripeへ問い合わせず、`lib/contractStats.js`の`contract-status:active`（Redis SET）を読む。このSETはWebhook（`api/stripe-webhook.js`）が契約状態の変化のたびに更新し、日次cron（`api/cron/process-cases.js`）の会員番号採番と同じcandidatesを使い回してバックフィル・取りこぼしの除去を行う（追加のStripe往復なし）。
