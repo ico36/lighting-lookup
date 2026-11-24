@@ -55,10 +55,6 @@ Anthropic API（Claude + web_search ツール） / Stripe / Upstash Redis / Verc
 - コミットメッセージ末尾に `Co-Authored-By` / `Claude-Session` 行は書かない。モデル名を確定できないまま推測で埋めると事実と異なる記録が残るため（実際に「Claude Sonnet 5」と書かれたが正しくは Opus 5 だった事例あり）。
 - **cron(`api/cron/process-cases.js`)を呼ぶテストは必ず`globalThis.fetch`をスタブすること**。ウェルカムメール送信保険のステップが、有効なサブスク候補が1件でもあればResendへ実際にfetchする。スタブを忘れると、テストごとに実際のネットワークリクエストが飛び、無効なAPIキーで401が返り続ける（2026-11-05に`tests/api/cron.member-no.test.mjs`等4ファイルで発覚・修正した実例あり）。
 
-## 会社Stripeアカウントへの移行時のTODO
-
-- 移行で3つのPrice IDを作り直したら、新しいPrice IDが正しく読み込めるか照合すること。`api/info/[type].js`（管理者専用の軽量参照エンドポイント群）に確認用の項目を追加し、3つのPrice IDそれぞれについて「取得可否・livemode・商品名(product.name)・metadata.plan」を返すようにして突き合わせる。
-
 ## 開発の背景・設計判断の記録
 
 過去の設計判断・実装経緯・つまずいた点はObsidianに記録されている：
